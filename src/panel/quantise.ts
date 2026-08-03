@@ -50,3 +50,27 @@ export async function quantisePng(png: Buffer, profile: PanelProfile): Promise<B
 
   return packGrayscale(new Uint8Array(data), profile);
 }
+
+/** Inverse of packGrayscale. Used by tooling to view what the panel will show. */
+export function unpackToGrayscale(packed: Buffer, profile: PanelProfile): Uint8Array {
+  if (packed.length !== profile.bytes) {
+    throw new Error(`expected ${profile.bytes} bytes, received ${packed.length}`);
+  }
+  const gray = new Uint8Array(profile.width * profile.height);
+  for (let y = 0; y < profile.height; y++) {
+    const byteRow = y * profile.stride;
+    const pixelRow = y * profile.width;
+    for (let x = 0; x < profile.width; x++) {
+      const bit = packed[byteRow + (x >> 3)]! & (0x80 >> (x & 7));
+      gray[pixelRow + x] = bit ? 0 : 255;
+    }
+  }
+  return gray;
+}
+
+/** Render a packed buffer back to a viewable PNG. */
+export async function bufferToPng(packed: Buffer, profile: PanelProfile): Promise<Buffer> {
+  return sharp(Buffer.from(unpackToGrayscale(packed, profile)), {
+    raw: { width: profile.width, height: profile.height, channels: 1 },
+  }).png().toBuffer();
+}

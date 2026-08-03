@@ -19,6 +19,11 @@ build/
 *.log
 npm-debug.log*
 
+# fake-device output and golden test diffs
+/frame.png
+/frame.png.etag
+test/fixtures/golden/actual.png
+
 # Brainstorming mockups
 .superpowers/
 
@@ -33,3 +38,6 @@ desktop.ini
 firmware/**/build/
 *.elf
 *.bin.hex
+
+# Local dev data directory
+/data-dev/
