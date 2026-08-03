@@ -1,0 +1,21 @@
+services:
+  inkpanel:
+    build: .
+    image: inkpanel:local
+    container_name: inkpanel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - inkpanel-data:/data
+    environment:
+      # The address panels can reach this host on. Printed on the enrolment
+      # screen, so getting it right saves guesswork at the panel itself.
+      # Leave empty to auto-detect the container's address, which is usually
+      # NOT reachable from your LAN — set it explicitly.
+      PUBLIC_BASE_URL: ""
+    # Chromium needs more than Docker's 64MB default for /dev/shm.
+    shm_size: "512mb"
+
+volumes:
+  inkpanel-data:

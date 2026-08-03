@@ -1,0 +1,11 @@
+node_modules
+data
+data-dev
+.git
+.gitattributes
+.superpowers
+docs
+frame.png
+frame.png.etag
+test/fixtures/golden/actual.png
+.env
