@@ -83,7 +83,10 @@ test('falls back to tomorrow when today is free', () => {
   const html = renderHtml(quiet, WFT0583, '');
   assert.match(html, /Nothing today/, 'says so explicitly');
   assert.match(html, /Train to Euston/, 'and shows what is coming');
-  assert.doesNotMatch(html, /slot--empty[\s\S]*Train to Euston/, 'not the empty state');
+  // Not "Nothing scheduled" — that is the genuinely-empty state, and it must
+  // not appear when there is something to show. Matching on slot--empty would
+  // be useless here: it is a class name in the embedded stylesheet too.
+  assert.doesNotMatch(html, /Nothing scheduled/, 'not the fully-empty state');
 });
 
 test('shows a stale marker but keeps the data', () => {
