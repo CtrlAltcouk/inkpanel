@@ -1,0 +1,204 @@
+/* ==========================================================================
+   CtrlAlt Design System — Core Tokens
+   Clean dark mode. Soft pink accent (#f7a4a2). Chunky display type.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Dela Gothic One";
+  src: url("./fonts/ModifiedDelaGothicOne-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* -------------------------------------------------------------------
+     Color — Brand
+     ------------------------------------------------------------------- */
+  --brand-pink:        #f7a4a2;   /* primary accent — EXACT, do not alter */
+  --brand-pink-hover:  #ffb8b6;   /* +brightness for hover states */
+  --brand-pink-press:  #e08d8b;   /* -brightness for press states */
+  --brand-pink-dim:    rgba(247, 164, 162, 0.16); /* tinted surface */
+  --brand-pink-line:   rgba(247, 164, 162, 0.32); /* tinted border */
+
+  --brand-red-accent:  #e85a56;   /* the tongue red, from mascot */
+
+  /* -------------------------------------------------------------------
+     Color — Neutrals (dark mode base)
+     ------------------------------------------------------------------- */
+  --bg-0: #0a0a0b;   /* page base, deepest */
+  --bg-1: #111113;   /* elevated surface / navbar */
+  --bg-2: #17181b;   /* card background */
+  --bg-3: #1f2024;   /* card hover / input bg */
+  --bg-4: #2a2b30;   /* hairline divider alt */
+
+  --line-1: #26272c; /* default border */
+  --line-2: #34363c; /* strong border / focus ring base */
+
+  --fg-1: #f5f5f6;   /* primary text */
+  --fg-2: #b9bac0;   /* secondary text */
+  --fg-3: #7a7b82;   /* tertiary / meta */
+  --fg-4: #52535a;   /* disabled / placeholder */
+
+  /* -------------------------------------------------------------------
+     Color — Semantic (difficulty tags, status)
+     ------------------------------------------------------------------- */
+  --tag-easy:   #7ed6a5;
+  --tag-medium: #f5c971;
+  --tag-hard:   var(--brand-pink);
+  --tag-expert: #c98bff;
+
+  /* -------------------------------------------------------------------
+     Typography
+     ------------------------------------------------------------------- */
+  --font-display: "Dela Gothic One", "Archivo Black", "Impact", sans-serif;
+  --font-body:    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                  Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+                  "Liberation Mono", monospace;
+
+  /* Base scale — body sits at 16px */
+  --fs-xs:   12px;
+  --fs-sm:   14px;
+  --fs-base: 16px;
+  --fs-md:   18px;
+  --fs-lg:   20px;
+  --fs-xl:   24px;
+  --fs-2xl:  32px;
+  --fs-3xl:  42px;
+  --fs-4xl:  56px;
+  --fs-5xl:  80px;
+  --fs-6xl:  120px;
+
+  --lh-tight:   1.05;
+  --lh-snug:    1.2;
+  --lh-normal:  1.5;
+  --lh-relaxed: 1.65;
+
+  --tracking-display: -0.02em;  /* tighten chunky display */
+  --tracking-body:    -0.005em;
+  --tracking-caps:    0.08em;
+
+  /* -------------------------------------------------------------------
+     Radii
+     ------------------------------------------------------------------- */
+  --radius-xs:  4px;
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-xl:  20px;
+  --radius-pill: 999px;
+
+  /* -------------------------------------------------------------------
+     Elevation / shadow
+     ------------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5), 0 6px 12px rgba(0, 0, 0, 0.35);
+  --shadow-glow: 0 0 0 4px var(--brand-pink-dim); /* focus/hover halo */
+
+  /* -------------------------------------------------------------------
+     Spacing (4px base)
+     ------------------------------------------------------------------- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+
+  /* -------------------------------------------------------------------
+     Motion
+     ------------------------------------------------------------------- */
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+  --dur-slow:   360ms;
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* ==========================================================================
+   Semantic element styles — use as tokens via CSS or Tailwind @apply
+   ========================================================================== */
+
+.ds-display {
+  font-family: var(--font-display);
+  font-size: var(--fs-5xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg-1);
+}
+
+.ds-h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-4xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg-1);
+}
+
+.ds-h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg-1);
+}
+
+.ds-h3 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-body);
+  color: var(--fg-1);
+}
+
+.ds-h4 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+  color: var(--fg-1);
+}
+
+.ds-eyebrow {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--brand-pink);
+}
+
+.ds-body {
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-relaxed);
+  color: var(--fg-2);
+}
+
+.ds-body-lg {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-relaxed);
+  color: var(--fg-2);
+}
+
+.ds-meta {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.ds-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}

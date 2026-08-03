@@ -1,0 +1,136 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from '../../src/http/app.ts';
+import { DeviceStore } from '../../src/devices/store.ts';
+import type { FrameService } from '../../src/render/frameService.ts';
+
+const frames = {
+  frameFor: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'c'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
+  enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'd'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
+  previewHtml: async () => '<html><body>preview</body></html>',
+} as unknown as FrameService;
+
+async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-mgmt-'));
+  const store = new DeviceStore(join(dir, 'config.json'));
+  const server = createApp({ store, frames, publicBaseUrl: 'http://test.local:8080' }).listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    await fn(`http://127.0.0.1:${port}`, store);
+  } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('lists devices', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { devices: Array<{ id: string }> };
+    assert.equal(body.devices[0]?.id, 'esp32-1');
+  });
+});
+
+test('updates and claims a device', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Desk panel', claimed: true, latitude: 52.04, longitude: -0.76 }),
+    });
+    assert.equal(res.status, 200);
+    const device = await store.get('esp32-1');
+    assert.equal(device?.name, 'Desk panel');
+    assert.equal(device?.claimed, true);
+  });
+});
+
+test('rejects invalid config instead of corrupting the store', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ latitude: 'not a number', activeIntervalSeconds: -5 }),
+    });
+    assert.equal(res.status, 400);
+    assert.equal((await store.get('esp32-1'))?.name, 'Unnamed panel', 'unchanged');
+  });
+});
+
+test('rejects unknown fields rather than silently ignoring them', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lastEtag: 'forged' }),
+    });
+    assert.equal(res.status, 400, 'telemetry fields are not user-writable');
+  });
+});
+
+test('rejects a non-URL calendar entry', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ calendarUrls: ['not a url'] }),
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('serves preview HTML and a PNG of the real output', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const html = await fetch(`${base}/api/devices/esp32-1/preview`);
+    assert.match(html.headers.get('content-type') ?? '', /text\/html/);
+
+    const png = await fetch(`${base}/api/devices/esp32-1/render.png`);
+    assert.equal(png.headers.get('content-type'), 'image/png');
+    const bytes = Buffer.from(await png.arrayBuffer());
+    assert.deepEqual(bytes.subarray(0, 4), Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'PNG magic');
+  });
+});
+
+test('health reports device count and liveness', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/health`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { status: string; devices: number };
+    assert.equal(body.status, 'ok');
+    assert.equal(body.devices, 1);
+  });
+});
+
+test('404s for an unknown device', async () => {
+  await withServer(async (base) => {
+    assert.equal((await fetch(`${base}/api/devices/ghost`)).status, 404);
+    assert.equal((await fetch(`${base}/api/devices/ghost/preview`)).status, 404);
+  });
+});
+
+test('serves the config UI and its fonts', async () => {
+  await withServer(async (base) => {
+    const page = await fetch(`${base}/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /inkpanel/);
+
+    const css = await fetch(`${base}/vendor/colors_and_type.css`);
+    assert.equal(css.status, 200, 'the vendored design system must be reachable');
+    assert.match(await css.text(), /--brand-pink:\s*#f7a4a2/);
+
+    const font = await fetch(`${base}/vendor/fonts/dela-gothic-one-latin-400-normal.woff2`);
+    assert.equal(font.status, 200, 'served from @fontsource, not a committed TTF');
+  });
+});

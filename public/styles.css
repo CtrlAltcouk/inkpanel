@@ -1,0 +1,214 @@
+@import url("./vendor/colors_and_type.css");
+
+/*
+ * The vendored design system points Dela Gothic One at a 2.7 MB TTF with full
+ * CJK coverage. We serve the latin-subset woff2 from @fontsource instead —
+ * same typeface, a fraction of the weight, and the same file the panel itself
+ * renders with. This rule wins because it comes after the @import.
+ */
+@font-face {
+  font-family: "Dela Gothic One";
+  src: url("/vendor/fonts/dela-gothic-one-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/vendor/fonts/inter-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/vendor/fonts/inter-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-body);
+  margin: 0;
+  padding: var(--sp-8);
+  max-width: 1100px;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xl);
+  letter-spacing: var(--tracking-display);
+  margin: 0 0 var(--sp-6);
+}
+
+h2 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-xl);
+  margin: 0 0 var(--sp-4);
+}
+
+h3 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  margin: var(--sp-6) 0 var(--sp-2);
+}
+
+.eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--brand-pink);
+  margin: 0 0 var(--sp-2);
+}
+
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+  margin-bottom: var(--sp-6);
+}
+
+label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+input[type="text"],
+input[type="number"],
+textarea {
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  color: var(--fg-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  padding: var(--sp-3);
+}
+
+textarea {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--brand-pink);
+  box-shadow: var(--shadow-glow);
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  font-size: var(--fs-base);
+  color: var(--fg-1);
+}
+
+.checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand-pink);
+}
+
+button {
+  background: var(--brand-pink);
+  color: var(--bg-0);
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-base);
+  padding: var(--sp-3) var(--sp-6);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+  margin-top: var(--sp-5);
+}
+
+button:hover { background: var(--brand-pink-hover); }
+button:active { background: var(--brand-pink-press); }
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+  margin: 0;
+}
+
+.status {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  border-radius: var(--radius-pill);
+  padding: 3px 12px;
+  margin-left: var(--sp-3);
+  vertical-align: middle;
+}
+
+.status--claimed {
+  background: var(--brand-pink-dim);
+  border: 1px solid var(--brand-pink-line);
+  color: var(--brand-pink);
+}
+
+.status--unclaimed {
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+
+.preview {
+  width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: #fff;
+  display: block;
+}
+
+.row {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.row > * { flex: 1 1 200px; }
+
+.health {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+}
+
+.pill {
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  color: var(--fg-2);
+}
+
+.error {
+  color: var(--brand-red-accent);
+  font-size: var(--fs-sm);
+  margin-top: var(--sp-3);
+  white-space: pre-wrap;
+}
+
+.empty {
+  color: var(--fg-3);
+  font-size: var(--fs-base);
+}
