@@ -31,6 +31,7 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .label{font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;}
 .stale{font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;border:1px solid #000;padding:1px 4px;margin-left:6px;}
 
+.subhead{font-size:13px;font-weight:700;margin-bottom:10px;}
 .events{display:flex;flex-direction:column;gap:11px;font-size:18px;}
 .event{display:flex;gap:12px;align-items:baseline;}
 .event .t{width:74px;font-weight:700;flex:none;}

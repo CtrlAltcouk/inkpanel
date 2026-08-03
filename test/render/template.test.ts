@@ -72,6 +72,20 @@ test('renders an empty agenda as a designed state, not a blank box', () => {
   assert.match(html, /Nothing scheduled/);
 });
 
+test('falls back to tomorrow when today is free', () => {
+  const quiet = structuredClone(data);
+  quiet.calendar = {
+    today: [],
+    tomorrow: [
+      { uid: 't1', title: 'Train to Euston', start: '2026-08-04T07:15:00.000Z', end: '2026-08-04T08:15:00.000Z', allDay: false },
+    ],
+  };
+  const html = renderHtml(quiet, WFT0583, '');
+  assert.match(html, /Nothing today/, 'says so explicitly');
+  assert.match(html, /Train to Euston/, 'and shows what is coming');
+  assert.doesNotMatch(html, /slot--empty[\s\S]*Train to Euston/, 'not the empty state');
+});
+
 test('shows a stale marker but keeps the data', () => {
   const stale = structuredClone(data);
   stale.sourceHealth = [{ id: 'weather', status: 'stale', fetchedAt: '2026-08-03T03:10:00.000Z', error: 'timeout' }];

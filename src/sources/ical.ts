@@ -162,8 +162,20 @@ export const icalSource: Source<IcalConfig, CalendarData> = {
       const texts = await Promise.all(
         config.urls.map(async (url) => {
           const res = await globalThis.fetch(url, { signal });
-          if (!res.ok) throw new Error(`${url} responded ${res.status}`);
-          return res.text();
+          if (!res.ok) throw new Error(`calendar responded ${res.status}`);
+          const text = await res.text();
+
+          // Google's settings page offers three URLs that look interchangeable.
+          // The "Public URL to this calendar" is an HTML page, which parses to
+          // zero events and would otherwise show a silent, permanently empty
+          // agenda. Fail loudly instead.
+          if (!text.includes('BEGIN:VCALENDAR')) {
+            throw new Error(
+              'not an iCalendar feed — use the "Secret address in iCal format" ' +
+                'from Google Calendar settings, not the embed or public web URL',
+            );
+          }
+          return text;
         }),
       );
       return {

@@ -36,11 +36,25 @@ function eventRow(event: CalendarEvent, timezone: string): string {
   return `<div class="event"><span class="t tnum">${esc(time)}</span><span class="n">${esc(event.title)}</span></div>`;
 }
 
+function eventList(events: CalendarEvent[], timezone: string, limit: number): string {
+  return `<div class="events">${events.slice(0, limit).map((e) => eventRow(e, timezone)).join('')}</div>`;
+}
+
 function agendaCell(data: DashboardData): string {
   if (!data.calendar) return emptySlot('Calendar unavailable');
-  const events = data.calendar.today;
-  if (events.length === 0) return emptySlot('Nothing scheduled');
-  return `<div class="events">${events.slice(0, 6).map((e) => eventRow(e, data.timezone)).join('')}</div>`;
+
+  const { today, tomorrow } = data.calendar;
+  if (today.length > 0) return eventList(today, data.timezone, 6);
+
+  // A free day is far more useful showing what is coming than showing a box
+  // that says nothing. It also distinguishes "working, quiet day" from
+  // "calendar broken", which an empty panel alone does not.
+  if (tomorrow.length > 0) {
+    return `<div class="subhead">Nothing today &mdash; tomorrow</div>
+      ${eventList(tomorrow, data.timezone, 5)}`;
+  }
+
+  return emptySlot('Nothing scheduled');
 }
 
 function forecastCell(data: DashboardData): string {
