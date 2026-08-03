@@ -1,0 +1,67 @@
+/** A single timed event on Monday 3 August 2026. */
+export const SINGLE_TIMED = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:single-1
+DTSTAMP:20260801T000000Z
+DTSTART:20260803T083000Z
+DTEND:20260803T084500Z
+SUMMARY:Team standup
+END:VEVENT
+END:VCALENDAR`;
+
+/** An all-day event on 3 August 2026. */
+export const ALL_DAY = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:allday-1
+DTSTAMP:20260801T000000Z
+DTSTART;VALUE=DATE:20260803
+DTEND;VALUE=DATE:20260804
+SUMMARY:Bank holiday
+END:VEVENT
+END:VCALENDAR`;
+
+/** Every weekday at 09:30, running for years, with 3 Aug cancelled. */
+export const WEEKLY_WITH_EXDATE = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:weekly-1
+DTSTAMP:20260101T000000Z
+DTSTART:20260105T093000Z
+DTEND:20260105T094500Z
+RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR
+EXDATE:20260803T093000Z
+SUMMARY:Daily sync
+END:VEVENT
+END:VCALENDAR`;
+
+/** Same weekly rule without the cancellation. */
+export const WEEKLY = WEEKLY_WITH_EXDATE
+  .split('\n')
+  .filter((l) => !l.startsWith('EXDATE'))
+  .join('\n');
+
+/** An event tomorrow, 4 August 2026. */
+export const TOMORROW = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:tomorrow-1
+DTSTAMP:20260801T000000Z
+DTSTART:20260804T071500Z
+DTEND:20260804T081500Z
+SUMMARY:Train to Euston
+END:VEVENT
+END:VCALENDAR`;
+
+export const EMPTY = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+END:VCALENDAR`;
+
+/** Deliberately broken, to prove one bad feed cannot take down the others. */
+export const MALFORMED = 'this is not a calendar at all';

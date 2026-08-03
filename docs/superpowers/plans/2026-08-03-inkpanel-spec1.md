@@ -866,6 +866,7 @@ Create `src/sources/ical.ts`:
 
 ```ts
 import ical from 'node-ical';
+import type { CalendarResponse, VEvent } from 'node-ical';
 import type { CalendarData, CalendarEvent } from '../model/dashboard.ts';
 import type { Source, SourceResult } from './types.ts';
 
@@ -881,13 +882,39 @@ export function localDateKey(instant: Date, timezone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-/**
- * All-day events carry a floating date, which node-ical represents as UTC
- * midnight. Reading it in a local zone can shift it a day, so read the UTC
- * parts directly.
- */
 function utcDateKey(instant: Date): string {
   return instant.toISOString().slice(0, 10);
+}
+
+/**
+ * Recover the authored calendar date of an all-day event.
+ *
+ * All-day events carry a *floating* date with no zone. node-ical materialises
+ * these as `new Date(year, month, day)` — midnight in whatever timezone the
+ * **server process** runs in. Reading such a Date as UTC shifts it a day west
+ * of Greenwich and the other way east of it, so the bug only appears on some
+ * machines: a dev box in London disagrees with a container running UTC.
+ *
+ * The system-local getters are the exact inverse of that construction, so they
+ * recover the authored date whatever the server's timezone is.
+ */
+function floatingDateKey(instant: Date): string {
+  const year = instant.getFullYear();
+  const month = String(instant.getMonth() + 1).padStart(2, '0');
+  const day = String(instant.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * A CalendarResponse holds VEVENTs alongside VTIMEZONEs, VTODOs and calendar
+ * metadata, so entries must be narrowed rather than assumed.
+ */
+function isVEvent(entry: unknown): entry is VEvent {
+  return (
+    typeof entry === 'object' &&
+    entry !== null &&
+    (entry as { type?: unknown }).type === 'VEVENT'
+  );
 }
 
 function addDays(key: string, days: number): string {
@@ -923,7 +950,7 @@ export function expandCalendar(icsTexts: string[], now: Date, timezone: string):
   const collected: CalendarEvent[] = [];
 
   for (const text of icsTexts) {
-    let parsed: ical.CalendarResponse;
+    let parsed: CalendarResponse;
     try {
       parsed = ical.sync.parseICS(text);
     } catch {
@@ -931,11 +958,11 @@ export function expandCalendar(icsTexts: string[], now: Date, timezone: string):
     }
 
     for (const entry of Object.values(parsed)) {
-      if (!entry || entry.type !== 'VEVENT') continue;
-      const event = entry as ical.VEvent;
+      if (!isVEvent(entry)) continue;
+      const event = entry;
       if (!event.start || !event.end) continue;
 
-      const allDay = (event.datetype as string | undefined) === 'date';
+      const allDay = event.datetype === 'date';
       const durationMs = event.end.getTime() - event.start.getTime();
       const summary = typeof event.summary === 'string' ? event.summary : '';
 
@@ -945,17 +972,26 @@ export function expandCalendar(icsTexts: string[], now: Date, timezone: string):
       }
 
       const excluded = new Set(
-        Object.values(event.exdate ?? {}).map((d) => (d as Date).toISOString()),
+        Object.values(event.exdate ?? {})
+          .filter((d): d is Date => d instanceof Date)
+          .map((d) => d.toISOString()),
       );
 
       for (const occurrence of event.rrule.between(windowStart, windowEnd, true)) {
         if (excluded.has(occurrence.toISOString())) continue;
 
-        // A modified instance overrides the generated one.
+        // A modified instance (RECURRENCE-ID) overrides the generated one.
+        // node-ical keys these by both date-only and full ISO timestamp; the
+        // date-only form is the one that matches a generated occurrence.
         const override = event.recurrences?.[utcDateKey(occurrence)];
-        if (override?.start && override.end) {
+        const overrideStart = override?.start;
+        const overrideEnd = override?.end;
+
+        // instanceof rather than a cast: Omit<VEvent, 'recurrences'> widens
+        // these to {}, and this is a real runtime guard as well as a narrowing.
+        if (overrideStart instanceof Date && overrideEnd instanceof Date) {
           collected.push(
-            toEvent(event.uid, String(override.summary ?? summary), override.start, override.end, allDay),
+            toEvent(event.uid, String(override?.summary ?? summary), overrideStart, overrideEnd, allDay),
           );
         } else {
           collected.push(
