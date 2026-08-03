@@ -1,9 +1,11 @@
 # Deployment
 
-> **Not yet verified on real infrastructure.** The container definition here is
-> written but has not been built or run — Docker was unavailable in the
-> environment where it was authored. Expect to iterate on first deploy, and see
-> "If the build fails" below for the likely causes.
+> **LXC installer: verified.** Tested on Proxmox VE 9.1.9 (kernel 6.17.13-2-pve)
+> with the Debian 13.6 template and Node v22.23.2. Installed and reached a
+> healthy service on the first run.
+>
+> **Docker image: not verified.** Written but never built — Docker was
+> unavailable where it was authored. See "If the build fails" below.
 
 ## Proxmox LXC — automatic
 

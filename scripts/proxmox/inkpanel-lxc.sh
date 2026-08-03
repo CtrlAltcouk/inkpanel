@@ -148,7 +148,10 @@ ok "container running"
 
 # --------------------------------------------------------------------- install
 
-run() { pct exec "$CTID" -- bash -c "$1"; }
+# pct exec inherits LANG from the Proxmox host, but a fresh Debian template has
+# no generated locales, so perl and apt-listchanges emit a wall of warnings.
+# C.UTF-8 always exists and needs no locale-gen.
+run() { pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash -c "$1"; }
 
 info "Installing dependencies"
 step "base packages"
