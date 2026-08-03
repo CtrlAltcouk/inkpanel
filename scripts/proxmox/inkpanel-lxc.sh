@@ -231,6 +231,26 @@ chown ${APP}:${APP} ${APP_DIR}/inkpanel.env"
 
 run "systemctl daemon-reload && systemctl enable --now ${APP}.service >/dev/null 2>&1"
 
+# Ship an update command rather than documenting a one-liner. The repo is owned
+# by the service user, and git refuses to operate on a repo owned by someone
+# else — so a root `git pull` fails with "dubious ownership", and a root
+# `npm ci` would leave root-owned node_modules behind.
+run "cat > /usr/local/bin/${APP}-update <<'UPDATE'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd ${APP_DIR}/app
+echo 'Updating ${APP}...'
+runuser -u ${APP} -- git pull --ff-only
+runuser -u ${APP} -- npm ci --omit=dev
+systemctl restart ${APP}
+sleep 3
+systemctl is-active --quiet ${APP} && echo 'OK — ${APP} restarted' || {
+  echo 'FAILED — check: journalctl -u ${APP} -n 50 --no-pager' >&2
+  exit 1
+}
+UPDATE
+chmod +x /usr/local/bin/${APP}-update"
+
 step "waiting for service"
 HEALTHY=0
 for _ in $(seq 1 30); do
@@ -247,7 +267,7 @@ if [[ $HEALTHY -eq 1 ]]; then
   printf '  %s\n' "Open:      ${C_PINK}http://${CT_IP}:${APP_PORT}${C_RESET}"
   printf '  %s\n' "Container: ${CTID} (${CT_HOSTNAME})"
   printf '  %s\n' "Logs:      pct exec ${CTID} -- journalctl -u ${APP} -f"
-  printf '  %s\n' "Update:    pct exec ${CTID} -- bash -c 'cd ${APP_DIR}/app && git pull && npm ci --omit=dev && systemctl restart ${APP}'"
+  printf '  %s\n' "Update:    pct exec ${CTID} -- ${APP}-update"
   printf '\n'
   printf '  %s\n' "${C_DIM}Flash a panel and it will appear in the UI with setup"
   printf '  %s\n' "instructions shown on the panel itself.${C_RESET}"

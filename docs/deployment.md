@@ -51,7 +51,22 @@ nano /opt/inkpanel/inkpanel.env                             # PUBLIC_BASE_URL
 To update:
 
 ```bash
-pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && git pull && npm ci --omit=dev && systemctl restart inkpanel'
+pct exec <CTID> -- inkpanel-update
+```
+
+The installer places that script in the container. Do not run `git pull` as root
+in `/opt/inkpanel/app` — the repo belongs to the `inkpanel` service user, so git
+refuses with *"detected dubious ownership"*, and a root `npm ci` would leave
+root-owned `node_modules` behind. The script runs both as the right user.
+
+Containers created before this script existed will not have it. Either re-run
+the installer for a fresh container, or update by hand once:
+
+```bash
+pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app \
+  && runuser -u inkpanel -- git pull --ff-only \
+  && runuser -u inkpanel -- npm ci --omit=dev \
+  && systemctl restart inkpanel'
 ```
 
 ## Proxmox LXC — manual, with Docker
