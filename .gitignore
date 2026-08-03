@@ -19,6 +19,9 @@ build/
 *.log
 npm-debug.log*
 
+# Brainstorming mockups
+.superpowers/
+
 # Editor / OS
 .vscode/
 .idea/
