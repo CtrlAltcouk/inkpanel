@@ -18,6 +18,24 @@ Arduino IDE, **Tools → Board → XIAO_ESP32S3_PLUS**:
 No external libraries are required — everything used ships with the ESP32
 Arduino core.
 
+## Plug the WiFi antenna in
+
+**Do this first.** The XIAO ESP32-S3 has a U.FL socket on the module and ships
+with a small antenna that must be clipped on. Without it the radio is deaf
+enough that association mostly fails — and when it does briefly succeed, TCP
+stalls, so the symptom shows up as an HTTP timeout rather than anything
+obviously WiFi-related.
+
+Symptoms of a missing antenna:
+
+```
+[wifi] attempt 1 failed (status 0)     <- IDLE: never even started associating
+[wifi] attempt 2 failed (status 6)     <- DISCONNECTED: associated, then dropped
+```
+
+`firmware/spikes/wifi_scan/` confirms it: with no antenna you will see almost no
+networks even beside the router.
+
 ## Before powering the panel
 
 1. Disconnect USB and battery while handling the ribbon.

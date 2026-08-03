@@ -10,9 +10,14 @@ carry forward.
 
 ## Before powering anything
 
+- [ ] **WiFi antenna clipped onto the U.FL socket on the XIAO module**
 - [ ] USB and battery both disconnected while handling the ribbon
 - [ ] 24-pin ribbon inserted the correct way round, latch fully closed
 - [ ] EE04 jumper set to **24 Pin**
+
+> The antenna is easy to overlook and does not fail cleanly. Without it the
+> panel associates roughly one boot in three, and the visible symptom is an
+> HTTP read timeout rather than anything that looks like a WiFi problem.
 
 ## Stage 1 — fetch and display (commit "fetch and display server-rendered frames")
 
