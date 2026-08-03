@@ -1,0 +1,14 @@
+# Normalise to LF in the repository and on checkout. The server runs in a Linux
+# container and the iCal fixtures embed literal newlines, so line endings must
+# not vary by contributor platform.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png   binary
+*.bin   binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.ico   binary
+*.3mf   binary
