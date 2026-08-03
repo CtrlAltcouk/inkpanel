@@ -23,8 +23,15 @@ constexpr uint32_t SPI_HZ = 4'000'000;
 }
 
 constexpr uint32_t EPD_BUSY_TIMEOUT_MS = 60'000;
-constexpr uint32_t WIFI_TIMEOUT_MS = 15'000;
-constexpr uint32_t HTTP_TIMEOUT_MS = 20'000;
+
+// Association can be slow straight out of reset, and one retry costs little
+// against the alternative of sleeping for 15 minutes.
+constexpr uint32_t WIFI_TIMEOUT_MS = 20'000;
+constexpr uint8_t  WIFI_ATTEMPTS = 2;
+
+// Generous: the server may be cold-starting Chromium, which on a small
+// container can take longer than a panel expects a web request to.
+constexpr uint32_t HTTP_TIMEOUT_MS = 45'000;
 
 // Used only when the server is unreachable and cannot dictate a schedule.
 constexpr uint32_t FALLBACK_WAKE_SECONDS = 900;

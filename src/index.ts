@@ -33,6 +33,14 @@ export async function main(): Promise<void> {
     console.log(`data directory: ${dataDir}`);
   });
 
+  // Launch Chromium now rather than making the first device wait for it. A cold
+  // launch on a modest container can exceed a panel's HTTP read timeout.
+  const warmStarted = Date.now();
+  frames
+    .warmUp()
+    .then(() => console.log(`chromium ready in ${Date.now() - warmStarted}ms`))
+    .catch((err) => console.error('chromium warm-up failed:', err));
+
   const shutdown = async () => {
     server.close();
     await renderer.close();

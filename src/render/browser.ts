@@ -18,6 +18,18 @@ export class Renderer {
     return this.browser;
   }
 
+  /**
+   * Launch Chromium ahead of the first request.
+   *
+   * A cold launch costs several seconds, and on a modest LXC enough of them
+   * that a device's HTTP read times out before the first frame ever arrives.
+   * Paying that at service startup instead moves the cost somewhere nobody is
+   * waiting on it.
+   */
+  async warmUp(): Promise<void> {
+    await this.ensure();
+  }
+
   async screenshot(html: string, profile: PanelProfile): Promise<Buffer> {
     const browser = await this.ensure();
     const context = await browser.newContext({

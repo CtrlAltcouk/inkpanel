@@ -43,6 +43,12 @@ interface Memo {
 
 export class FrameService {
   private readonly memo = new Map<string, Memo>();
+  /**
+   * Enrolment frames depend only on the device id and the server URL, neither
+   * of which changes. Without this an unclaimed device — which polls every 60
+   * seconds — would trigger a full Chromium render every single time.
+   */
+  private readonly enrolmentMemo = new Map<string, Frame>();
   private fontCssPromise: Promise<string> | null = null;
 
   constructor(private readonly deps: FrameDeps) {}
@@ -158,11 +164,22 @@ export class FrameService {
   }
 
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {
+    const key = `${device.id}|${baseUrl}|${device.panelProfileId}`;
+    const cached = this.enrolmentMemo.get(key);
+    if (cached) return cached;
+
     const profile = this.profileFor(device);
-    return this.rasterise(
+    const frame = await this.rasterise(
       renderEnrolmentHtml(device, baseUrl, profile, await this.fontCss()),
       profile,
     );
+    this.enrolmentMemo.set(key, frame);
+    return frame;
+  }
+
+  /** Launch Chromium before any device asks for a frame. */
+  async warmUp(): Promise<void> {
+    await this.deps.renderer.warmUp();
   }
 
   /** The HTML behind /preview, for iterating on layout in a browser. */

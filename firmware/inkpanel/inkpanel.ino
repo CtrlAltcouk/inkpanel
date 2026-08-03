@@ -54,10 +54,26 @@ static const char* wakeReason() {
 
 static bool connectWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(credentials.ssid, credentials.password);
-  const uint32_t deadline = millis() + WIFI_TIMEOUT_MS;
-  while (WiFi.status() != WL_CONNECTED && millis() < deadline) delay(200);
-  return WiFi.status() == WL_CONNECTED;
+  WiFi.setSleep(false);  // association is more reliable with modem sleep off
+
+  for (uint8_t attempt = 1; attempt <= WIFI_ATTEMPTS; ++attempt) {
+    WiFi.begin(credentials.ssid, credentials.password);
+    const uint32_t deadline = millis() + WIFI_TIMEOUT_MS;
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline) delay(200);
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("[wifi] connected on attempt %u, ip=%s rssi=%d\n",
+                    attempt, WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      return true;
+    }
+
+    // A failed association can leave the stack in a state a plain retry does
+    // not clear, so tear it down before trying again.
+    Serial.printf("[wifi] attempt %u failed (status %d)\n", attempt, WiFi.status());
+    WiFi.disconnect(true);
+    delay(500);
+  }
+  return false;
 }
 
 /** Exponential backoff, doubling per consecutive failure up to the cap. */

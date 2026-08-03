@@ -100,6 +100,37 @@ test('separate devices keep separate memos', async () => {
   });
 });
 
+test('memoises the enrolment frame', async () => {
+  await withService(
+    (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
+    async (service, counts) => {
+      const device = defaultDevice('esp32-a1b2c3');
+      const first = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
+      const second = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
+
+      assert.equal(second.etag, first.etag);
+      // An unclaimed device polls every 60s. Re-rendering each time would mean
+      // a Chromium launch a minute, and a cold one can outlast the panel's
+      // HTTP read timeout.
+      assert.equal(counts.screenshots, 1, 'must not re-render an unchanged enrolment screen');
+    },
+  );
+});
+
+test('a different server URL produces a different enrolment frame', async () => {
+  await withService(
+    (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
+    async (service, counts) => {
+      const device = defaultDevice('esp32-a1b2c3');
+      const a = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
+      const b = await service.enrolmentFrame(device, 'http://10.0.0.5:8080');
+
+      assert.notEqual(a.etag, b.etag, 'the URL is printed on the screen');
+      assert.equal(counts.screenshots, 2);
+    },
+  );
+});
+
 test('renders an enrolment frame in the normal format', async () => {
   await withService(
     (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
