@@ -41,3 +41,6 @@ firmware/**/build/
 
 # Local dev data directory
 /data-dev/
+
+# Local WiFi credentials for firmware bring-up
+firmware/inkpanel/secrets.h
