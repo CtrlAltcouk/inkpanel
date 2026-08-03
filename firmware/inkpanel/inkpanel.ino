@@ -69,7 +69,16 @@ static uint32_t backoffSeconds() {
   return seconds > MAX_BACKOFF_SECONDS ? MAX_BACKOFF_SECONDS : seconds;
 }
 
-[[noreturn]] static void sleepFor(uint32_t seconds) {
+/*
+  Deliberately not marked [[noreturn]], though it never returns.
+
+  The Arduino build system auto-generates prototypes for functions defined in
+  .ino files and injects them above the sketch. Those generated prototypes drop
+  attributes, so GCC sees a first declaration without [[noreturn]] followed by a
+  definition with it and errors out. Functions in .cpp files are unaffected,
+  which is why runProvisioningPortal keeps its attribute.
+*/
+static void sleepFor(uint32_t seconds) {
   Serial.printf("[sleep] %u seconds\n", seconds);
   Serial.flush();
 
