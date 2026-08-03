@@ -5,6 +5,9 @@
   sleeps for however long the server said. The device holds no opinion about
   scheduling — that lives in TypeScript where it can be tested and changed
   without reflashing.
+
+  First boot with no stored credentials opens a captive portal.
+  Hold KEY3 while resetting to wipe credentials and return to it.
 */
 #include <Arduino.h>
 #include <WiFi.h>
@@ -12,11 +15,19 @@
 #include <esp_sleep.h>
 
 #include "config.h"
-#include "secrets.h"
 #include "FrameClient.h"
 #include "OldV2EPD.h"
+#include "Provisioning.h"
+
+// Optional development shortcut. Copy secrets.example.h to secrets.h to skip
+// the portal on your own bench; the repo compiles and works without it.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#define HAVE_COMPILED_CREDENTIALS 1
+#endif
 
 OldV2EPD display;
+static Credentials credentials;
 
 // RTC memory survives deep sleep, so the ETag persists without wearing flash.
 RTC_DATA_ATTR char storedEtag[48] = {0};
@@ -43,7 +54,7 @@ static const char* wakeReason() {
 
 static bool connectWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(credentials.ssid, credentials.password);
   const uint32_t deadline = millis() + WIFI_TIMEOUT_MS;
   while (WiFi.status() != WL_CONNECTED && millis() < deadline) delay(200);
   return WiFi.status() == WL_CONNECTED;
@@ -80,6 +91,19 @@ static uint32_t backoffSeconds() {
   esp_deep_sleep_start();
 }
 
+/** Load credentials from NVS, or from secrets.h if one was compiled in. */
+static bool obtainCredentials() {
+#ifdef HAVE_COMPILED_CREDENTIALS
+  snprintf(credentials.ssid, sizeof(credentials.ssid), "%s", WIFI_SSID);
+  snprintf(credentials.password, sizeof(credentials.password), "%s", WIFI_PASS);
+  snprintf(credentials.serverUrl, sizeof(credentials.serverUrl), "%s", SERVER_URL);
+  Serial.println("[setup] using credentials compiled from secrets.h");
+  return true;
+#else
+  return loadCredentials(credentials);
+#endif
+}
+
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -88,6 +112,21 @@ void setup() {
   deviceId(id, sizeof(id));
   const char* reason = wakeReason();
   Serial.printf("\n[inkpanel] %s device=%s wake=%s\n", FIRMWARE_VERSION, id, reason);
+
+  // KEY3 held at boot wipes stored credentials. Checked before anything else
+  // so a bad server address cannot lock the panel out of being reconfigured.
+  pinMode(Hardware::KEY3, INPUT_PULLUP);
+  delay(50);
+  if (digitalRead(Hardware::KEY3) == LOW) {
+    Serial.println("[setup] KEY3 held — clearing credentials");
+    clearCredentials();
+    runProvisioningPortal();
+  }
+
+  if (!obtainCredentials()) {
+    Serial.println("[setup] no credentials stored — starting portal");
+    runProvisioningPortal();
+  }
 
   const float volts = readBatteryVoltage();
 
@@ -98,7 +137,7 @@ void setup() {
   }
 
   const FetchOutcome outcome = fetchFrame(
-      SERVER_URL, id, display.framebuffer(), OldV2EPD::BUFFER_SIZE,
+      credentials.serverUrl, id, display.framebuffer(), OldV2EPD::BUFFER_SIZE,
       storedEtag, volts, reason);
 
   if (outcome.result == FetchResult::Failed) {
