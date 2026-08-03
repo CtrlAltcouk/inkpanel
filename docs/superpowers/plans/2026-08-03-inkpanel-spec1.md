@@ -170,9 +170,9 @@ Create `package.json`:
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "node-ical": "^0.20.1",
+    "node-ical": "^0.27.1",
     "playwright": "^1.56.0",
-    "sharp": "^0.34.4",
+    "sharp": "^0.35.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -209,7 +209,21 @@ Create `tsconfig.json`:
 npm install && npm test
 ```
 
-Expected: FAIL — cannot resolve `../src/index.ts`.
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/index.ts`.
+
+Two npm warnings are expected and harmless:
+
+- **`allow-scripts`** on `sharp` and `esbuild`. Newer npm blocks install scripts
+  by default. Neither package needs them — both ship prebuilt binaries as
+  optional dependencies. Verify rather than assume, with
+  `node -e "import('sharp').then(s=>console.log('ok'))"`.
+- **Deprecation notices** from transitive dependencies.
+
+`npm audit` should report **0 vulnerabilities**. If it flags `sharp` or
+`node-ical`, the pinned versions above have drifted — both had advisories in
+their previous majors (libvips CVEs, and a `uuid` bounds check reached through
+`node-ical`, which parses feeds fetched from the internet). Upgrade rather than
+suppress.
 
 - [ ] **Step 4: Write the minimal implementation**
 
