@@ -4,19 +4,38 @@
 fixture. `dashboard.png` is the same thing made viewable — it is not used by the
 test, only by whoever is looking at a failure.
 
-## Regenerating
+**Neither is committed**, and the golden test **skips** when they are absent.
+That is deliberate, not an oversight — see below.
+
+## Generating one
 
 ```bash
 UPDATE_GOLDENS=1 npm test
 ```
 
-## These are environment-specific
+Both files land here and are gitignored, so a golden is local to whoever made
+it.
 
-Font rasterisation varies between platforms and Chromium versions, so a golden
-generated on Windows will not match one generated in the Linux container.
+## Why they are not committed
 
-**The canonical golden is the one generated inside the container image the
-project ships**, since that is what actually renders frames in production:
+Font rasterisation varies between platforms and Chromium versions. A golden
+generated on Windows does not match one generated on Linux — not by a few
+pixels, but by thousands of scattered bytes. Committing one means everybody
+except its author sees a permanent red failure, and a test that always fails is
+a test everyone learns to ignore.
+
+So the golden is opt-in per environment. Generate one where you actually work
+and the test starts protecting you; do nothing and it stays skipped.
+
+**If you want it in CI**, the canonical environment is the Linux runner. Trigger
+the `Generate golden reference` workflow manually, download the `golden-linux`
+artifact, drop it here, and force-add it:
+
+```bash
+git add -f test/fixtures/golden/dashboard.bin test/fixtures/golden/dashboard.png
+```
+
+For the shipped container specifically:
 
 ```bash
 docker compose run --rm -e UPDATE_GOLDENS=1 inkpanel npm test

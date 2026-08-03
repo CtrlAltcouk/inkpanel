@@ -1,5 +1,7 @@
 # inkpanel
 
+[![CI](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml)
+
 A self-hosted, day-at-a-glance dashboard for e-paper displays.
 
 A small server renders your calendar and weather into a single 1-bit image. A

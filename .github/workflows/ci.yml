@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch rather than queueing them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The render and golden tests need a real browser. --with-deps pulls the
+      # shared libraries Chromium needs on a bare runner.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+      # Date handling here is invisible on a single machine: an all-day calendar
+      # event materialises at local midnight, so a server in London and one in
+      # UTC disagree about which day it falls on. Running the suite under four
+      # zones is the only way to catch that class of bug.
+      - name: Test across server timezones
+        run: npm run test:tz
+
+  golden:
+    name: Generate golden reference
+    # Manual only. Golden images are environment-specific, so the canonical one
+    # is whatever this Linux runner produces — download the artifact and commit
+    # it if you want layout regression cover.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Render golden
+        run: UPDATE_GOLDENS=1 npm test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: golden-linux
+          path: test/fixtures/golden/
+          if-no-files-found: error
