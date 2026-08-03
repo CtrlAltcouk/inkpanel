@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Secrets and local config
+.env
+.env.local
+*.local.json
+
+# Runtime data (device registry, cached frames)
+/data/
+data/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Arduino build artefacts
+firmware/**/build/
+*.elf
+*.bin.hex
