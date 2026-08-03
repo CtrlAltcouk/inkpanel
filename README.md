@@ -33,6 +33,14 @@ old fast.
 
 ## Quick start
 
+**On Proxmox**, one command on the host creates an LXC and installs everything:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/inkpanel-lxc.sh)"
+```
+
+**Anywhere else:**
+
 ```bash
 git clone https://github.com/CtrlAltcouk/inkpanel.git
 cd inkpanel

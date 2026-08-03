@@ -5,7 +5,54 @@
 > environment where it was authored. Expect to iterate on first deploy, and see
 > "If the build fails" below for the likely causes.
 
-## Proxmox LXC
+## Proxmox LXC — automatic
+
+Run on the **Proxmox host** as root:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/inkpanel-lxc.sh)"
+```
+
+It creates an unprivileged Debian LXC, installs Node and Chromium, clones the
+repo, registers a systemd service, and prints the URL. No Docker involved —
+running the app natively in the LXC avoids nesting containers.
+
+Defaults are 2 cores, 1 GB RAM, 8 GB disk on the first active storage, DHCP on
+`vmbr0`, and the next free CTID. Override any of them:
+
+```bash
+CTID=910 CT_HOSTNAME=inkpanel RAM=2048 STORAGE=local-lvm BRIDGE=vmbr1 \
+  bash -c "$(curl -fsSL .../inkpanel-lxc.sh)"
+```
+
+**On piping a script into a root shell:** it is worth reading first, and the
+same caution applies to every installer of this shape. Download it, read it,
+then run it:
+
+```bash
+curl -fsSL -o inkpanel-lxc.sh https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/inkpanel-lxc.sh
+less inkpanel-lxc.sh
+bash inkpanel-lxc.sh
+```
+
+It is one self-contained file rather than a chain of remote includes, precisely
+so that reading it is practical.
+
+### Afterwards
+
+```bash
+pct exec <CTID> -- journalctl -u inkpanel -f                # logs
+pct exec <CTID> -- systemctl restart inkpanel               # restart
+nano /opt/inkpanel/inkpanel.env                             # PUBLIC_BASE_URL
+```
+
+To update:
+
+```bash
+pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && git pull && npm ci --omit=dev && systemctl restart inkpanel'
+```
+
+## Proxmox LXC — manual, with Docker
 
 1. Create a Debian 12 container: 2 cores, 1 GB RAM, 8 GB disk.
 2. Install Docker inside it.
