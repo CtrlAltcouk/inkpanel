@@ -10,7 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test \"test/**/*.test.ts\" \"test/**/*.test.js\"",
     "test:tz": "node scripts/test-timezones.mjs",
     "fake-device": "tsx src/tools/fakeDevice.ts"
   },

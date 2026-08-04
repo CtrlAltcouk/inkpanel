@@ -7,9 +7,15 @@
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <p class="eyebrow">CtrlAlt</p>
-  <h1>inkpanel</h1>
-  <div id="devices"><p class="empty">Loading…</p></div>
+  <div class="shell">
+    <p class="eyebrow">CtrlAlt</p>
+    <h1>inkpanel</h1>
+    <nav class="tabs">
+      <a href="#panels" data-tab="panels">Panels</a>
+      <a href="#settings" data-tab="settings">Settings</a>
+    </nav>
+    <main id="view"><p class="empty">Loading…</p></main>
+  </div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
