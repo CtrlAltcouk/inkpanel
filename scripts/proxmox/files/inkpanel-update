@@ -16,7 +16,7 @@ DATA_DIR="$APP_DIR/data"
 FLAG="$DATA_DIR/.update-requested"
 STATUS="$DATA_DIR/update-status.json"
 LOG_FILE="$(mktemp)"
-STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 
 # write-status.mjs is expected to live alongside this script wherever it is
 # deployed, so this works regardless of install location.

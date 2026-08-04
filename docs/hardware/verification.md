@@ -1,7 +1,8 @@
 # Hardware verification
 
-None of the firmware has been run on real hardware. Work through this before
-calling Spec 1 done, and record the date and firmware version.
+The firmware is deployed and working on one real panel. Stages 1 and 2 below
+have been completed. Complete Stage 3 onwards to fully verify the remaining
+features, and record the date and firmware version when doing so.
 
 Do not tick optimistically. A box that fails is a bug to fix, not a note to
 carry forward.
