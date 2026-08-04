@@ -253,7 +253,38 @@ And add this route inside `manageRoutes`, before the `return router;`:
 
 Append to `test/http/manageRoutes.test.ts`:
 
+Add the fixture import at the top of the file:
+
 ```ts
+import { MILTON_KEYNES } from '../fixtures/geocode.ts';
+```
+
+```ts
+/**
+ * Swap globalThis.fetch for the duration of a test.
+ *
+ * Requests to Open-Meteo are answered from a fixture; everything else — the
+ * test client talking to our own server — passes through untouched.
+ */
+async function withStubbedGeocoding(payload: unknown, fn: () => Promise<void>) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 test('geocode rejects a too-short query without calling upstream', async () => {
   await withServer(async (base) => {
     const res = await fetch(`${base}/api/geocode?q=m`);
@@ -262,19 +293,40 @@ test('geocode rejects a too-short query without calling upstream', async () => {
 });
 
 test('geocode returns labelled results', async () => {
-  await withServer(async (base) => {
-    const res = await fetch(`${base}/api/geocode?q=milton%20keynes`);
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { results: Array<{ label: string; timezone: string }> };
-    assert.ok(body.results.length > 0, 'live Open-Meteo lookup returned nothing');
-    assert.match(body.results[0]!.label, /Milton Keynes/);
-    assert.equal(body.results[0]!.timezone, 'Europe/London');
+  await withStubbedGeocoding(MILTON_KEYNES, async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton%20keynes`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { results: Array<{ label: string; timezone: string }> };
+      assert.equal(body.results[0]?.label, 'Milton Keynes, England, GB');
+      assert.equal(body.results[0]?.timezone, 'Europe/London');
+    });
   });
+});
+
+test('geocode reports upstream failure as 502 rather than an empty list', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response('upstream exploded', { status: 500 });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton`);
+      assert.equal(res.status, 502, 'no results and cannot look up are different things');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 ```
 
-> This one test does hit the network. Open-Meteo needs no key and the endpoint is
-> stable; if it ever becomes flaky in CI, it is the only test to quarantine.
+> **No test in this suite may call the real Open-Meteo API.** Fixtures already
+> cover the mapping; a live call would make the suite fail offline and flake in
+> CI for no additional coverage.
 
 - [ ] **Step 7: Run the tests**
 
@@ -906,14 +958,25 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
-  auth?: AuthOptions;
+  /**
+   * Required, not optional. A default would mean inventing a fallback HMAC key
+   * that is never used — the kind of line every future reader has to re-derive
+   * as safe. Callers already have a real one; make them pass it.
+   */
+  auth: AuthOptions;
 }
 ```
+
+**`auth` is now required, so every existing `createApp` call must supply it.**
+Update the two test helpers written in Spec 1 — `test/http/deviceRoutes.test.ts`
+and `test/http/manageRoutes.test.ts` — to pass
+`auth: { password: null, secret: randomBytes(32) }`, importing `randomBytes`
+from `node:crypto`. A null password leaves them behaving exactly as before.
 
 Then inside `createApp`, replace the two `app.use('/api', ...)` lines with:
 
 ```ts
-  const auth = createAuth(deps.auth ?? { password: null, secret: Buffer.alloc(32) });
+  const auth = createAuth(deps.auth);
 
   // Login must be reachable before the gate; the gate exempts it too, but
   // mounting first keeps the ordering obvious.
