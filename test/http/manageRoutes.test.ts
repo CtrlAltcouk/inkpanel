@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
+import { MILTON_KEYNES } from '../fixtures/geocode.ts';
 
 const frames = {
   frameFor: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'c'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
@@ -118,6 +119,69 @@ test('404s for an unknown device', async () => {
     assert.equal((await fetch(`${base}/api/devices/ghost`)).status, 404);
     assert.equal((await fetch(`${base}/api/devices/ghost/preview`)).status, 404);
   });
+});
+
+/**
+ * Swap globalThis.fetch for the duration of a test.
+ *
+ * Requests to Open-Meteo are answered from a fixture; everything else — the
+ * test client talking to our own server — passes through untouched.
+ */
+async function withStubbedGeocoding(payload: unknown, fn: () => Promise<void>) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test('geocode rejects a too-short query without calling upstream', async () => {
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/geocode?q=m`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test('geocode returns labelled results', async () => {
+  await withStubbedGeocoding(MILTON_KEYNES, async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton%20keynes`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { results: Array<{ label: string; timezone: string }> };
+      assert.equal(body.results[0]?.label, 'Milton Keynes, England, GB');
+      assert.equal(body.results[0]?.timezone, 'Europe/London');
+    });
+  });
+});
+
+test('geocode reports upstream failure as 502 rather than an empty list', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response('upstream exploded', { status: 500 });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton`);
+      assert.equal(res.status, 502, 'no results and cannot look up are different things');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test('serves the config UI and its fonts', async () => {

@@ -4,6 +4,7 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { bufferToPng } from '../panel/quantise.ts';
 import { PROFILES, WFT0583 } from '../panel/profile.ts';
+import { geocode } from '../sources/geocode.ts';
 
 const patchSchema = z
   .object({
@@ -77,6 +78,24 @@ export function manageRoutes(
       ? await frames.frameFor(device, device.lastBatteryVolts)
       : await frames.enrolmentFrame(device, publicBaseUrl);
     res.type('png').set('Cache-Control', 'no-store').send(await bufferToPng(frame.buffer, profile));
+  });
+
+  router.get('/geocode', async (req, res) => {
+    const query = String(req.query.q ?? '').trim();
+    if (query.length < 2) {
+      res.status(400).json({ error: 'query must be at least 2 characters' });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      res.json({ results: await geocode(query, controller.signal) });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'geocoding failed' });
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   return router;
