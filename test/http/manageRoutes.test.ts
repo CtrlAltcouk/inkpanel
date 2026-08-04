@@ -146,10 +146,34 @@ async function withStubbedGeocoding(payload: unknown, fn: () => Promise<void>) {
   }
 }
 
+/**
+ * Swap globalThis.fetch for the duration of a test.
+ *
+ * Requests to Open-Meteo fail the test; everything else — the test client
+ * talking to our own server — passes through untouched.
+ */
+async function withRejectedGeocoding(fn: () => Promise<void>) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      throw new Error('Test must not call geocoding-api.open-meteo.com');
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 test('geocode rejects a too-short query without calling upstream', async () => {
-  await withServer(async (base) => {
-    const res = await fetch(`${base}/api/geocode?q=m`);
-    assert.equal(res.status, 400);
+  await withRejectedGeocoding(async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=m`);
+      assert.equal(res.status, 400);
+    });
   });
 });
 
