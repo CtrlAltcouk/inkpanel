@@ -66,6 +66,9 @@ export function deviceRoutes(
       // Never send a broken frame. The device keeps its last good image.
       console.error(`[frame] ${id} render failed:`, err);
       res.set('X-Next-Wake-Seconds', String(ERROR_RETRY_SECONDS));
+      // The header just promised a shorter retry than the earlier lastWakeSeconds
+      // write above — keep the store in sync with what the device was actually told.
+      await store.update(id, { lastWakeSeconds: ERROR_RETRY_SECONDS });
       res.status(503).json({ error: 'render failed' });
     }
   });

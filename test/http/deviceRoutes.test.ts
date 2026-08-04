@@ -149,6 +149,23 @@ test('returns 503 with a retry interval when rendering fails', async () => {
   }, failing);
 });
 
+test('a failed render stores the same retry interval it sends', async () => {
+  const failing = {
+    frameFor: async () => { throw new Error('chromium died'); },
+    enrolmentFrame: async () => { throw new Error('chromium died'); },
+    previewHtml: async () => '',
+  } as unknown as FrameService;
+
+  await withServer(async (base, store) => {
+    await claim(store, 'esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1/frame`);
+    assert.equal(res.status, 503);
+    const handed = Number(res.headers.get('x-next-wake-seconds'));
+    assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
+      'stored lastWakeSeconds must match the retry interval actually sent, not the pre-failure value');
+  }, failing);
+});
+
 test('records the wake interval it handed out', async () => {
   await withServer(async (base, store) => {
     await claim(store, 'esp32-1');

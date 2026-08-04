@@ -130,6 +130,7 @@ test('a config file written before Spec 2a still loads', async () => {
     assert.equal(device?.name, 'Old panel', 'existing data survives');
     // Missing fields read as undefined; callers must tolerate that rather than
     // the store rewriting every record on load.
-    assert.equal(device?.locationLabel ?? '', '');
+    assert.equal(device?.locationLabel, undefined);
+    assert.equal(device?.lastWakeSeconds, undefined);
   });
 });
