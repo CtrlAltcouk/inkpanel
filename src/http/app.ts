@@ -26,11 +26,20 @@ export interface AppDeps {
    * as safe. Callers already have a real one; make them pass it.
    */
   auth: AuthOptions;
+  /**
+   * Forwarded to Express's `trust proxy` setting. Undefined leaves Express's
+   * default (`false`) in place. Required behind any reverse proxy: without
+   * it, `req.ip` is the proxy's own address for every client, so the login
+   * rate limiter buckets all clients into one shared counter — five bad
+   * attempts from anyone locks out everyone.
+   */
+  trustProxy?: boolean | number | string;
 }
 
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  if (deps.trustProxy !== undefined) app.set('trust proxy', deps.trustProxy);
   app.use(express.json());
 
   app.get('/health', async (_req, res) => {

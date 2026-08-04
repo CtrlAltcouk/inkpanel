@@ -11,6 +11,23 @@ import { SourceCache } from './sources/cache.ts';
 
 export const version = '0.1.0';
 
+/**
+ * Parse `TRUST_PROXY` into whatever Express's `app.set('trust proxy', ...)`
+ * expects: a hop count, `true`/`false`, or a string Express parses itself
+ * (a single token like "loopback", or a comma-separated list of addresses/
+ * subnets — Express's own `proxyaddr` compiler handles the splitting, so it
+ * is passed through unchanged rather than split here).
+ */
+export function parseTrustProxy(raw: string | undefined): boolean | number | string | undefined {
+  if (raw === undefined) return undefined;
+  const value = raw.trim();
+  if (value === '') return undefined;
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value.toLowerCase() === 'true') return true;
+  if (value.toLowerCase() === 'false') return false;
+  return value;
+}
+
 function lanAddress(): string {
   for (const addresses of Object.values(networkInterfaces())) {
     for (const address of addresses ?? []) {
@@ -31,8 +48,11 @@ export async function main(): Promise<void> {
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
   const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
-  const server = createApp({ store, frames, publicBaseUrl, auth: { password, secret } }).listen(port, () => {
+  const server = createApp({
+    store, frames, publicBaseUrl, auth: { password, secret }, trustProxy,
+  }).listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
     console.log(`data directory: ${dataDir}`);
     console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');

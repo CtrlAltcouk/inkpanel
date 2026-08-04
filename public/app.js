@@ -117,6 +117,10 @@ async function save(event) {
 async function load() {
   try {
     const res = await fetch('/api/devices');
+    if (res.status === 401) {
+      location.href = '/login.html';
+      return;
+    }
     const { devices } = await res.json();
     container.innerHTML = devices.length
       ? devices.map(card).join('')

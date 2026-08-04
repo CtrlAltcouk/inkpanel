@@ -110,7 +110,7 @@ read your calendar as a rendered image and change any panel's configuration.
 
 Set `INKPANEL_PASSWORD` to require a login. Two endpoints stay open regardless:
 `/api/devices/:id/frame`, because firmware cannot log in, and `/health`, so
-monitoring does not need credentials.
+monitoring does not need credentials. Sign in at `/login.html`.
 
 **The password travels in clear text.** This is plain HTTP, so the password and
 the session cookie are readable by anyone able to capture packets on your
@@ -119,6 +119,13 @@ idly poking at the address — and **not** against a hostile network.
 
 **Do not expose this to the internet.** If you need remote access, put it behind
 a VPN or a reverse proxy that terminates TLS and does its own authentication.
+**Behind a reverse proxy you must set `TRUST_PROXY`, or the rate limiter
+buckets every client together** — `req.ip` otherwise resolves to the proxy's
+own address for every request, so five bad logins from anyone locks out
+everyone for 15 minutes. Set it to the number of proxy hops in front of the
+server (usually `1`), or to a comma-separated list of trusted addresses/
+subnets — see [Express's `trust proxy` docs](https://expressjs.com/en/guide/behind-proxies.html)
+for the accepted values.
 
 ## Documentation
 
