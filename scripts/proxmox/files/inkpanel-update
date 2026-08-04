@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# Triggered by inkpanel-update.path when the application creates
+# /opt/inkpanel/data/.update-requested
+#
+# Runs as root. Must be root-owned and NOT writable by the inkpanel user — the
+# whole point of this arrangement is that the web application can request an
+# update but cannot influence what an update does.
+#
+set -Eeuo pipefail
+
+APP=inkpanel
+APP_DIR=/opt/inkpanel
+REPO_DIR="$APP_DIR/app"
+DATA_DIR="$APP_DIR/data"
+FLAG="$DATA_DIR/.update-requested"
+STATUS="$DATA_DIR/update-status.json"
+LOG_FILE="$(mktemp)"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+
+# Clear the flag first: the path unit re-arms on its absence, and leaving it
+# would retrigger this script immediately on exit.
+rm -f "$FLAG"
+
+write_status() {
+  node -e '
+const fs = require("fs");
+const [, , state, error, logFile, statusFile, startedAt] = process.argv;
+let log = [];
+try { log = fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean).slice(-200); } catch {}
+fs.writeFileSync(statusFile, JSON.stringify({
+  state,
+  startedAt,
+  finishedAt: state === "running" ? null : new Date().toISOString(),
+  log,
+  error: error || null,
+}, null, 2));
+' "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
+  chmod 644 "$STATUS"
+}
+
+fail() {
+  write_status failed "$1"
+  echo "inkpanel-update: FAILED — $1" >&2
+  # Deliberately no restart. A broken update must be a no-op, not an outage:
+  # the currently running process is still serving.
+  exit 1
+}
+trap 'fail "unexpected error on line $LINENO"' ERR
+
+write_status running
+
+cd "$REPO_DIR"
+
+LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+
+echo "== git pull ==" >>"$LOG_FILE"
+runuser -u "$APP" -- git pull --ff-only >>"$LOG_FILE" 2>&1 || fail "git pull failed"
+write_status running
+
+LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+
+if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
+  # npm ci removes node_modules before reinstalling, so a failure here leaves
+  # the service unable to start. Only pay that risk when dependencies actually
+  # changed — most updates are code-only.
+  echo "== npm ci (lockfile changed) ==" >>"$LOG_FILE"
+  runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
+else
+  echo "== npm ci skipped (lockfile unchanged) ==" >>"$LOG_FILE"
+fi
+write_status running
+
+echo "== restart ==" >>"$LOG_FILE"
+write_status success
+systemctl restart "$APP"
+
+rm -f "$LOG_FILE"

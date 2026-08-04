@@ -4,6 +4,7 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { readVersion } from '../system/version.ts';
 import { checkForUpdate } from '../system/updateCheck.ts';
+import { readUpdateStatus, requestUpdate } from '../system/updateStatus.ts';
 
 export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: string): Router {
   const router = Router();
@@ -42,6 +43,25 @@ export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: 
         totalDevices: devices.length,
       },
     });
+  });
+
+  router.post('/system/update', async (_req, res) => {
+    const running = await readUpdateStatus(dataDir);
+    if (running.state === 'running') {
+      res.status(409).json({ error: 'an update is already running' });
+      return;
+    }
+
+    try {
+      await requestUpdate(dataDir);
+      res.status(202).json({ requestedAt: new Date().toISOString() });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'could not request update' });
+    }
+  });
+
+  router.get('/system/update/status', async (_req, res) => {
+    res.set('Cache-Control', 'no-store').json(await readUpdateStatus(dataDir));
   });
 
   return router;

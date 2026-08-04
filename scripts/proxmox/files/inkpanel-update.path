@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for an inkpanel update request
+
+[Path]
+# The application creates this file. It can do nothing else privileged.
+PathExists=/opt/inkpanel/data/.update-requested
+Unit=inkpanel-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Update inkpanel from git
+# Separate unit, so restarting inkpanel.service does not kill this mid-flight.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/inkpanel-update

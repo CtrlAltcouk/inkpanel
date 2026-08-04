@@ -125,3 +125,24 @@ Then commit the updated `test/fixtures/golden/`.
   default for `/dev/shm` is not enough.
 - **`EACCES` writing `/data`** — the Playwright image runs as a non-root user.
   Ensure the volume is writable by it.
+
+## Updating from the UI
+
+The Settings tab can update the server. It works by creating a flag file that a
+systemd path unit watches; the update itself runs as root in a separate unit the
+web application cannot modify. The app is granted no privilege beyond writing a
+file in its own data directory.
+
+`npm ci` runs only when `package-lock.json` changed, and **a failed update does
+not restart the service** — the running process keeps serving and the UI reports
+the failure.
+
+**The risk worth knowing:** self-update can break the service, and the UI that
+would fix it *is* the service. If an update leaves it unable to start, recover
+from the command line:
+
+```bash
+pct exec <CTID> -- journalctl -u inkpanel -n 50 --no-pager
+pct exec <CTID> -- cat /opt/inkpanel/data/update-status.json
+pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && runuser -u inkpanel -- git reset --hard HEAD~1 && systemctl restart inkpanel'
+```
