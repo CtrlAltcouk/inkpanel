@@ -3,6 +3,7 @@ import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './http/app.ts';
+import { loadOrCreateSecret } from './http/auth.ts';
 import { DeviceStore } from './devices/store.ts';
 import { FrameService } from './render/frameService.ts';
 import { Renderer } from './render/browser.ts';
@@ -28,9 +29,13 @@ export async function main(): Promise<void> {
   const renderer = new Renderer();
   const frames = new FrameService({ renderer, cache: new SourceCache(join(dataDir, 'cache')) });
 
-  const server = createApp({ store, frames, publicBaseUrl }).listen(port, () => {
+  const password = process.env.INKPANEL_PASSWORD?.trim() || null;
+  const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
+
+  const server = createApp({ store, frames, publicBaseUrl, auth: { password, secret } }).listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
     console.log(`data directory: ${dataDir}`);
+    console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
   });
 
   // Launch Chromium now rather than making the first device wait for it. A cold

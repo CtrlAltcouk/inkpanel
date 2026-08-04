@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +19,10 @@ const frames = {
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-mgmt-'));
   const store = new DeviceStore(join(dir, 'config.json'));
-  const server = createApp({ store, frames, publicBaseUrl: 'http://test.local:8080' }).listen(0);
+  const server = createApp({
+    store, frames, publicBaseUrl: 'http://test.local:8080',
+    auth: { password: null, secret: randomBytes(32) },
+  }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
   try {

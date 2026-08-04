@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>inkpanel — sign in</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body class="login-page">
+  <form class="card login-card" id="form">
+    <p class="eyebrow">CtrlAlt</p>
+    <h1>inkpanel</h1>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" autofocus>
+    <button type="submit">Sign in</button>
+    <p class="error" id="error" hidden></p>
+  </form>
+<script type="module">
+const form = document.getElementById('form');
+const error = document.getElementById('error');
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  error.hidden = true;
+
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: document.getElementById('password').value }),
+  });
+
+  if (res.ok) {
+    location.href = '/';
+    return;
+  }
+  const body = await res.json().catch(() => ({ error: res.statusText }));
+  error.textContent = body.error ?? 'Sign in failed';
+  error.hidden = false;
+});
+</script>
+</body>
+</html>

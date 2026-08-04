@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
+import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
 
@@ -19,6 +20,12 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
+  /**
+   * Required, not optional. A default would mean inventing a fallback HMAC key
+   * that is never used — the kind of line every future reader has to re-derive
+   * as safe. Callers already have a real one; make them pass it.
+   */
+  auth: AuthOptions;
 }
 
 export function createApp(deps: AppDeps): express.Express {
@@ -33,6 +40,13 @@ export function createApp(deps: AppDeps): express.Express {
       uptimeSeconds: Math.round(process.uptime()),
     });
   });
+
+  const auth = createAuth(deps.auth);
+
+  // Login must be reachable before the gate; the gate exempts it too, but
+  // mounting first keeps the ordering obvious.
+  app.use('/api', auth.router);
+  app.use('/api', auth.middleware);
 
   // Device routes first: both mount under /api and :id/frame must win.
   app.use('/api', deviceRoutes(deps.store, deps.frames, deps.publicBaseUrl));

@@ -212,3 +212,8 @@ button:active { background: var(--brand-pink-press); }
   color: var(--fg-3);
   font-size: var(--fs-base);
 }
+
+.login-page { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-card { width: 100%; max-width: 320px; }
+.login-card h1 { font-family: var(--font-display); font-size: var(--fs-2xl); margin: 0 0 var(--sp-4); }
+.login-card button { width: 100%; }

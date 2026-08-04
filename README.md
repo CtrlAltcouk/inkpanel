@@ -105,12 +105,20 @@ in London and a container running UTC disagree about which day it falls on.
 
 ## Security
 
-**There is no authentication. Do not expose this to the internet.**
+By default there is **no authentication** — anyone who can reach the server can
+read your calendar as a rendered image and change any panel's configuration.
 
-Anyone who can reach the server can read your calendar as a rendered image and
-change any device's configuration. It is designed as a LAN appliance. If you
-need remote access, put it behind a VPN or a reverse proxy that provides its own
-authentication.
+Set `INKPANEL_PASSWORD` to require a login. Two endpoints stay open regardless:
+`/api/devices/:id/frame`, because firmware cannot log in, and `/health`, so
+monitoring does not need credentials.
+
+**The password travels in clear text.** This is plain HTTP, so the password and
+the session cookie are readable by anyone able to capture packets on your
+network. It is protection against casual access — a guest on your WiFi, someone
+idly poking at the address — and **not** against a hostile network.
+
+**Do not expose this to the internet.** If you need remote access, put it behind
+a VPN or a reverse proxy that terminates TLS and does its own authentication.
 
 ## Documentation
 
