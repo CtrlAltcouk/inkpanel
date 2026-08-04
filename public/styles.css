@@ -284,3 +284,38 @@ button.ghost:hover { background: var(--brand-pink-dim); }
 button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); cursor: default; }
 
 .notice { color: var(--fg-2); font-size: var(--fs-sm); margin-top: var(--sp-3); }
+
+#city-picker { position: relative; }
+
+.city-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: var(--bg-3);
+  border: 1px solid var(--brand-pink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.city-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--fg-1);
+  border: 0;
+  border-bottom: 1px solid var(--line-1);
+  border-radius: 0;
+  margin: 0;
+  padding: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.city-option:last-child { border-bottom: 0; }
+.city-option:hover { background: var(--brand-pink-dim); }
+.city-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-3); }
+.city-current { margin-top: var(--sp-2); }
