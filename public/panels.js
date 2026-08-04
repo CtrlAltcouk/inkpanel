@@ -70,6 +70,13 @@ function pushMessage(result) {
   return 'Rendered. Will appear at the panel’s next check-in.';
 }
 
+function showError(root, err) {
+  const el = root.querySelector('#error');
+  const detailText = (err.issues ?? []).map((i) => `${i.path?.join('.') ?? '?'}: ${i.message}`).join('\n');
+  el.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`;
+  el.hidden = false;
+}
+
 async function save(event, root) {
   event.preventDefault();
   const form = event.target;
@@ -120,12 +127,7 @@ export async function renderPanels(root) {
 
   const form = root.querySelector('form');
   form.addEventListener('submit', (event) => {
-    void save(event, root).catch((err) => {
-      const el = root.querySelector('#error');
-      const detailText = (err.issues ?? []).map((i) => `${i.path?.join('.') ?? '?'}: ${i.message}`).join('\n');
-      el.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`;
-      el.hidden = false;
-    });
+    void save(event, root).catch((err) => showError(root, err));
   });
 
   root.querySelector('[data-push]').addEventListener('click', async (event) => {
@@ -140,6 +142,8 @@ export async function renderPanels(root) {
       // Cache-bust so the preview reflects the render that just happened.
       root.querySelector('.preview').src =
         `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
+    } catch (err) {
+      showError(root, err);
     } finally {
       button.disabled = false;
       button.textContent = 'Push';
