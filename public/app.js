@@ -48,7 +48,19 @@ async function route() {
   }
 
   if (myGeneration !== generation) return; // superseded — discard
-  view.innerHTML = scratch.innerHTML;
+  // Adopt `scratch` itself into `view`, rather than round-tripping through
+  // `scratch.innerHTML` (a string round-trip re-parses fresh elements and
+  // silently drops every addEventListener a render attached — e.g.
+  // panels.js's card-select, save and push handlers — leaving the live DOM
+  // inert) and rather than moving just its children (render() closures such
+  // as panels.js's push handler re-query `root` — i.e. `scratch` — *after*
+  // this point, e.g. when the push response comes back; if only the
+  // children were relocated, `scratch` would be left empty and those
+  // lookups would silently return null). Moving `scratch` itself preserves
+  // both the live listeners and `root` as the queryable container. #view
+  // has no styling that depends on its children being unwrapped, so the
+  // added layer costs nothing.
+  view.replaceChildren(scratch);
 }
 
 window.addEventListener('hashchange', route);
