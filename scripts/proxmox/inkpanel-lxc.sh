@@ -223,33 +223,37 @@ UNIT"
 
 # PUBLIC_BASE_URL is printed on the panel's enrolment screen, so it must be an
 # address the panel can actually reach — not the container's own idea of itself.
-run "cat > ${APP_DIR}/inkpanel.env <<ENVFILE
+run "cat > ${APP_DIR}/${APP}.env <<ENVFILE
 # Address panels use to reach this server. Shown on the enrolment screen.
 PUBLIC_BASE_URL=http://${CT_IP}:${APP_PORT}
+
+# Uncomment to require a password for the web UI. The panel's own endpoint stays
+# open regardless, because firmware cannot log in.
+#
+# NOTE: this is plain HTTP. The password crosses your LAN in clear text. It
+# guards against casual access, not against anyone capturing packets.
+#INKPANEL_PASSWORD=change-me
 ENVFILE
-chown ${APP}:${APP} ${APP_DIR}/inkpanel.env"
+chown ${APP}:${APP} ${APP_DIR}/${APP}.env"
 
 run "systemctl daemon-reload && systemctl enable --now ${APP}.service >/dev/null 2>&1"
 
-# Ship an update command rather than documenting a one-liner. The repo is owned
-# by the service user, and git refuses to operate on a repo owned by someone
-# else — so a root `git pull` fails with "dubious ownership", and a root
-# `npm ci` would leave root-owned node_modules behind.
-run "cat > /usr/local/bin/${APP}-update <<'UPDATE'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-cd ${APP_DIR}/app
-echo 'Updating ${APP}...'
-runuser -u ${APP} -- git pull --ff-only
-runuser -u ${APP} -- npm ci --omit=dev
-systemctl restart ${APP}
-sleep 3
-systemctl is-active --quiet ${APP} && echo 'OK — ${APP} restarted' || {
-  echo 'FAILED — check: journalctl -u ${APP} -n 50 --no-pager' >&2
-  exit 1
-}
-UPDATE
-chmod +x /usr/local/bin/${APP}-update"
+# The update script and units are copied from the repo the container just
+# cloned, so they stay in step with the application rather than being
+# duplicated inside this installer.
+#
+# write-status.mjs must land beside the updater: the script resolves it via
+# ${BASH_SOURCE[0]}, so a missing or misplaced copy breaks every update at
+# runtime with nothing but an ENOENT in the journal.
+step "installing update units"
+run "install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update /usr/local/bin/inkpanel-update
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/write-status.mjs /usr/local/bin/write-status.mjs
+     chown root:root /usr/local/bin/inkpanel-update /usr/local/bin/write-status.mjs
+     chmod 755 /usr/local/bin/inkpanel-update
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.path /etc/systemd/system/inkpanel-update.path
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.service /etc/systemd/system/inkpanel-update.service
+     systemctl daemon-reload
+     systemctl enable --now inkpanel-update.path >/dev/null 2>&1"
 
 step "waiting for service"
 HEALTHY=0
@@ -268,6 +272,7 @@ if [[ $HEALTHY -eq 1 ]]; then
   printf '  %s\n' "Container: ${CTID} (${CT_HOSTNAME})"
   printf '  %s\n' "Logs:      pct exec ${CTID} -- journalctl -u ${APP} -f"
   printf '  %s\n' "Update:    pct exec ${CTID} -- ${APP}-update"
+  printf '  %s\n' "Password:  edit ${APP_DIR}/${APP}.env, then: pct exec ${CTID} -- systemctl restart ${APP}"
   printf '\n'
   printf '  %s\n' "${C_DIM}Flash a panel and it will appear in the UI with setup"
   printf '  %s\n' "instructions shown on the panel itself.${C_RESET}"
