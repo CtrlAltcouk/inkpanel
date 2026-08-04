@@ -319,3 +319,25 @@ button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); curso
 .city-option:hover { background: var(--brand-pink-dim); }
 .city-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-3); }
 .city-current { margin-top: var(--sp-2); }
+
+.update-log {
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+  margin-top: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.issue-list {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
+}
