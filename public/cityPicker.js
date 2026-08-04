@@ -25,6 +25,18 @@ export function renderCityPicker(container, device) {
   let timer = null;
   let sequence = 0;
 
+  // If the user hand-edits the timezone field after choosing a city, their
+  // edit must win: save() in panels.js prefers dataset.timezone over the
+  // visible field, so a stale dataset.timezone would silently override a
+  // deliberate correction. Clear it on direct edits so save() falls back to
+  // whatever the field actually shows. The field lives in the surrounding
+  // form, not inside this container — see the note in choose() below — and
+  // may not exist at all, so this must not throw when it's absent.
+  const timezoneField = container.closest('form')?.querySelector('input[name="timezone"]');
+  timezoneField?.addEventListener('input', () => {
+    delete container.dataset.timezone;
+  });
+
   function choose(result) {
     // panels.js reads these on submit. Storing on the container keeps the
     // picker free of any knowledge of the form around it.
@@ -77,6 +89,7 @@ export function renderCityPicker(container, device) {
     clearTimeout(timer);
     const query = input.value.trim();
     if (query.length < MIN_CHARS) {
+      sequence += 1;
       results.hidden = true;
       return;
     }
