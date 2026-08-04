@@ -34,6 +34,10 @@ jobs:
             echo "checking $script"
             bash -n "$script"
           done
+          # Not a bash script, but it's executed by the one above and ships
+          # alongside it — check it can at least parse. The real behavioural
+          # coverage is test/system/writeStatus.test.ts, run below.
+          node --check scripts/proxmox/files/write-status.mjs
 
       # The render and golden tests need a real browser. --with-deps pulls the
       # shared libraries Chromium needs on a bare runner.

@@ -53,3 +53,49 @@ test('requesting an update creates the flag file the systemd path unit watches',
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// The status file is written by a root-owned shell script, not by this
+// process, so the reader cannot assume it is well-typed. These cover fields
+// that JSON.parse happily hands back as the wrong type.
+
+test('non-string timestamps are dropped rather than passed through', () => {
+  const status = parseUpdateStatus(JSON.stringify({
+    state: 'running', startedAt: { a: 1 }, finishedAt: 12345, log: [], error: null,
+  }));
+  assert.equal(status.startedAt, null);
+  assert.equal(status.finishedAt, null);
+});
+
+test('a non-string error is dropped rather than passed through', () => {
+  const status = parseUpdateStatus(JSON.stringify({
+    state: 'failed', startedAt: null, finishedAt: null, log: [], error: { nested: {} },
+  }));
+  assert.equal(status.error, null);
+});
+
+test('a non-array log is treated as empty rather than passed through', () => {
+  const status = parseUpdateStatus(JSON.stringify({
+    state: 'running', startedAt: null, finishedAt: null, log: 'not an array', error: null,
+  }));
+  assert.deepEqual(status.log, []);
+});
+
+test('an oversized log is capped rather than passed through whole', () => {
+  const log = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const status = parseUpdateStatus(JSON.stringify({
+    state: 'running', startedAt: null, finishedAt: null, log, error: null,
+  }));
+  assert.ok(status.log.length <= 200, `expected log capped at 200, got ${status.log.length}`);
+  assert.equal(status.log.at(-1), 'line 4999', 'keeps the most recent lines');
+});
+
+test('a top-level JSON array reads as idle rather than throwing', () => {
+  assert.equal(parseUpdateStatus('[1,2,3]').state, 'idle');
+});
+
+test('two idle reads are not the same object', () => {
+  const a = parseUpdateStatus(null);
+  const b = parseUpdateStatus('');
+  assert.notEqual(a, b, 'sharing an object means one caller mutating it would corrupt every other idle read');
+  assert.notEqual(a.log, b.log, 'the log array itself must not be shared either');
+});

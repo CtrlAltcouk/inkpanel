@@ -18,25 +18,24 @@ STATUS="$DATA_DIR/update-status.json"
 LOG_FILE="$(mktemp)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
+# write-status.mjs is expected to live alongside this script wherever it is
+# deployed, so this works regardless of install location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set once a terminal status (success/failed) has actually been written, so
+# the EXIT trap below can tell "we finished" from "we got cut off mid-run".
+FINALIZED=0
+
 # Clear the flag first: the path unit re-arms on its absence, and leaving it
 # would retrigger this script immediately on exit.
 rm -f "$FLAG"
 
 write_status() {
-  node -e '
-const fs = require("fs");
-const [, , state, error, logFile, statusFile, startedAt] = process.argv;
-let log = [];
-try { log = fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean).slice(-200); } catch {}
-fs.writeFileSync(statusFile, JSON.stringify({
-  state,
-  startedAt,
-  finishedAt: state === "running" ? null : new Date().toISOString(),
-  log,
-  error: error || null,
-}, null, 2));
-' "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
+  node "$SCRIPT_DIR/write-status.mjs" "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
   chmod 644 "$STATUS"
+  if [[ "$1" == "success" || "$1" == "failed" ]]; then
+    FINALIZED=1
+  fi
 }
 
 fail() {
@@ -48,6 +47,24 @@ fail() {
 }
 trap 'fail "unexpected error on line $LINENO"' ERR
 
+# Runs on every exit path — normal completion, `fail`'s `exit 1`, or this
+# process being killed (reboot, `systemctl stop`, a start timeout). Without
+# this, an interrupted run leaves the status file stuck at "running" forever,
+# and POST /api/system/update then returns 409 with no way to recover short
+# of editing the file by hand. This also covers the temp log file, which
+# previously was only ever cleaned up on the success path.
+#
+# Note this cannot help against SIGKILL (e.g. some OOM-kill policies) — no
+# trap can run then. That is a real, unavoidable gap; it is not the case this
+# trap is written for.
+cleanup() {
+  if [[ "$FINALIZED" -eq 0 ]]; then
+    write_status failed "update was interrupted before it finished"
+  fi
+  rm -f "$LOG_FILE"
+}
+trap cleanup EXIT
+
 write_status running
 
 cd "$REPO_DIR"
@@ -55,7 +72,9 @@ cd "$REPO_DIR"
 LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
 
 echo "== git pull ==" >>"$LOG_FILE"
-runuser -u "$APP" -- git pull --ff-only >>"$LOG_FILE" 2>&1 || fail "git pull failed"
+# Pinned to origin/main so a repointed remote.origin.url or a checked-out
+# side branch cannot change what gets deployed.
+runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
 write_status running
 
 LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
@@ -74,5 +93,3 @@ write_status running
 echo "== restart ==" >>"$LOG_FILE"
 write_status success
 systemctl restart "$APP"
-
-rm -f "$LOG_FILE"

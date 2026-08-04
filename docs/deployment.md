@@ -146,3 +146,14 @@ pct exec <CTID> -- journalctl -u inkpanel -n 50 --no-pager
 pct exec <CTID> -- cat /opt/inkpanel/data/update-status.json
 pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && runuser -u inkpanel -- git reset --hard HEAD~1 && systemctl restart inkpanel'
 ```
+
+If the updater itself was interrupted mid-run (a reboot, `systemctl stop`, an OOM
+kill) rather than failing normally, its own exit trap should have already
+written a `failed` status explaining that — but if it was killed in a way no
+trap can catch (`SIGKILL`), the status file can be left stuck at `running`,
+which makes `POST /api/system/update` return 409 forever with no way to
+recover from the UI. Clear it by hand:
+
+```bash
+pct exec <CTID> -- rm /opt/inkpanel/data/update-status.json
+```
