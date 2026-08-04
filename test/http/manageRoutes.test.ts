@@ -241,6 +241,22 @@ test('push renders and reports when the panel will collect it', async () => {
   });
 });
 
+test('push renders the enrolment frame for an unclaimed device', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    assert.equal((await store.get('esp32-1'))?.claimed, false, 'precondition: device is unclaimed');
+
+    const res = await fetch(`${base}/api/devices/esp32-1/push`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { etag: string };
+    assert.equal(
+      body.etag,
+      'd'.repeat(32),
+      'an unclaimed device is still showing its enrolment screen; push must not render the dashboard it cannot display',
+    );
+  });
+});
+
 test('push 404s for an unknown device', async () => {
   await withServer(async (base) => {
     const res = await fetch(`${base}/api/devices/ghost/push`, { method: 'POST' });

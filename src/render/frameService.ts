@@ -33,6 +33,14 @@ export interface Frame {
   buffer: Buffer;
   etag: string;
   renderedAt: string;
+  /**
+   * When the visible content last genuinely changed, ISO instant. Set on
+   * frames produced by frameFor/renderNow; absent on enrolment frames, which
+   * have no such concept. Exposed on the frame (rather than only internally)
+   * so callers — and tests — can observe it directly instead of parsing the
+   * rendered "Updated HH:MM" footer.
+   */
+  contentChangedAt?: string;
 }
 
 interface Memo {
@@ -140,8 +148,20 @@ export class FrameService {
     };
   }
 
-  /** Build the device's frame, re-rendering only when visible content changed. */
-  async frameFor(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+  /**
+   * Shared implementation behind frameFor and renderNow.
+   *
+   * `force` controls only whether an unchanged hash still triggers a
+   * re-rasterise — it never affects whether contentChangedAt moves. That
+   * timestamp advances if and only if the content hash actually changed, so
+   * Push (force: true) can make Chromium run again to prove something
+   * happened without relabelling stale content as freshly changed.
+   */
+  private async renderInternal(
+    device: DeviceRecord,
+    batteryVolts: number | null,
+    force: boolean,
+  ): Promise<Frame> {
     const bundle = await this.fetchAll(device);
     const previous = this.memo.get(device.id);
     const provisional = this.buildData(
@@ -151,16 +171,23 @@ export class FrameService {
       previous?.contentChangedAt ?? new Date().toISOString(),
     );
     const hash = contentHash(provisional);
+    const unchanged = previous !== undefined && previous.hash === hash;
 
-    if (previous && previous.hash === hash) return previous.frame;
+    if (unchanged && !force) return previous.frame;
 
-    const contentChangedAt = new Date().toISOString();
+    const contentChangedAt = unchanged ? previous.contentChangedAt : new Date().toISOString();
     const data = { ...provisional, contentChangedAt };
     const profile = this.profileFor(device);
-    const frame = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
+    const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
+    const frame: Frame = { ...rendered, contentChangedAt };
 
     this.memo.set(device.id, { hash, frame, contentChangedAt });
     return frame;
+  }
+
+  /** Build the device's frame, re-rendering only when visible content changed. */
+  async frameFor(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+    return this.renderInternal(device, batteryVolts, false);
   }
 
   /**
@@ -168,11 +195,15 @@ export class FrameService {
    *
    * frameFor returns the cached frame when the content hash is unchanged, which
    * is exactly right for devices and exactly wrong for a user who has pressed
-   * Push and expects to see something happen.
+   * Push and expects to see something happen. Push therefore always
+   * re-rasterises through Chromium — but when content has not genuinely
+   * changed it keeps the existing contentChangedAt (the "Updated HH:MM"
+   * footer), since that timestamp is deliberately excluded from the content
+   * hash and must only move when content actually changed, not merely
+   * because someone pressed a button.
    */
   async renderNow(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
-    this.memo.delete(device.id);
-    return this.frameFor(device, batteryVolts);
+    return this.renderInternal(device, batteryVolts, true);
   }
 
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {

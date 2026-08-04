@@ -131,6 +131,61 @@ test('a different server URL produces a different enrolment frame', async () => 
   );
 });
 
+test('renderNow re-rasterises even when content is unchanged', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service, counts) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    await service.frameFor(device, 4.0);
+    assert.equal(counts.screenshots, 1);
+
+    await service.renderNow(device, 4.0);
+    assert.equal(counts.screenshots, 2, 'Push must re-rasterise even though frameFor would have served the memo');
+  });
+});
+
+test('renderNow does not change contentChangedAt when content is unchanged', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    const first = await service.frameFor(device, 4.0);
+    const pushed = await service.renderNow(device, 4.0);
+
+    assert.equal(
+      pushed.contentChangedAt,
+      first.contentChangedAt,
+      'pressing Push on unchanged content must not relabel it as freshly changed',
+    );
+  });
+});
+
+test('renderNow updates contentChangedAt when content genuinely changed', async () => {
+  let title = 'Standup';
+  const fetchData = async (): Promise<SourceBundle> => ({
+    calendar: {
+      today: [{ uid: '1', title, start: '2026-08-03T08:30:00.000Z', end: '2026-08-03T08:45:00.000Z', allDay: false }],
+      tomorrow: [],
+    },
+    weather: null,
+    sourceHealth: OK_HEALTH,
+  });
+
+  await withService(fetchData, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    const first = await service.frameFor(device, 4.0);
+    title = 'Standup MOVED';
+    const pushed = await service.renderNow(device, 4.0);
+
+    assert.notEqual(
+      pushed.contentChangedAt,
+      first.contentChangedAt,
+      'a genuine content change must still move the timestamp, even via Push',
+    );
+  });
+});
+
 test('renders an enrolment frame in the normal format', async () => {
   await withService(
     (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
