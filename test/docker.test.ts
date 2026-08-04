@@ -64,6 +64,6 @@ test('the installer ships the update units and the password variable', async () 
   // The old inline heredoc updater does not clear the flag file. Leaving it in
   // place while the path unit is enabled means every update retriggers itself
   // and restarts the service in a loop.
-  assert.doesNotMatch(installer, /cat > \/usr\/local\/bin\/\$\{APP\}-update <</,
+  assert.doesNotMatch(installer, /cat > \/usr\/local\/bin\/(?:\$\{APP\}|inkpanel)-update <</,
     'the inline heredoc updater must be gone, replaced by the repo copy');
 });
