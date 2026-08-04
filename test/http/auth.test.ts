@@ -153,13 +153,14 @@ const frames = {
   enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'f'.repeat(32), renderedAt: '2026-08-04T00:00:00.000Z' }),
   previewHtml: async () => '<html></html>',
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-04T00:00:00.000Z' }),
+  sourceIssues: () => [],
 } as unknown as FrameService;
 
 async function withApp(password: string | null, fn: (base: string, store: DeviceStore) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-auth-'));
   const store = new DeviceStore(join(dir, 'config.json'));
   const app = createApp({
-    store, frames, publicBaseUrl: 'http://test:8080',
+    store, frames, publicBaseUrl: 'http://test:8080', dataDir: dir,
     auth: { password, secret: SECRET },
   });
   const server = app.listen(0);
@@ -182,6 +183,16 @@ test('no password means nothing is gated', async () => {
 test('a password gates the management API', async () => {
   await withApp('hunter2', async (base) => {
     assert.equal((await fetch(`${base}/api/devices`)).status, 401);
+  });
+});
+
+test('a password gates the system info endpoint', async () => {
+  // systemRoutes is mounted after the auth middleware deliberately: it
+  // exposes the data directory path and update-check state, neither of
+  // which should be reachable by an unauthenticated caller once a password
+  // is configured.
+  await withApp('hunter2', async (base) => {
+    assert.equal((await fetch(`${base}/api/system/info`)).status, 401);
   });
 });
 

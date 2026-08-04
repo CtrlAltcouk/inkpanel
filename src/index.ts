@@ -51,7 +51,7 @@ export async function main(): Promise<void> {
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
   const server = createApp({
-    store, frames, publicBaseUrl, auth: { password, secret }, trustProxy,
+    store, frames, publicBaseUrl, dataDir, auth: { password, secret }, trustProxy,
   }).listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
     console.log(`data directory: ${dataDir}`);

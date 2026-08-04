@@ -16,6 +16,7 @@ function stubFrames(): FrameService {
     frameFor: async () => ({ buffer: Buffer.alloc(48000, 0), etag: ETAG, renderedAt: '2026-08-03T07:42:00.000Z' }),
     enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 1), etag: 'b'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
     previewHtml: async () => '<html></html>',
+    sourceIssues: () => [],
   } as unknown as FrameService;
 }
 
@@ -26,7 +27,7 @@ async function withServer(
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-http-'));
   const store = new DeviceStore(join(dir, 'config.json'));
   const app = createApp({
-    store, frames, publicBaseUrl: 'http://test.local:8080',
+    store, frames, publicBaseUrl: 'http://test.local:8080', dataDir: dir,
     auth: { password: null, secret: randomBytes(32) },
   });
   const server = app.listen(0);

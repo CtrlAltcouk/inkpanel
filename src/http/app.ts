@@ -7,6 +7,7 @@ import type { FrameService } from '../render/frameService.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
+import { systemRoutes } from './systemRoutes.ts';
 
 const require = createRequire(import.meta.url);
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -20,6 +21,8 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
+  /** Where device config and caches live; used to report free disk space. */
+  dataDir: string;
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -60,6 +63,7 @@ export function createApp(deps: AppDeps): express.Express {
   // Device routes first: both mount under /api and :id/frame must win.
   app.use('/api', deviceRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
+  app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
 
   // Serve the latin-subset woff2 straight from @fontsource rather than
   // committing a 2.7 MB TTF for one heading in the admin UI.

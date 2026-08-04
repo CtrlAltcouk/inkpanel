@@ -6,7 +6,7 @@ import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
 
-const frames = {} as unknown as FrameService;
+const frames = { sourceIssues: () => [] } as unknown as FrameService;
 
 function makeApp(trustProxy?: boolean | number | string) {
   const store = new DeviceStore(join('unused', 'config.json'));
@@ -14,6 +14,7 @@ function makeApp(trustProxy?: boolean | number | string) {
     store,
     frames,
     publicBaseUrl: 'http://test:8080',
+    dataDir: 'unused',
     auth: { password: null, secret: randomBytes(32) },
     trustProxy,
   });

@@ -47,6 +47,7 @@ interface Memo {
   hash: string;
   frame: Frame;
   contentChangedAt: string;
+  health: SourceHealth[];
 }
 
 export class FrameService {
@@ -181,7 +182,7 @@ export class FrameService {
     const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
     const frame: Frame = { ...rendered, contentChangedAt };
 
-    this.memo.set(device.id, { hash, frame, contentChangedAt });
+    this.memo.set(device.id, { hash, frame, contentChangedAt, health: bundle.sourceHealth });
     return frame;
   }
 
@@ -204,6 +205,24 @@ export class FrameService {
    */
   async renderNow(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
     return this.renderInternal(device, batteryVolts, true);
+  }
+
+  /**
+   * Sources not currently reporting ok, across every device rendered so far.
+   *
+   * Safe to read from the memo: source status is part of the content hash, so
+   * a status change always forces a re-render and therefore a fresh entry.
+   */
+  sourceIssues(): Array<{ deviceId: string; sourceId: string; status: string; error: string | null }> {
+    const issues = [];
+    for (const [deviceId, memo] of this.memo) {
+      for (const source of memo.health) {
+        if (source.status !== 'ok') {
+          issues.push({ deviceId, sourceId: source.id, status: source.status, error: source.error });
+        }
+      }
+    }
+    return issues;
   }
 
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {

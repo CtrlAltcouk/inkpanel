@@ -14,13 +14,14 @@ const frames = {
   enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'd'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
   previewHtml: async () => '<html><body>preview</body></html>',
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
+  sourceIssues: () => [],
 } as unknown as FrameService;
 
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-mgmt-'));
   const store = new DeviceStore(join(dir, 'config.json'));
   const server = createApp({
-    store, frames, publicBaseUrl: 'http://test.local:8080',
+    store, frames, publicBaseUrl: 'http://test.local:8080', dataDir: dir,
     auth: { password: null, secret: randomBytes(32) },
   }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -265,5 +266,17 @@ test('push 404s for an unknown device', async () => {
   await withServer(async (base) => {
     const res = await fetch(`${base}/api/devices/ghost/push`, { method: 'POST' });
     assert.equal(res.status, 404);
+  });
+});
+
+test('system info reports version and device count', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/system/info`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { version: string; deviceCount: number; update: { state: string } };
+    assert.match(body.version, /^\d+\.\d+\.\d+$/);
+    assert.equal(body.deviceCount, 1);
+    assert.ok(['current', 'behind', 'unknown'].includes(body.update.state));
   });
 });
