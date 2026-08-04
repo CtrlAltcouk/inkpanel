@@ -10,6 +10,10 @@ import { Renderer } from '../../src/render/browser.ts';
 import { defaultDevice } from '../../src/devices/types.ts';
 
 const OK_HEALTH = [{ id: 'ical', status: 'ok' as const, fetchedAt: '2026-08-03T07:00:00.000Z', error: null }];
+const FAILING_HEALTH = [
+  { id: 'ical', status: 'ok' as const, fetchedAt: '2026-08-03T07:00:00.000Z', error: null },
+  { id: 'weather', status: 'error' as const, fetchedAt: null, error: 'timed out' },
+];
 
 async function withService(
   fetchData: (() => Promise<SourceBundle>) | (() => never),
@@ -131,6 +135,61 @@ test('a different server URL produces a different enrolment frame', async () => 
   );
 });
 
+test('renderNow re-rasterises even when content is unchanged', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service, counts) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    await service.frameFor(device, 4.0);
+    assert.equal(counts.screenshots, 1);
+
+    await service.renderNow(device, 4.0);
+    assert.equal(counts.screenshots, 2, 'Push must re-rasterise even though frameFor would have served the memo');
+  });
+});
+
+test('renderNow does not change contentChangedAt when content is unchanged', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    const first = await service.frameFor(device, 4.0);
+    const pushed = await service.renderNow(device, 4.0);
+
+    assert.equal(
+      pushed.contentChangedAt,
+      first.contentChangedAt,
+      'pressing Push on unchanged content must not relabel it as freshly changed',
+    );
+  });
+});
+
+test('renderNow updates contentChangedAt when content genuinely changed', async () => {
+  let title = 'Standup';
+  const fetchData = async (): Promise<SourceBundle> => ({
+    calendar: {
+      today: [{ uid: '1', title, start: '2026-08-03T08:30:00.000Z', end: '2026-08-03T08:45:00.000Z', allDay: false }],
+      tomorrow: [],
+    },
+    weather: null,
+    sourceHealth: OK_HEALTH,
+  });
+
+  await withService(fetchData, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+
+    const first = await service.frameFor(device, 4.0);
+    title = 'Standup MOVED';
+    const pushed = await service.renderNow(device, 4.0);
+
+    assert.notEqual(
+      pushed.contentChangedAt,
+      first.contentChangedAt,
+      'a genuine content change must still move the timestamp, even via Push',
+    );
+  });
+});
+
 test('renders an enrolment frame in the normal format', async () => {
   await withService(
     (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
@@ -140,4 +199,38 @@ test('renders an enrolment frame in the normal format', async () => {
       assert.match(frame.etag, /^[0-9a-f]{32}$/);
     },
   );
+});
+
+// sourceIssues() alone cannot distinguish "every source is healthy" from
+// "nothing has been rendered yet" — both read as []. renderedDeviceCount()
+// is what lets a caller (e.g. /api/system/info) tell the two apart.
+test('nothing rendered yet reports zero coverage, not a clean bill of health', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service) => {
+    assert.equal(service.renderedDeviceCount(), 0, 'nothing has been checked');
+    assert.deepEqual(service.sourceIssues(), [], 'an empty issues list here means "unknown", not "healthy"');
+  });
+});
+
+test('devices that have been rendered and are healthy count as coverage with no issues', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  await withService(async () => bundle, async (service) => {
+    await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
+    await service.frameFor({ ...defaultDevice('panel-b'), claimed: true }, 4.0);
+
+    assert.equal(service.renderedDeviceCount(), 2, 'both devices were actually checked');
+    assert.deepEqual(service.sourceIssues(), [], 'genuinely healthy this time, not merely unchecked');
+  });
+});
+
+test('a failing source is reported without hiding that the device was checked', async () => {
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: FAILING_HEALTH };
+  await withService(async () => bundle, async (service) => {
+    await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
+
+    assert.equal(service.renderedDeviceCount(), 1);
+    assert.deepEqual(service.sourceIssues(), [
+      { deviceId: 'panel-a', sourceId: 'weather', status: 'error', error: 'timed out' },
+    ]);
+  });
 });

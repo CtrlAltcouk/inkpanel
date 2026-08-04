@@ -21,6 +21,15 @@ export interface DeviceRecord {
   lastBatteryVolts: number | null;
   lastEtag: string | null;
   lastFirmwareVersion: string | null;
+
+  /** Human-readable location from the city picker, e.g. "Milton Keynes, England, GB". */
+  locationLabel: string;
+
+  /**
+   * What the device was last told to sleep for. Combined with lastSeenAt this
+   * gives the next expected check-in, which Push reports back to the user.
+   */
+  lastWakeSeconds: number | null;
 }
 
 export function defaultDevice(id: string): DeviceRecord {
@@ -43,5 +52,7 @@ export function defaultDevice(id: string): DeviceRecord {
     lastBatteryVolts: null,
     lastEtag: null,
     lastFirmwareVersion: null,
+    locationLabel: '',
+    lastWakeSeconds: null,
   };
 }

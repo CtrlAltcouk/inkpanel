@@ -8,11 +8,11 @@ A small server renders your calendar and weather into a single 1-bit image. A
 battery-powered ESP32 panel wakes up, fetches that image, displays it, and goes
 back to sleep. The panel does almost nothing; the server does almost everything.
 
-> **Status: server working, firmware unverified.** The server renders, serves
+> **Status: server working, one panel deployed.** The server renders, serves
 > and caches frames, and the whole protocol is exercised by a `fake-device` CLI.
-> The Proxmox LXC installer is tested and working. The firmware is written but
-> has never been flashed to a real panel, and the Docker image has never been
-> built.
+> The Proxmox LXC installer is tested and working. The firmware is flashed to
+> a real panel and running, reporting battery and firmware version back to the
+> server. The Docker image is written but has never been built.
 
 ## Why this shape
 
@@ -105,12 +105,27 @@ in London and a container running UTC disagree about which day it falls on.
 
 ## Security
 
-**There is no authentication. Do not expose this to the internet.**
+By default there is **no authentication** — anyone who can reach the server can
+read your calendar as a rendered image and change any panel's configuration.
 
-Anyone who can reach the server can read your calendar as a rendered image and
-change any device's configuration. It is designed as a LAN appliance. If you
-need remote access, put it behind a VPN or a reverse proxy that provides its own
-authentication.
+Set `INKPANEL_PASSWORD` to require a login. Two endpoints stay open regardless:
+`/api/devices/:id/frame`, because firmware cannot log in, and `/health`, so
+monitoring does not need credentials. Sign in at `/login.html`.
+
+**The password travels in clear text.** This is plain HTTP, so the password and
+the session cookie are readable by anyone able to capture packets on your
+network. It is protection against casual access — a guest on your WiFi, someone
+idly poking at the address — and **not** against a hostile network.
+
+**Do not expose this to the internet.** If you need remote access, put it behind
+a VPN or a reverse proxy that terminates TLS and does its own authentication.
+**Behind a reverse proxy you must set `TRUST_PROXY`, or the rate limiter
+buckets every client together** — `req.ip` otherwise resolves to the proxy's
+own address for every request, so five bad logins from anyone locks out
+everyone for 15 minutes. Set it to the number of proxy hops in front of the
+server (usually `1`), or to a comma-separated list of trusted addresses/
+subnets — see [Express's `trust proxy` docs](https://expressjs.com/en/guide/behind-proxies.html)
+for the accepted values.
 
 ## Documentation
 

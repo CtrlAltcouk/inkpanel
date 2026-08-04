@@ -107,3 +107,30 @@ test('a corrupt config file is treated as empty rather than throwing', async () 
     assert.deepEqual(await reopened.list(), [], 'must not crash the server on startup');
   });
 });
+
+test('new devices carry the Spec 2a fields with safe defaults', async () => {
+  await withStore(async (store) => {
+    const device = await store.getOrCreate('esp32-new');
+    assert.equal(device.locationLabel, '');
+    assert.equal(device.lastWakeSeconds, null);
+  });
+});
+
+test('a config file written before Spec 2a still loads', async () => {
+  await withStore(async (store, path) => {
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    const { dirname } = await import('node:path');
+    await mkdir(dirname(path), { recursive: true });
+    // A record with none of the new fields, as Spec 1 would have written it.
+    await writeFile(path, JSON.stringify({
+      devices: [{ id: 'esp32-old', name: 'Old panel', claimed: true }],
+    }), 'utf8');
+
+    const device = await store.get('esp32-old');
+    assert.equal(device?.name, 'Old panel', 'existing data survives');
+    // Missing fields read as undefined; callers must tolerate that rather than
+    // the store rewriting every record on load.
+    assert.equal(device?.locationLabel, undefined);
+    assert.equal(device?.lastWakeSeconds, undefined);
+  });
+});

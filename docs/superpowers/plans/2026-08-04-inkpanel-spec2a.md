@@ -253,7 +253,38 @@ And add this route inside `manageRoutes`, before the `return router;`:
 
 Append to `test/http/manageRoutes.test.ts`:
 
+Add the fixture import at the top of the file:
+
 ```ts
+import { MILTON_KEYNES } from '../fixtures/geocode.ts';
+```
+
+```ts
+/**
+ * Swap globalThis.fetch for the duration of a test.
+ *
+ * Requests to Open-Meteo are answered from a fixture; everything else — the
+ * test client talking to our own server — passes through untouched.
+ */
+async function withStubbedGeocoding(payload: unknown, fn: () => Promise<void>) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 test('geocode rejects a too-short query without calling upstream', async () => {
   await withServer(async (base) => {
     const res = await fetch(`${base}/api/geocode?q=m`);
@@ -262,19 +293,40 @@ test('geocode rejects a too-short query without calling upstream', async () => {
 });
 
 test('geocode returns labelled results', async () => {
-  await withServer(async (base) => {
-    const res = await fetch(`${base}/api/geocode?q=milton%20keynes`);
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { results: Array<{ label: string; timezone: string }> };
-    assert.ok(body.results.length > 0, 'live Open-Meteo lookup returned nothing');
-    assert.match(body.results[0]!.label, /Milton Keynes/);
-    assert.equal(body.results[0]!.timezone, 'Europe/London');
+  await withStubbedGeocoding(MILTON_KEYNES, async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton%20keynes`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { results: Array<{ label: string; timezone: string }> };
+      assert.equal(body.results[0]?.label, 'Milton Keynes, England, GB');
+      assert.equal(body.results[0]?.timezone, 'Europe/London');
+    });
   });
+});
+
+test('geocode reports upstream failure as 502 rather than an empty list', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('geocoding-api.open-meteo.com')) {
+      return new Response('upstream exploded', { status: 500 });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/geocode?q=milton`);
+      assert.equal(res.status, 502, 'no results and cannot look up are different things');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 ```
 
-> This one test does hit the network. Open-Meteo needs no key and the endpoint is
-> stable; if it ever becomes flaky in CI, it is the only test to quarantine.
+> **No test in this suite may call the real Open-Meteo API.** Fixtures already
+> cover the mapping; a live call would make the suite fail offline and flake in
+> CI for no additional coverage.
 
 - [ ] **Step 7: Run the tests**
 
@@ -906,14 +958,25 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
-  auth?: AuthOptions;
+  /**
+   * Required, not optional. A default would mean inventing a fallback HMAC key
+   * that is never used — the kind of line every future reader has to re-derive
+   * as safe. Callers already have a real one; make them pass it.
+   */
+  auth: AuthOptions;
 }
 ```
+
+**`auth` is now required, so every existing `createApp` call must supply it.**
+Update the two test helpers written in Spec 1 — `test/http/deviceRoutes.test.ts`
+and `test/http/manageRoutes.test.ts` — to pass
+`auth: { password: null, secret: randomBytes(32) }`, importing `randomBytes`
+from `node:crypto`. A null password leaves them behaving exactly as before.
 
 Then inside `createApp`, replace the two `app.use('/api', ...)` lines with:
 
 ```ts
-  const auth = createAuth(deps.auth ?? { password: null, secret: Buffer.alloc(32) });
+  const auth = createAuth(deps.auth);
 
   // Login must be reachable before the gate; the gate exempts it too, but
   // mounting first keeps the ordering obvious.
@@ -1872,10 +1935,20 @@ test('the installer ships the update units and the password variable', async () 
   assert.match(installer, /systemctl enable --now inkpanel-update\.path/, 'path unit must be enabled');
   assert.match(installer, /INKPANEL_PASSWORD/, 'env file must mention the password');
 
+  // The updater resolves write-status.mjs relative to its own path, so a
+  // missing copy breaks every update with only an ENOENT in the journal.
+  assert.match(installer, /write-status\.mjs/, 'the status writer must be installed too');
+
   // The containment argument depends on this: the app must not be able to
   // rewrite the script that runs as root.
-  assert.match(installer, /chown root:root \/usr\/local\/bin\/inkpanel-update/);
-  assert.match(installer, /chmod 755 \/usr\/local\/bin\/inkpanel-update/);
+  assert.match(installer, /chown root:root [^\n]*\/usr\/local\/bin\/inkpanel-update/);
+  assert.match(installer, /chmod 755 [^\n]*\/usr\/local\/bin\/inkpanel-update/);
+
+  // The old inline heredoc updater does not clear the flag file. Leaving it in
+  // place while the path unit is enabled means every update retriggers itself
+  // and restarts the service in a loop.
+  assert.doesNotMatch(installer, /cat > \/usr\/local\/bin\/\$\{APP\}-update <</,
+    'the inline heredoc updater must be gone, replaced by the repo copy');
 });
 ```
 
@@ -1893,13 +1966,25 @@ In `scripts/proxmox/inkpanel-lxc.sh`, replace the block that writes
 `/usr/local/bin/${APP}-update` (added in Spec 1) with this. The manual
 convenience command stays; the new units sit alongside it.
 
+**This block must replace the existing one entirely, not sit alongside it.** The
+installer currently writes its own simpler inline `/usr/local/bin/inkpanel-update`
+via a heredoc. That older script does not clear the flag file — so if the `.path`
+unit were enabled while it is still in place, every update would leave the flag
+present, retrigger the unit, and restart the service in a loop. Deleting the old
+heredoc is part of this step, not a tidy-up.
+
 ```bash
 # The update script and units are copied from the repo the container just
 # cloned, so they stay in step with the application rather than being
 # duplicated inside this installer.
+#
+# write-status.mjs must land beside the updater: the script resolves it via
+# ${BASH_SOURCE[0]}, so a missing or misplaced copy breaks every update at
+# runtime with nothing but an ENOENT in the journal.
 step "installing update units"
 run "install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/${APP}-update /usr/local/bin/${APP}-update
-     chown root:root /usr/local/bin/${APP}-update
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/write-status.mjs /usr/local/bin/write-status.mjs
+     chown root:root /usr/local/bin/${APP}-update /usr/local/bin/write-status.mjs
      chmod 755 /usr/local/bin/${APP}-update
      install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/${APP}-update.path /etc/systemd/system/${APP}-update.path
      install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/${APP}-update.service /etc/systemd/system/${APP}-update.service

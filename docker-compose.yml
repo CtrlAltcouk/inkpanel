@@ -14,6 +14,19 @@ services:
       # Leave empty to auto-detect the container's address, which is usually
       # NOT reachable from your LAN — set it explicitly.
       PUBLIC_BASE_URL: ""
+      # Uncomment to require a password for the web UI. The panel's own
+      # endpoint (/api/devices/:id/frame) and /health stay open regardless,
+      # since firmware cannot log in. NOTE: this is plain HTTP — the password
+      # crosses your network in clear text; protection against casual access
+      # only, not against a hostile network.
+      # INKPANEL_PASSWORD: "change-me"
+      # Set this if this container sits behind a reverse proxy. Without it,
+      # req.ip is the proxy's own address for every client, so the login rate
+      # limiter buckets everyone together — one bad-login burst locks out
+      # every client for 15 minutes. Set to the number of proxy hops in front
+      # of the server (usually 1), or a comma-separated list of trusted
+      # addresses/subnets. See https://expressjs.com/en/guide/behind-proxies.html.
+      # TRUST_PROXY: "1"
     # Chromium needs more than Docker's 64MB default for /dev/shm.
     shm_size: "512mb"
 

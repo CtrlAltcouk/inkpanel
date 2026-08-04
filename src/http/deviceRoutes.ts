@@ -31,14 +31,17 @@ export function deviceRoutes(
     const device = await store.getOrCreate(id);
     const batteryVolts = parseVolts(req.get('x-battery-voltage'));
 
-    // Record telemetry before rendering, so a render failure still logs the visit.
+    const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });
+
+    // Record telemetry before rendering, so a render failure still logs the
+    // visit. lastWakeSeconds is stored alongside so Push can say when the panel
+    // will next collect a frame.
     await store.update(id, {
       lastSeenAt: new Date().toISOString(),
       lastBatteryVolts: batteryVolts ?? device.lastBatteryVolts,
       lastFirmwareVersion: req.get('x-firmware-version') ?? device.lastFirmwareVersion,
+      lastWakeSeconds: wake,
     });
-
-    const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });
     res.set('X-Next-Wake-Seconds', String(wake));
     res.set('Cache-Control', 'no-store');
 
@@ -63,6 +66,9 @@ export function deviceRoutes(
       // Never send a broken frame. The device keeps its last good image.
       console.error(`[frame] ${id} render failed:`, err);
       res.set('X-Next-Wake-Seconds', String(ERROR_RETRY_SECONDS));
+      // The header just promised a shorter retry than the earlier lastWakeSeconds
+      // write above — keep the store in sync with what the device was actually told.
+      await store.update(id, { lastWakeSeconds: ERROR_RETRY_SECONDS });
       res.status(503).json({ error: 'render failed' });
     }
   });

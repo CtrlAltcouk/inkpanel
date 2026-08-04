@@ -1,10 +1,16 @@
 # Hardware verification
 
-None of the firmware has been run on real hardware. Work through this before
-calling Spec 1 done, and record the date and firmware version.
+The firmware is deployed and working on one real panel: it enrols, is claimed,
+and renders the dashboard with live calendar and weather.
+
+**Nothing below has been formally worked through.** Stage 1 is substantially
+covered by that deployment, but the rest is not: deep sleep, the 304 no-flash
+behaviour, KEY1 wake, failure backoff, battery-only operation and provisioning
+have never been deliberately exercised. The sleep-current measurement in
+[`sleep-current.md`](sleep-current.md) is still an unfilled form.
 
 Do not tick optimistically. A box that fails is a bug to fix, not a note to
-carry forward.
+carry forward — and "it seemed to work" is not the same as having checked.
 
 **Date tested:** ____________  **Firmware:** ____________
 

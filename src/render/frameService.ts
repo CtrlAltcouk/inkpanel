@@ -33,12 +33,21 @@ export interface Frame {
   buffer: Buffer;
   etag: string;
   renderedAt: string;
+  /**
+   * When the visible content last genuinely changed, ISO instant. Set on
+   * frames produced by frameFor/renderNow; absent on enrolment frames, which
+   * have no such concept. Exposed on the frame (rather than only internally)
+   * so callers — and tests — can observe it directly instead of parsing the
+   * rendered "Updated HH:MM" footer.
+   */
+  contentChangedAt?: string;
 }
 
 interface Memo {
   hash: string;
   frame: Frame;
   contentChangedAt: string;
+  health: SourceHealth[];
 }
 
 export class FrameService {
@@ -140,8 +149,20 @@ export class FrameService {
     };
   }
 
-  /** Build the device's frame, re-rendering only when visible content changed. */
-  async frameFor(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+  /**
+   * Shared implementation behind frameFor and renderNow.
+   *
+   * `force` controls only whether an unchanged hash still triggers a
+   * re-rasterise — it never affects whether contentChangedAt moves. That
+   * timestamp advances if and only if the content hash actually changed, so
+   * Push (force: true) can make Chromium run again to prove something
+   * happened without relabelling stale content as freshly changed.
+   */
+  private async renderInternal(
+    device: DeviceRecord,
+    batteryVolts: number | null,
+    force: boolean,
+  ): Promise<Frame> {
     const bundle = await this.fetchAll(device);
     const previous = this.memo.get(device.id);
     const provisional = this.buildData(
@@ -151,16 +172,72 @@ export class FrameService {
       previous?.contentChangedAt ?? new Date().toISOString(),
     );
     const hash = contentHash(provisional);
+    const unchanged = previous !== undefined && previous.hash === hash;
 
-    if (previous && previous.hash === hash) return previous.frame;
+    if (unchanged && !force) return previous.frame;
 
-    const contentChangedAt = new Date().toISOString();
+    const contentChangedAt = unchanged ? previous.contentChangedAt : new Date().toISOString();
     const data = { ...provisional, contentChangedAt };
     const profile = this.profileFor(device);
-    const frame = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
+    const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
+    const frame: Frame = { ...rendered, contentChangedAt };
 
-    this.memo.set(device.id, { hash, frame, contentChangedAt });
+    this.memo.set(device.id, { hash, frame, contentChangedAt, health: bundle.sourceHealth });
     return frame;
+  }
+
+  /** Build the device's frame, re-rendering only when visible content changed. */
+  async frameFor(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+    return this.renderInternal(device, batteryVolts, false);
+  }
+
+  /**
+   * Render unconditionally, ignoring the memo.
+   *
+   * frameFor returns the cached frame when the content hash is unchanged, which
+   * is exactly right for devices and exactly wrong for a user who has pressed
+   * Push and expects to see something happen. Push therefore always
+   * re-rasterises through Chromium — but when content has not genuinely
+   * changed it keeps the existing contentChangedAt (the "Updated HH:MM"
+   * footer), since that timestamp is deliberately excluded from the content
+   * hash and must only move when content actually changed, not merely
+   * because someone pressed a button.
+   */
+  async renderNow(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+    return this.renderInternal(device, batteryVolts, true);
+  }
+
+  /**
+   * Sources not currently reporting ok, across every device rendered so far.
+   *
+   * Safe to read from the memo: source status is part of the content hash, so
+   * a status change always forces a re-render and therefore a fresh entry.
+   */
+  sourceIssues(): Array<{ deviceId: string; sourceId: string; status: string; error: string | null }> {
+    const issues = [];
+    for (const [deviceId, memo] of this.memo) {
+      for (const source of memo.health) {
+        if (source.status !== 'ok') {
+          issues.push({ deviceId, sourceId: source.id, status: source.status, error: source.error });
+        }
+      }
+    }
+    return issues;
+  }
+
+  /**
+   * How many devices have actually been rendered at least once (and so have
+   * an entry in the memo) — as opposed to the total number of devices known
+   * to the store.
+   *
+   * `sourceIssues()` returns `[]` both when every rendered source is healthy
+   * and when nothing has been rendered at all (a fresh restart, or a claimed
+   * device that has not polled since). This count is what lets a caller tell
+   * those two situations apart, the same way `checkForUpdate` reports
+   * `'unknown'` rather than silently reading as `'current'`.
+   */
+  renderedDeviceCount(): number {
+    return this.memo.size;
   }
 
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {

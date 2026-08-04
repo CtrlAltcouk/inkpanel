@@ -1,9 +1,10 @@
 # inkpanel firmware
 
-> **Not yet run on hardware.** Written against the working
-> `EE04_WFT0583CZ61_OldV2_Test` sketch, but never flashed. Work through
-> [`docs/hardware/verification.md`](../docs/hardware/verification.md) before
-> trusting it.
+> **Deployed and working on one real panel.** The hardware verification
+> checklist in [`docs/hardware/verification.md`](../docs/hardware/verification.md)
+> has not been fully worked through; in particular, the sleep-current
+> measurement in [`docs/hardware/sleep-current.md`](../docs/hardware/sleep-current.md)
+> remains an unfilled form.
 
 ## Board settings
 

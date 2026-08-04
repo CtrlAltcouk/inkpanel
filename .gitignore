@@ -48,3 +48,6 @@ firmware/inkpanel/secrets.h
 # Golden reference images are environment-specific; generate locally.
 test/fixtures/golden/*.bin
 test/fixtures/golden/*.png
+
+# Local dev launch config for the browser preview tool
+.claude/

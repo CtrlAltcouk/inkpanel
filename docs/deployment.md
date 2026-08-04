@@ -125,3 +125,51 @@ Then commit the updated `test/fixtures/golden/`.
   default for `/dev/shm` is not enough.
 - **`EACCES` writing `/data`** — the Playwright image runs as a non-root user.
   Ensure the volume is writable by it.
+
+## Updating from the UI
+
+**This is a Proxmox LXC feature, not a general one.** The Settings tab's Update
+button works by creating a flag file that a systemd path unit watches — and
+that path unit only exists because `scripts/proxmox/inkpanel-lxc.sh` installed
+it. Nothing else in this repo creates it.
+
+On the README's "Anywhere else" install (`git clone` + `npm start`), on the
+manual-Docker LXC setup, and on TrueNAS, the server can still see a git
+checkout, so the button is enabled — but pressing it only writes
+`.update-requested` in the data directory. Nothing is watching for that file,
+so it sits there permanently, and after three minutes the UI's own advice to
+check `journalctl -u inkpanel` points at a systemd unit that was never
+installed on that host. On those installs, update the way you installed:
+`git pull --ff-only && npm ci` for a manual clone, or rebuild and redeploy the
+image for Docker/TrueNAS.
+
+The rest of this section describes the Proxmox LXC installer's behaviour only.
+
+It works by creating a flag file that a systemd path unit watches; the update
+itself runs as root in a separate unit the web application cannot modify. The
+app is granted no privilege beyond writing a file in its own data directory.
+
+`npm ci` runs only when `package-lock.json` changed, and **a failed update does
+not restart the service** — the running process keeps serving and the UI reports
+the failure.
+
+**The risk worth knowing:** self-update can break the service, and the UI that
+would fix it *is* the service. If an update leaves it unable to start, recover
+from the command line:
+
+```bash
+pct exec <CTID> -- journalctl -u inkpanel -n 50 --no-pager
+pct exec <CTID> -- cat /opt/inkpanel/data/update-status.json
+pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && runuser -u inkpanel -- git reset --hard HEAD~1 && systemctl restart inkpanel'
+```
+
+If the updater itself was interrupted mid-run (a reboot, `systemctl stop`, an OOM
+kill) rather than failing normally, its own exit trap should have already
+written a `failed` status explaining that — but if it was killed in a way no
+trap can catch (`SIGKILL`), the status file can be left stuck at `running`,
+which makes `POST /api/system/update` return 409 forever with no way to
+recover from the UI. Clear it by hand:
+
+```bash
+pct exec <CTID> -- rm /opt/inkpanel/data/update-status.json
+```

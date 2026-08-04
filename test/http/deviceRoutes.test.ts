@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,8 @@ function stubFrames(): FrameService {
     frameFor: async () => ({ buffer: Buffer.alloc(48000, 0), etag: ETAG, renderedAt: '2026-08-03T07:42:00.000Z' }),
     enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 1), etag: 'b'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
     previewHtml: async () => '<html></html>',
+    sourceIssues: () => [],
+    renderedDeviceCount: () => 0,
   } as unknown as FrameService;
 }
 
@@ -24,7 +27,10 @@ async function withServer(
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-http-'));
   const store = new DeviceStore(join(dir, 'config.json'));
-  const app = createApp({ store, frames, publicBaseUrl: 'http://test.local:8080' });
+  const app = createApp({
+    store, frames, publicBaseUrl: 'http://test.local:8080', dataDir: dir,
+    auth: { password: null, secret: randomBytes(32) },
+  });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
@@ -147,4 +153,31 @@ test('returns 503 with a retry interval when rendering fails', async () => {
     assert.equal(res.status, 503);
     assert.ok(Number(res.headers.get('x-next-wake-seconds')) > 0, 'device still needs a schedule');
   }, failing);
+});
+
+test('a failed render stores the same retry interval it sends', async () => {
+  const failing = {
+    frameFor: async () => { throw new Error('chromium died'); },
+    enrolmentFrame: async () => { throw new Error('chromium died'); },
+    previewHtml: async () => '',
+  } as unknown as FrameService;
+
+  await withServer(async (base, store) => {
+    await claim(store, 'esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1/frame`);
+    assert.equal(res.status, 503);
+    const handed = Number(res.headers.get('x-next-wake-seconds'));
+    assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
+      'stored lastWakeSeconds must match the retry interval actually sent, not the pre-failure value');
+  }, failing);
+});
+
+test('records the wake interval it handed out', async () => {
+  await withServer(async (base, store) => {
+    await claim(store, 'esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1/frame`);
+    const handed = Number(res.headers.get('x-next-wake-seconds'));
+    assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
+      'what we told the device must match what we remember telling it');
+  });
 });

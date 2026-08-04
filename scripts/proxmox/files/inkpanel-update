@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# Triggered by inkpanel-update.path when the application creates
+# /opt/inkpanel/data/.update-requested
+#
+# Runs as root. Must be root-owned and NOT writable by the inkpanel user — the
+# whole point of this arrangement is that the web application can request an
+# update but cannot influence what an update does.
+#
+set -Eeuo pipefail
+
+APP=inkpanel
+APP_DIR=/opt/inkpanel
+REPO_DIR="$APP_DIR/app"
+DATA_DIR="$APP_DIR/data"
+FLAG="$DATA_DIR/.update-requested"
+STATUS="$DATA_DIR/update-status.json"
+LOG_FILE="$(mktemp)"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+
+# write-status.mjs is expected to live alongside this script wherever it is
+# deployed, so this works regardless of install location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set once a terminal status (success/failed) has actually been written, so
+# the EXIT trap below can tell "we finished" from "we got cut off mid-run".
+FINALIZED=0
+
+# Clear the flag first: the path unit re-arms on its absence, and leaving it
+# would retrigger this script immediately on exit.
+rm -f "$FLAG"
+
+write_status() {
+  node "$SCRIPT_DIR/write-status.mjs" "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
+  chmod 644 "$STATUS"
+  if [[ "$1" == "success" || "$1" == "failed" ]]; then
+    FINALIZED=1
+  fi
+}
+
+fail() {
+  write_status failed "$1"
+  echo "inkpanel-update: FAILED — $1" >&2
+  # Deliberately no restart. A broken update must be a no-op, not an outage:
+  # the currently running process is still serving.
+  exit 1
+}
+trap 'fail "unexpected error on line $LINENO"' ERR
+
+# Runs on every exit path — normal completion, `fail`'s `exit 1`, or this
+# process being killed (reboot, `systemctl stop`, a start timeout). Without
+# this, an interrupted run leaves the status file stuck at "running" forever,
+# and POST /api/system/update then returns 409 with no way to recover short
+# of editing the file by hand. This also covers the temp log file, which
+# previously was only ever cleaned up on the success path.
+#
+# Note this cannot help against SIGKILL (e.g. some OOM-kill policies) — no
+# trap can run then. That is a real, unavoidable gap; it is not the case this
+# trap is written for.
+cleanup() {
+  if [[ "$FINALIZED" -eq 0 ]]; then
+    write_status failed "update was interrupted before it finished"
+  fi
+  rm -f "$LOG_FILE"
+}
+trap cleanup EXIT
+
+write_status running
+
+cd "$REPO_DIR"
+
+LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+
+echo "== git pull ==" >>"$LOG_FILE"
+# Pinned to origin/main so a repointed remote.origin.url or a checked-out
+# side branch cannot change what gets deployed.
+runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
+write_status running
+
+LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+
+if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
+  # npm ci removes node_modules before reinstalling, so a failure here leaves
+  # the service unable to start. Only pay that risk when dependencies actually
+  # changed — most updates are code-only.
+  echo "== npm ci (lockfile changed) ==" >>"$LOG_FILE"
+  runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
+else
+  echo "== npm ci skipped (lockfile unchanged) ==" >>"$LOG_FILE"
+fi
+write_status running
+
+echo "== restart ==" >>"$LOG_FILE"
+write_status success
+systemctl restart "$APP"

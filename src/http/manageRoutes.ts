@@ -4,6 +4,8 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { bufferToPng } from '../panel/quantise.ts';
 import { PROFILES, WFT0583 } from '../panel/profile.ts';
+import { geocode } from '../sources/geocode.ts';
+import { nextCheckIn } from '../devices/nextCheckIn.ts';
 
 const patchSchema = z
   .object({
@@ -12,6 +14,7 @@ const patchSchema = z
     timezone: z.string().min(1).optional(),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
+    locationLabel: z.string().max(120).optional(),
     calendarUrls: z.array(z.string().url()).max(10).optional(),
     panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),
@@ -77,6 +80,48 @@ export function manageRoutes(
       ? await frames.frameFor(device, device.lastBatteryVolts)
       : await frames.enrolmentFrame(device, publicBaseUrl);
     res.type('png').set('Cache-Control', 'no-store').send(await bufferToPng(frame.buffer, profile));
+  });
+
+  router.get('/geocode', async (req, res) => {
+    const query = String(req.query.q ?? '').trim();
+    if (query.length < 2) {
+      res.status(400).json({ error: 'query must be at least 2 characters' });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      res.json({ results: await geocode(query, controller.signal) });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'geocoding failed' });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  router.post('/devices/:id/push', async (req, res) => {
+    const device = await store.get(req.params.id);
+    if (!device) {
+      res.status(404).json({ error: 'unknown device' });
+      return;
+    }
+
+    try {
+      // An unclaimed device is still displaying its enrolment screen and will
+      // keep doing so until claimed — pushing it must not render the
+      // dashboard it can't show, exactly like GET /render.png above.
+      const frame = device.claimed
+        ? await frames.renderNow(device, device.lastBatteryVolts)
+        : await frames.enrolmentFrame(device, publicBaseUrl);
+      res.json({
+        etag: frame.etag,
+        renderedAt: frame.renderedAt,
+        ...nextCheckIn(device, new Date()),
+      });
+    } catch (err) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'render failed' });
+    }
   });
 
   return router;

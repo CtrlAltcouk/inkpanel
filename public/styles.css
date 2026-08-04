@@ -169,14 +169,6 @@ button:active { background: var(--brand-pink-press); }
   color: var(--fg-3);
 }
 
-.preview {
-  width: 100%;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-md);
-  background: #fff;
-  display: block;
-}
-
 .row {
   display: flex;
   gap: var(--sp-4);
@@ -211,4 +203,153 @@ button:active { background: var(--brand-pink-press); }
 .empty {
   color: var(--fg-3);
   font-size: var(--fs-base);
+}
+
+.login-page { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-card { width: 100%; max-width: 320px; }
+.login-card h1 { font-family: var(--font-display); font-size: var(--fs-2xl); margin: 0 0 var(--sp-4); }
+.login-card button { width: 100%; }
+
+body { max-width: none; }
+
+.shell { max-width: 900px; margin: 0 auto; }
+
+.tabs {
+  display: flex;
+  gap: var(--sp-6);
+  border-bottom: 1px solid var(--line-1);
+  margin-bottom: var(--sp-6);
+}
+
+.tabs a {
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs a.on { color: var(--fg-1); font-weight: 600; border-bottom-color: var(--brand-pink); }
+.tabs a:hover { color: var(--fg-1); }
+
+.panel-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+}
+
+.panel-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--fg-1);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.panel-card:hover { border-color: var(--line-2); }
+.panel-card.on { border-color: var(--brand-pink); }
+
+.panel-thumb {
+  width: 100%;
+  aspect-ratio: 800 / 480;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+/*
+ * "View full size" in the detail pane, and clicking the thumbnail again to
+ * close it, both toggle this class on the strip's own <img> — the same
+ * element, same already-fetched bytes, just enlarged in place. This is
+ * deliberately not a second <img src="...render.png"> in the detail pane,
+ * which would cost another live render request for a picture already on
+ * screen.
+ */
+.panel-thumb--zoomed {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(92vw, 900px);
+  height: auto;
+  max-height: 92vh;
+  z-index: 1000;
+  cursor: zoom-out;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.7);
+}
+
+.panel-name { font-weight: 700; font-size: var(--fs-base); }
+.panel-meta { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-3); }
+.panel-card .status { margin-left: 0; align-self: flex-start; }
+
+.actions { display: flex; gap: var(--sp-3); align-items: center; }
+button.ghost { background: transparent; color: var(--brand-pink); border: 1px solid var(--brand-pink); }
+button.ghost:hover { background: var(--brand-pink-dim); }
+button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); cursor: default; }
+
+.notice { color: var(--fg-2); font-size: var(--fs-sm); margin-top: var(--sp-3); }
+
+#city-picker { position: relative; }
+
+.city-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: var(--bg-3);
+  border: 1px solid var(--brand-pink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.city-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--fg-1);
+  border: 0;
+  border-bottom: 1px solid var(--line-1);
+  border-radius: 0;
+  margin: 0;
+  padding: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.city-option:last-child { border-bottom: 0; }
+.city-option:hover { background: var(--brand-pink-dim); }
+.city-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-3); }
+.city-current { margin-top: var(--sp-2); }
+
+.update-log {
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+  margin-top: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.issue-list {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
 }

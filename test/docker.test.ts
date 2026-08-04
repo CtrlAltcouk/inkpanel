@@ -43,3 +43,27 @@ test('tsx is a runtime dependency, since the container runs it', async () => {
     assert.ok(!pkg.devDependencies.tsx, 'tsx must not be in both');
   }
 });
+
+test('the installer ships the update units and the password variable', async () => {
+  const installer = await readFile(join(root, 'scripts/proxmox/inkpanel-lxc.sh'), 'utf8');
+
+  assert.match(installer, /inkpanel-update\.path/, 'path unit must be installed');
+  assert.match(installer, /inkpanel-update\.service/, 'service unit must be installed');
+  assert.match(installer, /systemctl enable --now inkpanel-update\.path/, 'path unit must be enabled');
+  assert.match(installer, /INKPANEL_PASSWORD/, 'env file must mention the password');
+
+  // The updater resolves write-status.mjs relative to its own path, so a
+  // missing copy breaks every update with only an ENOENT in the journal.
+  assert.match(installer, /write-status\.mjs/, 'the status writer must be installed too');
+
+  // The containment argument depends on this: the app must not be able to
+  // rewrite the script that runs as root.
+  assert.match(installer, /chown root:root [^\n]*\/usr\/local\/bin\/inkpanel-update/);
+  assert.match(installer, /chmod 755 [^\n]*\/usr\/local\/bin\/inkpanel-update/);
+
+  // The old inline heredoc updater does not clear the flag file. Leaving it in
+  // place while the path unit is enabled means every update retriggers itself
+  // and restarts the service in a loop.
+  assert.doesNotMatch(installer, /cat > \/usr\/local\/bin\/(?:\$\{APP\}|inkpanel)-update <</,
+    'the inline heredoc updater must be gone, replaced by the repo copy');
+});

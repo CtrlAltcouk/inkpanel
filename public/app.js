@@ -1,130 +1,66 @@
-const container = document.getElementById('devices');
+import { renderPanels } from './panels.js';
+import { renderSettings } from './settings.js';
+import { esc } from './components.js';
+import { resolveRouteName } from './router.js';
 
-const esc = (v) =>
-  String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+const view = document.getElementById('view');
 
-function field(device, key, label, type = 'text') {
-  return `
-    <label for="${esc(device.id)}-${key}">${esc(label)}</label>
-    <input id="${esc(device.id)}-${key}" name="${key}" type="${type}"
-           ${type === 'number' ? 'step="any"' : ''} value="${esc(device[key])}">`;
-}
+const ROUTES = {
+  panels: renderPanels,
+  settings: renderSettings,
+};
+const FALLBACK_ROUTE = 'panels';
 
-function healthPills(device) {
-  const seen = device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'never';
-  const battery = device.lastBatteryVolts ? `${device.lastBatteryVolts.toFixed(2)} V` : 'unknown';
-  const firmware = device.lastFirmwareVersion ?? 'unknown';
-  return `<div class="health">
-    <span class="pill">last seen ${esc(seen)}</span>
-    <span class="pill">battery ${esc(battery)}</span>
-    <span class="pill">fw ${esc(firmware)}</span>
-  </div>`;
-}
+// Bumped on every route() entry so a slow, stale render can recognise it has
+// been superseded and discard its result instead of overwriting a newer
+// render's DOM. Both tabs make real getJson() calls on this exact path, so a
+// fast reload during a slow fetch would otherwise let the stale response win
+// the race.
+let generation = 0;
 
-function card(device) {
-  const statusClass = device.claimed ? 'status--claimed' : 'status--unclaimed';
-  const statusText = device.claimed ? 'Claimed' : 'Unclaimed';
+async function route() {
+  const myGeneration = ++generation;
 
-  return `
-  <div class="card">
-    <h2>${esc(device.name)}<span class="status ${statusClass}">${statusText}</span></h2>
-    <p class="meta">${esc(device.id)}</p>
-    ${healthPills(device)}
+  const name = resolveRouteName(location.hash, ROUTES, FALLBACK_ROUTE);
+  const render = ROUTES[name];
 
-    <form data-id="${esc(device.id)}">
-      <h3>Location and time</h3>
-      <div class="row">
-        <div>${field(device, 'name', 'Name')}</div>
-        <div>${field(device, 'timezone', 'Timezone')}</div>
-      </div>
-      <div class="row">
-        <div>${field(device, 'latitude', 'Latitude', 'number')}</div>
-        <div>${field(device, 'longitude', 'Longitude', 'number')}</div>
-      </div>
-
-      <h3>Calendar</h3>
-      <label for="${esc(device.id)}-cal">Secret iCal URLs, one per line</label>
-      <textarea id="${esc(device.id)}-cal" name="calendarUrls" rows="3"
-        placeholder="https://calendar.google.com/calendar/ical/.../basic.ics">${esc((device.calendarUrls ?? []).join('\n'))}</textarea>
-
-      <h3>Refresh schedule</h3>
-      <div class="row">
-        <div>${field(device, 'activeIntervalSeconds', 'Interval (seconds)', 'number')}</div>
-        <div>${field(device, 'quietHoursStart', 'Quiet from (hour)', 'number')}</div>
-        <div>${field(device, 'quietHoursEnd', 'Quiet until (hour)', 'number')}</div>
-      </div>
-
-      <label class="checkbox">
-        <input type="checkbox" name="claimed" ${device.claimed ? 'checked' : ''}>
-        Claimed — show the dashboard instead of the setup screen
-      </label>
-
-      <button type="submit">Save</button>
-      <p class="error" hidden></p>
-    </form>
-
-    <h3>What the panel shows</h3>
-    <img class="preview" alt="Rendered output for ${esc(device.name)}"
-         src="/api/devices/${encodeURIComponent(device.id)}/render.png?t=${Date.now()}">
-  </div>`;
-}
-
-async function save(event) {
-  event.preventDefault();
-  const form = event.target;
-  const errorEl = form.querySelector('.error');
-  const raw = Object.fromEntries(new FormData(form));
-
-  const body = {
-    name: raw.name,
-    timezone: raw.timezone,
-    latitude: Number(raw.latitude),
-    longitude: Number(raw.longitude),
-    calendarUrls: String(raw.calendarUrls || '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    activeIntervalSeconds: Number(raw.activeIntervalSeconds),
-    quietHoursStart: Number(raw.quietHoursStart),
-    quietHoursEnd: Number(raw.quietHoursEnd),
-    claimed: form.querySelector('[name=claimed]').checked,
-  };
-
-  const res = await fetch(`/api/devices/${encodeURIComponent(form.dataset.id)}`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+  document.querySelectorAll('[data-tab]').forEach((tab) => {
+    tab.classList.toggle('on', tab.dataset.tab === name);
   });
 
-  if (!res.ok) {
-    const problem = await res.json().catch(() => ({ error: res.statusText }));
-    const detail = (problem.issues ?? [])
-      .map((i) => `${i.path?.join('.') ?? '?'}: ${i.message}`)
-      .join('\n');
-    errorEl.textContent = `${problem.error}${detail ? `\n${detail}` : ''}`;
-    errorEl.hidden = false;
+  view.innerHTML = '<p class="empty">Loading…</p>';
+
+  // Render into a detached element rather than `view` directly. render()
+  // implementations set `root.innerHTML` themselves, so without this
+  // indirection a stale render would already have written to the live DOM
+  // before there was any chance to check whether it was still current.
+  const scratch = document.createElement('div');
+  try {
+    await render(scratch);
+  } catch (err) {
+    if (myGeneration !== generation) return; // superseded — discard
+    // ApiError with status 401 already redirected; anything else is worth showing.
+    if (err?.status !== 401) {
+      view.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
+    }
     return;
   }
 
-  errorEl.hidden = true;
-  await load();
+  if (myGeneration !== generation) return; // superseded — discard
+  // Adopt `scratch` itself into `view`, rather than round-tripping through
+  // `scratch.innerHTML` (a string round-trip re-parses fresh elements and
+  // silently drops every addEventListener a render attached — e.g.
+  // panels.js's card-select, save and push handlers — leaving the live DOM
+  // inert) and rather than moving just its children (render() closures such
+  // as panels.js's push handler re-query `root` — i.e. `scratch` — *after*
+  // this point, e.g. when the push response comes back; if only the
+  // children were relocated, `scratch` would be left empty and those
+  // lookups would silently return null). Moving `scratch` itself preserves
+  // both the live listeners and `root` as the queryable container. #view
+  // has no styling that depends on its children being unwrapped, so the
+  // added layer costs nothing.
+  view.replaceChildren(scratch);
 }
 
-async function load() {
-  try {
-    const res = await fetch('/api/devices');
-    const { devices } = await res.json();
-    container.innerHTML = devices.length
-      ? devices.map(card).join('')
-      : '<div class="card"><p class="empty">No panels yet. Power one on and it will appear here.</p></div>';
-    container.querySelectorAll('form').forEach((f) => f.addEventListener('submit', save));
-  } catch (err) {
-    container.innerHTML = `<div class="card"><p class="error">Could not reach the server: ${esc(err.message)}</p></div>`;
-  }
-}
-
-await load();
+window.addEventListener('hashchange', route);
+await route();
