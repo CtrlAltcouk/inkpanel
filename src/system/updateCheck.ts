@@ -31,11 +31,13 @@ export function compareRefs(local: string | null, remote: string | null): { stat
 }
 
 let cache: { at: number; info: UpdateInfo } | null = null;
+// The in-flight check itself, not just its result — so concurrent callers
+// arriving during a cold or expired window share one `git` invocation
+// instead of each spawning their own. Same pattern as readVersion in
+// ./version.ts, which caches `resolve()`'s promise rather than its value.
+let pending: Promise<UpdateInfo> | null = null;
 
-export async function checkForUpdate(force = false): Promise<UpdateInfo> {
-  const now = Date.now();
-  if (!force && cache && now - cache.at < CACHE_MS) return cache.info;
-
+async function resolveUpdate(now: number): Promise<UpdateInfo> {
   let local: string | null = null;
   let remote: string | null = null;
   let error: string | undefined;
@@ -59,4 +61,14 @@ export async function checkForUpdate(force = false): Promise<UpdateInfo> {
 
   cache = { at: now, info };
   return info;
+}
+
+export function checkForUpdate(force = false): Promise<UpdateInfo> {
+  const now = Date.now();
+  if (!force && cache && now - cache.at < CACHE_MS) return Promise.resolve(cache.info);
+
+  pending ??= resolveUpdate(now).finally(() => {
+    pending = null;
+  });
+  return pending;
 }

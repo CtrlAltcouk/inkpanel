@@ -31,7 +31,16 @@ export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: 
       dataDir,
       freeBytes,
       update,
-      sourceIssues: frames.sourceIssues(),
+      // issues/renderedDevices come from FrameService's in-memory memo — only
+      // devices actually rendered since the last restart; totalDevices comes
+      // from the store. Assembled here, where both are already in hand, so a
+      // caller can tell "no issues across N of M panels" apart from "nothing
+      // rendered since restart" instead of reading an unqualified all-clear.
+      sources: {
+        issues: frames.sourceIssues(),
+        renderedDevices: frames.renderedDeviceCount(),
+        totalDevices: devices.length,
+      },
     });
   });
 

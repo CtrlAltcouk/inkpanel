@@ -15,6 +15,7 @@ const frames = {
   previewHtml: async () => '<html><body>preview</body></html>',
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
   sourceIssues: () => [],
+  renderedDeviceCount: () => 0,
 } as unknown as FrameService;
 
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
@@ -274,9 +275,22 @@ test('system info reports version and device count', async () => {
     await store.getOrCreate('esp32-1');
     const res = await fetch(`${base}/api/system/info`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { version: string; deviceCount: number; update: { state: string } };
+    const body = (await res.json()) as {
+      version: string;
+      deviceCount: number;
+      update: { state: string };
+      sources: { issues: unknown[]; renderedDevices: number; totalDevices: number };
+    };
     assert.match(body.version, /^\d+\.\d+\.\d+$/);
     assert.equal(body.deviceCount, 1);
     assert.ok(['current', 'behind', 'unknown'].includes(body.update.state));
+
+    // The stub FrameService reports zero rendered devices — the "haven't
+    // looked yet" state. An empty issues array alone must not read as "all
+    // healthy": totalDevices (1) outstripping renderedDevices (0) is what
+    // says so.
+    assert.deepEqual(body.sources.issues, []);
+    assert.equal(body.sources.renderedDevices, 0);
+    assert.equal(body.sources.totalDevices, 1);
   });
 });

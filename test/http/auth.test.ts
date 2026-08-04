@@ -154,6 +154,7 @@ const frames = {
   previewHtml: async () => '<html></html>',
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-04T00:00:00.000Z' }),
   sourceIssues: () => [],
+  renderedDeviceCount: () => 0,
 } as unknown as FrameService;
 
 async function withApp(password: string | null, fn: (base: string, store: DeviceStore) => Promise<void>) {

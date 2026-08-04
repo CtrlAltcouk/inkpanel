@@ -225,6 +225,21 @@ export class FrameService {
     return issues;
   }
 
+  /**
+   * How many devices have actually been rendered at least once (and so have
+   * an entry in the memo) — as opposed to the total number of devices known
+   * to the store.
+   *
+   * `sourceIssues()` returns `[]` both when every rendered source is healthy
+   * and when nothing has been rendered at all (a fresh restart, or a claimed
+   * device that has not polled since). This count is what lets a caller tell
+   * those two situations apart, the same way `checkForUpdate` reports
+   * `'unknown'` rather than silently reading as `'current'`.
+   */
+  renderedDeviceCount(): number {
+    return this.memo.size;
+  }
+
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {
     const key = `${device.id}|${baseUrl}|${device.panelProfileId}`;
     const cached = this.enrolmentMemo.get(key);

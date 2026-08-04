@@ -17,6 +17,7 @@ function stubFrames(): FrameService {
     enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 1), etag: 'b'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
     previewHtml: async () => '<html></html>',
     sourceIssues: () => [],
+    renderedDeviceCount: () => 0,
   } as unknown as FrameService;
 }
 
