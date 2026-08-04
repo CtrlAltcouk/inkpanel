@@ -20,7 +20,7 @@ for (const timeZone of ZONES) {
   process.stdout.write(`\n=== TZ=${timeZone} ===\n`);
   const result = spawnSync(
     process.execPath,
-    ['--import', 'tsx', '--test', 'test/**/*.test.ts'],
+    ['--import', 'tsx', '--test', 'test/**/*.test.ts', 'test/**/*.test.js'],
     { stdio: 'inherit', env: { ...process.env, TZ: timeZone } },
   );
   if (result.status !== 0) {

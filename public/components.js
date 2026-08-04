@@ -13,10 +13,30 @@ export function formatRelative(iso, now = new Date()) {
   if (Number.isNaN(then)) return 'never';
 
   const seconds = Math.round((now.getTime() - then) / 1000);
-  if (seconds < 45) return 'just now';
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
+  const abs = Math.abs(seconds);
+  if (abs < 45) return 'just now';
+
+  const label = relativeBucket(abs);
+  // A future timestamp means the reporting device's clock is ahead of the
+  // server's — plausible for battery firmware with no RTC sync. Trivial
+  // skew still reads as "just now" (handled above), but anything past that
+  // is shown as "in Xm/h/d" rather than being folded into "just now",
+  // which would make an hour of skew indistinguishable from a fresh check-in.
+  return seconds < 0 ? `in ${label}` : `${label} ago`;
+}
+
+// Picks the unit/value pair for a non-negative second count, rounding to the
+// nearest whole unit. Rounding alone can push a value to the top of its
+// bucket (3599s -> 60m, 86399s -> 24h); when that happens, bump to the next
+// unit instead of displaying "60m" or "24h".
+function relativeBucket(abs) {
+  const minutes = Math.round(abs / 60);
+  if (abs < 3600 && minutes < 60) return `${minutes}m`;
+
+  const hours = Math.round(abs / 3600);
+  if (abs < 86400 && hours < 24) return `${hours}h`;
+
+  return `${Math.round(abs / 86400)}d`;
 }
 
 export function formatVolts(volts) {
