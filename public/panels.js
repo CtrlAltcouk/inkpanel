@@ -23,6 +23,8 @@ function detail(device) {
     <p class="meta">${esc(device.id)} · fw ${esc(device.lastFirmwareVersion ?? 'unknown')}</p>
 
     <form data-id="${esc(device.id)}">
+      ${field(device.id, 'name', 'Name', device.name)}
+
       <h3>Location</h3>
       <div id="city-picker"></div>
       ${field(device.id, 'timezone', 'Timezone', device.timezone)}
@@ -47,14 +49,15 @@ function detail(device) {
       <div class="actions">
         <button type="submit">Save</button>
         <button type="button" class="ghost" data-push="${esc(device.id)}">Push</button>
+        <!-- The strip card above already carries a live thumbnail for this
+             device; opening a second copy here would be a second render.png
+             request for the same picture. This reuses that exact <img>
+             (via CSS, in place) rather than fetching it again. -->
+        <button type="button" class="ghost" data-zoom="${esc(device.id)}">View full size</button>
       </div>
       <p class="notice" id="notice" hidden></p>
       <p class="error" id="error" hidden></p>
     </form>
-
-    <h3>What the panel shows</h3>
-    <img class="preview" alt="Rendered output for ${esc(device.name)}"
-         src="/api/devices/${encodeURIComponent(device.id)}/render.png?t=${Date.now()}">
   </div>`;
 }
 
@@ -70,11 +73,24 @@ function pushMessage(result) {
   return 'Rendered. Will appear at the panel’s next check-in.';
 }
 
+// #notice and #error are mutually exclusive: showing one always hides the
+// other, so a failure that follows an earlier success (or vice versa) never
+// leaves both visible at once.
 function showError(root, err) {
-  const el = root.querySelector('#error');
+  const notice = root.querySelector('#notice');
+  const error = root.querySelector('#error');
+  notice.hidden = true;
   const detailText = (err.issues ?? []).map((i) => `${i.path?.join('.') ?? '?'}: ${i.message}`).join('\n');
-  el.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`;
-  el.hidden = false;
+  error.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`;
+  error.hidden = false;
+}
+
+function showNotice(root, text) {
+  const notice = root.querySelector('#notice');
+  const error = root.querySelector('#error');
+  error.hidden = true;
+  notice.textContent = text;
+  notice.hidden = false;
 }
 
 async function save(event, root) {
@@ -84,6 +100,7 @@ async function save(event, root) {
   const picker = form.querySelector('#city-picker');
 
   const body = {
+    name: raw.name,
     timezone: raw.timezone,
     calendarUrls: String(raw.calendarUrls || '').split('\n').map((s) => s.trim()).filter(Boolean),
     activeIntervalSeconds: Number(raw.activeIntervalSeconds),
@@ -105,6 +122,71 @@ async function save(event, root) {
   await renderPanels(root);
 }
 
+// Renders (or replaces) the #detail card for `device` and wires its form,
+// push and zoom controls. Shared by the initial render and by card
+// selection so both stay in sync.
+async function renderDetail(root, device) {
+  const html = detail(device);
+  const existing = root.querySelector('#detail');
+  if (existing) {
+    existing.outerHTML = html;
+  } else {
+    root.insertAdjacentHTML('beforeend', html);
+  }
+
+  const detailEl = root.querySelector('#detail');
+
+  const form = detailEl.querySelector('form');
+  form.addEventListener('submit', (event) => {
+    // A 401 has already sent the browser to /login.html (see api.js);
+    // painting "authentication required" into the page here would just be
+    // noise on the way out, so only genuine failures get shown.
+    void save(event, root).catch((err) => {
+      if (err?.status !== 401) showError(root, err);
+    });
+  });
+
+  detailEl.querySelector('[data-push]').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Rendering…';
+    try {
+      const result = await sendJson('POST', `/api/devices/${encodeURIComponent(button.dataset.push)}/push`);
+      showNotice(root, pushMessage(result));
+      // Cache-bust the strip thumbnail so it reflects the render that just
+      // happened, rather than requesting a second copy of the same image.
+      const thumb = root.querySelector(`[data-select="${CSS.escape(button.dataset.push)}"] .panel-thumb`);
+      if (thumb) thumb.src = `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
+    } catch (err) {
+      if (err?.status !== 401) showError(root, err);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Push';
+    }
+  });
+
+  detailEl.querySelector('[data-zoom]').addEventListener('click', () => {
+    const img = root.querySelector(`[data-select="${CSS.escape(device.id)}"] .panel-thumb`);
+    img?.classList.toggle('panel-thumb--zoomed');
+  });
+
+  const { renderCityPicker } = await import('./cityPicker.js');
+  renderCityPicker(detailEl.querySelector('#city-picker'), device);
+}
+
+// Switching the selected card must not re-fetch every thumbnail: it only
+// swaps the detail pane and toggles which card is highlighted. The strip's
+// <img> elements are left completely untouched, so no new render.png
+// requests happen just from clicking around.
+function selectDevice(root, devices, id) {
+  selectedId = id;
+  root.querySelectorAll('[data-select]').forEach((card) => {
+    card.classList.toggle('on', card.dataset.select === id);
+  });
+  const device = devices.find((d) => d.id === id);
+  void renderDetail(root, device);
+}
+
 export async function renderPanels(root) {
   const { devices } = await getJson('/api/devices');
 
@@ -114,42 +196,21 @@ export async function renderPanels(root) {
   }
 
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  const selected = devices.find((d) => d.id === selectedId);
 
-  root.innerHTML = `<div class="panel-strip">${devices.map(thumbnail).join('')}</div>${detail(selected)}`;
-
+  root.innerHTML = `<div class="panel-strip">${devices.map(thumbnail).join('')}</div>`;
   root.querySelectorAll('[data-select]').forEach((card) => {
-    card.addEventListener('click', () => {
-      selectedId = card.dataset.select;
-      void renderPanels(root);
+    card.addEventListener('click', () => selectDevice(root, devices, card.dataset.select));
+  });
+  root.querySelectorAll('.panel-thumb').forEach((img) => {
+    // While zoomed, clicking the (now full-screen) picture closes it again.
+    // Stop the click from also bubbling to the card's own select handler.
+    img.addEventListener('click', (event) => {
+      if (img.classList.contains('panel-thumb--zoomed')) {
+        event.stopPropagation();
+        img.classList.remove('panel-thumb--zoomed');
+      }
     });
   });
 
-  const form = root.querySelector('form');
-  form.addEventListener('submit', (event) => {
-    void save(event, root).catch((err) => showError(root, err));
-  });
-
-  root.querySelector('[data-push]').addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    const notice = root.querySelector('#notice');
-    button.disabled = true;
-    button.textContent = 'Rendering…';
-    try {
-      const result = await sendJson('POST', `/api/devices/${encodeURIComponent(button.dataset.push)}/push`);
-      notice.textContent = pushMessage(result);
-      notice.hidden = false;
-      // Cache-bust so the preview reflects the render that just happened.
-      root.querySelector('.preview').src =
-        `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
-    } catch (err) {
-      showError(root, err);
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Push';
-    }
-  });
-
-  const { renderCityPicker } = await import('./cityPicker.js');
-  renderCityPicker(root.querySelector('#city-picker'), selected);
+  await renderDetail(root, devices.find((d) => d.id === selectedId));
 }

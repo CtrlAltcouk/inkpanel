@@ -169,14 +169,6 @@ button:active { background: var(--brand-pink-press); }
   color: var(--fg-3);
 }
 
-.preview {
-  width: 100%;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-md);
-  background: #fff;
-  display: block;
-}
-
 .row {
   display: flex;
   gap: var(--sp-4);
@@ -272,6 +264,26 @@ body { max-width: none; }
   background: #fff;
   border-radius: var(--radius-sm);
   object-fit: contain;
+}
+
+/*
+ * "View full size" in the detail pane, and clicking the thumbnail again to
+ * close it, both toggle this class on the strip's own <img> — the same
+ * element, same already-fetched bytes, just enlarged in place. This is
+ * deliberately not a second <img src="...render.png"> in the detail pane,
+ * which would cost another live render request for a picture already on
+ * screen.
+ */
+.panel-thumb--zoomed {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(92vw, 900px);
+  height: auto;
+  max-height: 92vh;
+  z-index: 1000;
+  cursor: zoom-out;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.7);
 }
 
 .panel-name { font-weight: 700; font-size: var(--fs-base); }

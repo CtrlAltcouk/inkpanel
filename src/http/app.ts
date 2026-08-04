@@ -55,8 +55,11 @@ export function createApp(deps: AppDeps): express.Express {
 
   const auth = createAuth(deps.auth);
 
-  // Login must be reachable before the gate; the gate exempts it too, but
-  // mounting first keeps the ordering obvious.
+  // Login must be reachable before the gate. auth.ts's isExempt() does NOT
+  // match it — only the device frame route is exempt — so this reachability
+  // depends entirely on auth.router being mounted before auth.middleware
+  // here. This ordering is load-bearing: reverse it and login starts
+  // requiring a session to reach the endpoint that creates one.
   app.use('/api', auth.router);
   app.use('/api', auth.middleware);
 

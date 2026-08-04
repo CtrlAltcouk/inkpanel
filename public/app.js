@@ -13,10 +13,9 @@ const FALLBACK_ROUTE = 'panels';
 
 // Bumped on every route() entry so a slow, stale render can recognise it has
 // been superseded and discard its result instead of overwriting a newer
-// render's DOM. Today both tabs are synchronous placeholders so renders
-// never overlap in practice, but Tasks 9/11 add real getJson() calls on this
-// exact path, where a fast reload during a slow fetch would otherwise let
-// the stale response win the race.
+// render's DOM. Both tabs make real getJson() calls on this exact path, so a
+// fast reload during a slow fetch would otherwise let the stale response win
+// the race.
 let generation = 0;
 
 async function route() {

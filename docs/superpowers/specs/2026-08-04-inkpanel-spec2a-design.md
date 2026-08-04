@@ -64,10 +64,16 @@ A strip of cards — one per device — each showing a live `render.png` thumbna
 name, claimed state, battery and last-seen. Selecting a card shows its config
 below.
 
-**Thumbnails must not cost renders.** They are lazy-loaded (`loading="lazy"`) and
-served through the existing frame memo, so a page refresh is free unless content
-genuinely changed. This is the same mechanism that stops the panel flashing; it
-must not be bypassed here.
+**Thumbnails are lazy-loaded (`loading="lazy"`), and rasterisation is memoed** —
+Chromium only runs again when the content hash actually changed, the same
+mechanism that stops the panel flashing. That is not the same claim as "a page
+refresh is free": the frame memo sits *after* the source fetch, not before it,
+so every `render.png` request — including a thumbnail — still makes a live
+iCal and Open-Meteo call before the memo is even consulted. What the memo
+buys is skipping Chromium, not skipping the network. The UI must not multiply
+that cost on its own: only one `<img>` per device should ever request
+`render.png` on a normal render, and switching between devices must not
+re-request thumbnails that are already on screen.
 
 ---
 

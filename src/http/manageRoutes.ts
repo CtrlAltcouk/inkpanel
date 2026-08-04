@@ -110,7 +110,7 @@ export function manageRoutes(
     try {
       // An unclaimed device is still displaying its enrolment screen and will
       // keep doing so until claimed — pushing it must not render the
-      // dashboard it can't show, exactly like GET /render.png below.
+      // dashboard it can't show, exactly like GET /render.png above.
       const frame = device.claimed
         ? await frames.renderNow(device, device.lastBatteryVolts)
         : await frames.enrolmentFrame(device, publicBaseUrl);

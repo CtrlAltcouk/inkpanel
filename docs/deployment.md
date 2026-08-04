@@ -128,10 +128,26 @@ Then commit the updated `test/fixtures/golden/`.
 
 ## Updating from the UI
 
-The Settings tab can update the server. It works by creating a flag file that a
-systemd path unit watches; the update itself runs as root in a separate unit the
-web application cannot modify. The app is granted no privilege beyond writing a
-file in its own data directory.
+**This is a Proxmox LXC feature, not a general one.** The Settings tab's Update
+button works by creating a flag file that a systemd path unit watches — and
+that path unit only exists because `scripts/proxmox/inkpanel-lxc.sh` installed
+it. Nothing else in this repo creates it.
+
+On the README's "Anywhere else" install (`git clone` + `npm start`), on the
+manual-Docker LXC setup, and on TrueNAS, the server can still see a git
+checkout, so the button is enabled — but pressing it only writes
+`.update-requested` in the data directory. Nothing is watching for that file,
+so it sits there permanently, and after three minutes the UI's own advice to
+check `journalctl -u inkpanel` points at a systemd unit that was never
+installed on that host. On those installs, update the way you installed:
+`git pull --ff-only && npm ci` for a manual clone, or rebuild and redeploy the
+image for Docker/TrueNAS.
+
+The rest of this section describes the Proxmox LXC installer's behaviour only.
+
+It works by creating a flag file that a systemd path unit watches; the update
+itself runs as root in a separate unit the web application cannot modify. The
+app is granted no privilege beyond writing a file in its own data directory.
 
 `npm ci` runs only when `package-lock.json` changed, and **a failed update does
 not restart the service** — the running process keeps serving and the UI reports

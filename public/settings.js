@@ -77,12 +77,42 @@ function view(info) {
 }
 
 /**
+ * True when `status` reflects the update actually requested at `requestedAt`,
+ * rather than a stale status left over from a previous run.
+ *
+ * `update-status.json` is never cleared between runs — it just sits at
+ * whatever terminal state ('success' or 'failed') the last update left it in
+ * until the path unit's own process overwrites it with 'running'. A client
+ * that starts polling before that overwrite lands would otherwise read last
+ * run's outcome as if it belonged to the update it just triggered: a stale
+ * 'success' says "Done. Reloading…" while the real update is still in
+ * flight, and a stale 'failed' shows last month's log for one that is
+ * proceeding fine.
+ *
+ * A status with no `startedAt` has not begun yet (including the idle
+ * default) and must be treated as not-yet-started rather than terminal —
+ * never pattern-matched against `state` at all.
+ */
+export function isCurrentStatus(status, requestedAt) {
+  if (!status?.startedAt) return false;
+  return new Date(status.startedAt).getTime() >= new Date(requestedAt).getTime();
+}
+
+/**
  * Poll until the update finishes.
  *
  * The server restarts underneath us partway through, so connection failures are
  * an expected part of a successful update rather than an error condition.
+ *
+ * `requestedAt` is the timestamp the server handed back from the 202 that
+ * kicked this update off. When set, any status not yet reflecting that
+ * request (see `isCurrentStatus`) is treated as "not started yet" rather than
+ * read for its `state`. When absent — the "an update is already running"
+ * path, where this client made no request of its own — every status is
+ * accepted, since there is no earlier request of ours for it to be stale
+ * against.
  */
-async function pollUntilDone(log) {
+async function pollUntilDone(log, requestedAt) {
   const deadline = Date.now() + GIVE_UP_MS;
 
   while (Date.now() < deadline) {
@@ -95,6 +125,8 @@ async function pollUntilDone(log) {
       log.textContent = 'Server restarting…';
       continue;
     }
+
+    if (requestedAt && !isCurrentStatus(status, requestedAt)) continue;
 
     if (status.log.length > 0) log.textContent = status.log.join('\n');
 
@@ -112,8 +144,8 @@ async function pollUntilDone(log) {
   log.textContent += '\n\nGave up waiting. Check: journalctl -u inkpanel -n 50';
 }
 
-export async function renderSettings(root) {
-  const info = await getJson('/api/system/info');
+export async function renderSettings(root, { refresh = false } = {}) {
+  const info = await getJson(`/api/system/info${refresh ? '?refresh=1' : ''}`);
   root.innerHTML = view(info);
 
   const log = root.querySelector('#log');
@@ -121,7 +153,14 @@ export async function renderSettings(root) {
 
   root.querySelector('#recheck').addEventListener('click', async () => {
     root.innerHTML = '<p class="empty">Checking…</p>';
-    await renderSettings(root);
+    try {
+      await renderSettings(root, { refresh: true });
+    } catch (err) {
+      // A 401 has already sent the browser to /login.html (see api.js);
+      // painting an error here would just be noise on the way out.
+      if (err?.status === 401) return;
+      root.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
+    }
   });
 
   root.querySelector('#update').addEventListener('click', async (event) => {
@@ -132,14 +171,19 @@ export async function renderSettings(root) {
     log.hidden = false;
     log.textContent = 'Requested…';
 
+    let requestedAt = null;
     try {
-      await sendJson('POST', '/api/system/update');
+      const response = await sendJson('POST', '/api/system/update');
+      requestedAt = response.requestedAt;
     } catch (err) {
       if (err.status === 409) {
         // A real state, not a generic failure: an update is already running
         // (another tab, or a previous press that outlived a reload). Watch
         // its status instead of reporting this request's own rejection.
         log.textContent = 'An update is already in progress — watching…';
+      } else if (err.status === 401) {
+        // Already redirecting to /login.html; nothing useful to show here.
+        return;
       } else {
         error.textContent = err.message;
         error.hidden = false;
@@ -149,6 +193,6 @@ export async function renderSettings(root) {
       }
     }
 
-    await pollUntilDone(log);
+    await pollUntilDone(log, requestedAt);
   });
 }

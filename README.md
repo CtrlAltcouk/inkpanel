@@ -8,11 +8,11 @@ A small server renders your calendar and weather into a single 1-bit image. A
 battery-powered ESP32 panel wakes up, fetches that image, displays it, and goes
 back to sleep. The panel does almost nothing; the server does almost everything.
 
-> **Status: server working, firmware unverified.** The server renders, serves
+> **Status: server working, one panel deployed.** The server renders, serves
 > and caches frames, and the whole protocol is exercised by a `fake-device` CLI.
-> The Proxmox LXC installer is tested and working. The firmware is written but
-> has never been flashed to a real panel, and the Docker image has never been
-> built.
+> The Proxmox LXC installer is tested and working. The firmware is flashed to
+> a real panel and running, reporting battery and firmware version back to the
+> server. The Docker image is written but has never been built.
 
 ## Why this shape
 
