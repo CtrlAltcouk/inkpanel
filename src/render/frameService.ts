@@ -163,6 +163,18 @@ export class FrameService {
     return frame;
   }
 
+  /**
+   * Render unconditionally, ignoring the memo.
+   *
+   * frameFor returns the cached frame when the content hash is unchanged, which
+   * is exactly right for devices and exactly wrong for a user who has pressed
+   * Push and expects to see something happen.
+   */
+  async renderNow(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
+    this.memo.delete(device.id);
+    return this.frameFor(device, batteryVolts);
+  }
+
   async enrolmentFrame(device: DeviceRecord, baseUrl: string): Promise<Frame> {
     const key = `${device.id}|${baseUrl}|${device.panelProfileId}`;
     const cached = this.enrolmentMemo.get(key);

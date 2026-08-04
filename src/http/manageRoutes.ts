@@ -5,6 +5,7 @@ import type { FrameService } from '../render/frameService.ts';
 import { bufferToPng } from '../panel/quantise.ts';
 import { PROFILES, WFT0583 } from '../panel/profile.ts';
 import { geocode } from '../sources/geocode.ts';
+import { nextCheckIn } from '../devices/nextCheckIn.ts';
 
 const patchSchema = z
   .object({
@@ -96,6 +97,25 @@ export function manageRoutes(
       res.status(502).json({ error: err instanceof Error ? err.message : 'geocoding failed' });
     } finally {
       clearTimeout(timer);
+    }
+  });
+
+  router.post('/devices/:id/push', async (req, res) => {
+    const device = await store.get(req.params.id);
+    if (!device) {
+      res.status(404).json({ error: 'unknown device' });
+      return;
+    }
+
+    try {
+      const frame = await frames.renderNow(device, device.lastBatteryVolts);
+      res.json({
+        etag: frame.etag,
+        renderedAt: frame.renderedAt,
+        ...nextCheckIn(device, new Date()),
+      });
+    } catch (err) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'render failed' });
     }
   });
 

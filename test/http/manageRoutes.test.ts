@@ -12,6 +12,7 @@ const frames = {
   frameFor: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'c'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
   enrolmentFrame: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'd'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
   previewHtml: async () => '<html><body>preview</body></html>',
+  renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
 } as unknown as FrameService;
 
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
@@ -220,5 +221,29 @@ test('serves the config UI and its fonts', async () => {
 
     const font = await fetch(`${base}/vendor/fonts/dela-gothic-one-latin-400-normal.woff2`);
     assert.equal(font.status, 200, 'served from @fontsource, not a committed TTF');
+  });
+});
+
+test('push renders and reports when the panel will collect it', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    await store.update('esp32-1', {
+      claimed: true,
+      lastSeenAt: new Date(Date.now() - 60_000).toISOString(),
+      lastWakeSeconds: 900,
+    });
+
+    const res = await fetch(`${base}/api/devices/esp32-1/push`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { etag: string; willAppearBy: string | null };
+    assert.match(body.etag, /^[0-9a-f]{32}$/);
+    assert.ok(body.willAppearBy, 'a recently seen device has a predicted next wake');
+  });
+});
+
+test('push 404s for an unknown device', async () => {
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/devices/ghost/push`, { method: 'POST' });
+    assert.equal(res.status, 404);
   });
 });
