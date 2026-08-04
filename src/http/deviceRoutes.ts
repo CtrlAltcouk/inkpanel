@@ -31,14 +31,17 @@ export function deviceRoutes(
     const device = await store.getOrCreate(id);
     const batteryVolts = parseVolts(req.get('x-battery-voltage'));
 
-    // Record telemetry before rendering, so a render failure still logs the visit.
+    const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });
+
+    // Record telemetry before rendering, so a render failure still logs the
+    // visit. lastWakeSeconds is stored alongside so Push can say when the panel
+    // will next collect a frame.
     await store.update(id, {
       lastSeenAt: new Date().toISOString(),
       lastBatteryVolts: batteryVolts ?? device.lastBatteryVolts,
       lastFirmwareVersion: req.get('x-firmware-version') ?? device.lastFirmwareVersion,
+      lastWakeSeconds: wake,
     });
-
-    const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });
     res.set('X-Next-Wake-Seconds', String(wake));
     res.set('Cache-Control', 'no-store');
 

@@ -13,6 +13,7 @@ const patchSchema = z
     timezone: z.string().min(1).optional(),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
+    locationLabel: z.string().max(120).optional(),
     calendarUrls: z.array(z.string().url()).max(10).optional(),
     panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),

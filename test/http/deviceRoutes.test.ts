@@ -148,3 +148,13 @@ test('returns 503 with a retry interval when rendering fails', async () => {
     assert.ok(Number(res.headers.get('x-next-wake-seconds')) > 0, 'device still needs a schedule');
   }, failing);
 });
+
+test('records the wake interval it handed out', async () => {
+  await withServer(async (base, store) => {
+    await claim(store, 'esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1/frame`);
+    const handed = Number(res.headers.get('x-next-wake-seconds'));
+    assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
+      'what we told the device must match what we remember telling it');
+  });
+});
