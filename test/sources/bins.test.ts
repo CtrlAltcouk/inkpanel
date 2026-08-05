@@ -55,8 +55,20 @@ test('a later collection is only surfaced once the nearer one has passed', () =>
 });
 
 test('a collection scheduled for today counts as next, not as past', () => {
-  const data = mapBins(REAL_RESPONSE, new Date('2026-08-07T23:00:00.000Z'));
+  // 20:00 UTC on 2026-08-07 is 21:00 BST — still 7 August in the UK, the same
+  // calendar day as the collection itself.
+  const data = mapBins(REAL_RESPONSE, new Date('2026-08-07T20:00:00.000Z'));
   assert.equal(data.next!.date, '2026-08-07');
+});
+
+test('the cutoff follows the UK calendar day, not the UTC one', () => {
+  // 2026-08-07T23:30:00.000Z is 2026-08-08 00:30 BST: past UK midnight, so
+  // the three 2026-08-07 rounds have already happened locally and only the
+  // 2026-08-14 round remains. A UTC-based cutoff (`toISOString().slice(0, 10)`
+  // still reads '2026-08-07' at this instant) would wrongly keep them.
+  const data = mapBins(REAL_RESPONSE, new Date('2026-08-07T23:30:00.000Z'));
+  assert.equal(data.next!.date, '2026-08-14');
+  assert.deepEqual(data.next!.types, ['recycling']);
 });
 
 test('keeps the original labels so the panel can print what the council said', () => {
@@ -78,4 +90,43 @@ test('a malformed response throws rather than reporting no bins', () => {
   // "The API changed" and "you have no collections" must not look identical.
   assert.throws(() => mapBins({ nonsense: true }, BEFORE_ALL), /malformed/i);
   assert.throws(() => mapBins(null, BEFORE_ALL), /malformed/i);
+});
+
+test('a response missing rows_data still throws rather than reporting no bins', () => {
+  // Structural damage (the field the mapper depends on is gone) is not the
+  // same case as one round having a bad date — that must still be an error.
+  assert.throws(() => mapBins({ integration: { transformed: {} } }, BEFORE_ALL), /malformed/i);
+});
+
+test('a row with an unusable NextInstance (e.g. a suspended round reporting null) is dropped, not treated as malformed', () => {
+  const oneRowSuspended = {
+    integration: {
+      transformed: {
+        rows_data: {
+          '0': { TaskTypeName: 'Collect Recycling Red', NextInstance: '2026-08-14' },
+          '1': { TaskTypeName: 'Collect Refuse', NextInstance: null },
+        },
+      },
+    },
+  };
+  const data = mapBins(oneRowSuspended, BEFORE_ALL);
+  assert.ok(data.next, 'the still-valid row is surfaced despite the bad one');
+  assert.equal(data.next!.date, '2026-08-14');
+  assert.deepEqual(data.next!.types, ['recycling']);
+});
+
+test('a response where every row has an unusable NextInstance returns no collection, not a throw', () => {
+  const everyRowSuspended = {
+    integration: {
+      transformed: {
+        rows_data: {
+          '0': { TaskTypeName: 'Collect Recycling Red', NextInstance: null },
+          '1': { TaskTypeName: 'Collect Refuse', NextInstance: null },
+        },
+      },
+    },
+  };
+  const data = mapBins(everyRowSuspended, BEFORE_ALL);
+  assert.equal(data.next, null);
+  assert.deepEqual(data.rawLabels, []);
 });

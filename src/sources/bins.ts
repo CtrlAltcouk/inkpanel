@@ -42,8 +42,29 @@ const LOOKUP_URL = 'https://mycouncil.milton-keynes.gov.uk/apibroker/runLookup';
 // liable to change without notice — the first thing to check when bins break.
 const FORM_ID = '64d9feda3a507';
 
-function isoDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
+/**
+ * The calendar date "today" falls on in the UK, as YYYY-MM-DD.
+ *
+ * `toISOString().slice(0, 10)` would give the UTC calendar day instead, which
+ * during BST is wrong for the hour between UK-local midnight and 01:00 (the
+ * UTC clock still reads the previous day). Milton Keynes bin collections are
+ * a Europe/London concept, not a UTC one, so the cutoff has to be computed in
+ * that zone — the same approach `localDateKey` in ical.ts uses, via
+ * `Intl.DateTimeFormat` rather than the Date object's UTC getters.
+ *
+ * Europe/London is hardcoded rather than threaded through as config: this
+ * source only ever talks to Milton Keynes council, so there is no timezone
+ * for a caller to supply.
+ */
+function londonDateKey(instant: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -59,7 +80,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  */
 const rowSchema = z.object({
   TaskTypeName: z.string(),
-  NextInstance: z.string(),
+  NextInstance: z.unknown(),
 });
 
 const responseSchema = z.object({
@@ -77,16 +98,19 @@ function extractRows(raw: unknown): { date: string; label: string }[] {
   }
 
   return Object.values(parsed.data.integration.transformed.rows_data)
-    // A round with no usable date (e.g. suspended) is dropped rather than
-    // treated as an error: the other rounds are still valid.
-    .filter((row) => ISO_DATE.test(row.NextInstance))
+    // A round with no usable date (e.g. suspended, or the council sending
+    // NextInstance: null) is dropped rather than treated as an error: the
+    // other rounds are still valid.
+    .filter((row): row is { TaskTypeName: string; NextInstance: string } =>
+      typeof row.NextInstance === 'string' && ISO_DATE.test(row.NextInstance),
+    )
     .map((row) => ({ date: row.NextInstance, label: row.TaskTypeName }));
 }
 
 export function mapBins(raw: unknown, today: Date): BinsData {
   const rows = extractRows(raw);
 
-  const cutoff = isoDate(today);
+  const cutoff = londonDateKey(today);
   const upcoming = rows.filter((r) => r.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
   if (upcoming.length === 0) return { next: null, rawLabels: [] };
 
