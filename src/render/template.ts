@@ -116,7 +116,7 @@ function departureRow(departure: TrainDeparture): string {
 
 function trainLabel(data: DashboardData): string {
   if (!data.train) return 'Trains';
-  return `${esc(data.train.originName)} &rarr; ${esc(data.train.destinationName)}`;
+  return `${esc(data.train.originCrs)} &rarr; ${esc(data.train.destinationName)}`;
 }
 
 function trainCell(data: DashboardData): string {

@@ -145,7 +145,7 @@ test('renders departures with times, statuses and platforms', () => {
   withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
 
   const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /MILTON KEYNES CENTRAL|Milton Keynes Central/i, 'the route is the heading');
+  assert.match(html, /MKC/, 'the route is the heading, using the short CRS code for the origin');
   assert.match(html, /London Euston/i);
   assert.match(html, /07:42/);
   assert.match(html, /On time/);
@@ -173,6 +173,42 @@ test('a cancelled service says so and shows no platform', () => {
   assert.match(html, /Cancelled/);
   // A platform for a train that is not running would send someone to it.
   assert.doesNotMatch(html, /Plat\s*&mdash;|Plat\s*—/);
+});
+
+test('a cancelled service with a platform still shows no platform', () => {
+  // buildDepartures deliberately passes the raw platform through for
+  // cancelled services; the render layer is where the omission belongs.
+  // The mixedBoard fixture's cancelled entry already has platform: null,
+  // which would let this guard be deleted without any test noticing.
+  const withTrains = structuredClone(data);
+  withTrains.train = {
+    ...structuredClone(mixedBoard),
+    departures: [
+      { scheduled: '08:19', expected: null, status: 'cancelled', delayMinutes: null, platform: '2' },
+    ],
+  };
+  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
+
+  const html = renderHtml(withTrains, WFT0583, '');
+  assert.match(html, /Cancelled/);
+  assert.doesNotMatch(html, /Plat/, 'a platform must never be printed for a cancelled service');
+});
+
+test('a delay of unknown length shows "Delayed" with no minute count', () => {
+  const withTrains = structuredClone(data);
+  withTrains.train = {
+    ...structuredClone(mixedBoard),
+    departures: [
+      { scheduled: '08:19', expected: null, status: 'delayed', delayMinutes: null, platform: '2' },
+    ],
+  };
+  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
+
+  const html = renderHtml(withTrains, WFT0583, '');
+  assert.match(html, /Delayed/);
+  // \b avoids a false match inside the embedded stylesheet's "grid-template".
+  assert.doesNotMatch(html, /\blate\b/, 'no minute count when the length is unknown');
+  assert.doesNotMatch(html, /null/, 'must never leak the literal null');
 });
 
 test('no departures is different from trains unavailable', () => {
