@@ -17,6 +17,10 @@ test('an unknown CRS is null, not a throw', () => {
   assert.equal(findStation('ZZZ'), null);
   assert.equal(findStation(''), null);
   assert.equal(findStation('TOOLONG'), null);
+  // Express hands a repeated query param through as an array.
+  assert.equal(findStation(['MKC'] as unknown as string), null);
+  assert.equal(findStation(null as unknown as string), null);
+  assert.deepEqual(searchStations(['milton'] as unknown as string), []);
 });
 
 test('searches by name fragment', () => {
@@ -26,8 +30,10 @@ test('searches by name fragment', () => {
 });
 
 test('searches by CRS too, so typing a known code finds it', () => {
-  const hits = searchStations('EUS');
-  assert.equal(hits[0]?.crs, 'EUS', 'an exact CRS match sorts first');
+  // 'AIN' competes with Acton Main Line and Ainsdale, both of which sort
+  // earlier alphabetically — so this fails if the exact-CRS-first sort goes.
+  const hits = searchStations('AIN');
+  assert.equal(hits[0]?.crs, 'AIN', 'an exact CRS match sorts first, ahead of "Acton Main Line"');
 });
 
 test('caps results so the picker never renders hundreds of rows', () => {

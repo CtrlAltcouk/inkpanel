@@ -24,7 +24,7 @@ export function stationCount(): number {
 }
 
 export function findStation(crs: string): Station | null {
-  if (!/^[A-Za-z]{3}$/.test(crs)) return null;
+  if (typeof crs !== 'string' || !/^[A-Za-z]{3}$/.test(crs)) return null;
   return byCrs.get(crs.toUpperCase()) ?? null;
 }
 
@@ -35,6 +35,7 @@ const DEFAULT_LIMIT = 8;
  * code you already know lands on it rather than burying it under name matches.
  */
 export function searchStations(query: string, limit = DEFAULT_LIMIT): Station[] {
+  if (typeof query !== 'string') return [];
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) return [];
 
