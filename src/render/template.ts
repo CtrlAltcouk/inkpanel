@@ -131,6 +131,38 @@ function trainCell(data: DashboardData): string {
   return data.train.departures.map(departureRow).join('');
 }
 
+const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
+};
+
+function binsCell(data: DashboardData): string {
+  const health = data.sourceHealth.find((s) => s.id === 'bins');
+
+  // Not configured and broken are different things and must read differently.
+  if (!health) return emptySlot('Bins — not set up');
+  if (!data.bins) return emptySlot('Bins unavailable');
+  if (!data.bins.next) return emptySlot('No collection scheduled');
+
+  const when = new Intl.DateTimeFormat('en-GB', BIN_DATE_FORMAT)
+    .format(new Date(`${data.bins.next.date}T12:00:00.000Z`))
+    .toUpperCase();
+
+  // Pair each council label with a swatch, falling back to the collection's
+  // own types when labels and types disagree in length.
+  const rows = data.bins.rawLabels.length > 0
+    ? data.bins.rawLabels.map((label, i) => ({
+        label,
+        type: data.bins!.next!.types[i] ?? data.bins!.next!.types[0] ?? 'general',
+      }))
+    : data.bins.next.types.map((type) => ({ label: type, type }));
+
+  const list = rows
+    .map((r) => `<div class="bin-row"><span class="bin-swatch bin--${esc(r.type)}"></span><span>${esc(r.label)}</span></div>`)
+    .join('');
+
+  return `<div class="bin-date disp">${esc(when)}</div>${list}`;
+}
+
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
   const battery = data.battery.percent === null ? 'Battery --' : `Battery ${data.battery.percent}%`;
   const changed = hhmm(data.contentChangedAt, data.timezone);
@@ -152,7 +184,10 @@ ${banner(data)}
     <div class="label">${trainLabel(data)}${staleBadge(data, 'train')}</div>
     ${trainCell(data)}
   </div>
-  <div class="cell cell--br">${emptySlot('Bins & tasks — coming soon')}</div>
+  <div class="cell cell--br">
+    <div class="label">Bins${staleBadge(data, 'bins')}</div>
+    ${binsCell(data)}
+  </div>
 </div>
 <div class="footer"><span class="tnum">Updated ${esc(changed)}</span><span>${esc(battery)}</span></div>
 </body></html>`;

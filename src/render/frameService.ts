@@ -137,6 +137,9 @@ export class FrameService {
       // No transport yet — Task 7 wires a fetcher into SourceBundle and this
       // becomes `bundle.train`.
       train: null,
+      // No bins yet — a later task wires binsSource into SourceBundle and
+      // this becomes `bundle.bins`.
+      bins: null,
       sourceHealth: bundle.sourceHealth,
       battery: { volts: batteryVolts, percent: batteryPercent(batteryVolts) },
     };

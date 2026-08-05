@@ -23,6 +23,7 @@ function sample(overrides: Partial<DashboardData> = {}): DashboardData {
     sourceHealth: [{ id: 'ical', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null }],
     battery: { volts: 4.02, percent: 87 },
     train: null,
+    bins: null,
     ...overrides,
   };
 }
@@ -102,4 +103,12 @@ test('changes when a departure is delayed', () => {
   // This is exactly why §4 of the spec accepts more frequent refreshes: live
   // times are drawn on the panel, so they must be part of the hash.
   assert.notEqual(contentHash(onTime), contentHash(sample({ train: delayed })));
+});
+
+test('changes when the bin collection changes', () => {
+  const a = contentHash(sample());
+  const b = contentHash(sample({
+    bins: { next: { date: '2026-08-13', types: ['general'] }, rawLabels: ['Refuse'] },
+  }));
+  assert.notEqual(a, b, 'the collection date is drawn on the panel');
 });

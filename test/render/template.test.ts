@@ -34,6 +34,7 @@ const data: DashboardData = {
   ],
   battery: { volts: 4.02, percent: 87 },
   train: null,
+  bins: null,
 };
 
 test('renders the event and the temperature', () => {
@@ -119,8 +120,13 @@ test('the stylesheet contains no greys', () => {
 });
 
 test('escapes captions exactly once', () => {
-  const html = renderHtml(data, WFT0583, '');
-  assert.match(html, /Bins &amp; tasks/, 'ampersand is escaped for HTML');
+  // Was: the bottom-right "Bins & tasks — coming soon" placeholder, which
+  // this task's bins render replaces. An event title now supplies the "&"
+  // instead, exercising the same esc() path.
+  const withAmpersand = structuredClone(data);
+  withAmpersand.calendar!.today[0]!.title = 'Tea & Toast';
+  const html = renderHtml(withAmpersand, WFT0583, '');
+  assert.match(html, /Tea &amp; Toast/, 'ampersand is escaped for HTML');
   assert.doesNotMatch(html, /&amp;amp;/, 'but not double-escaped, which renders literally');
 });
 
@@ -240,4 +246,65 @@ test('a single departure renders — late at night that is the whole board', () 
   };
   late.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T23:00:00.000Z', error: null }];
   assert.match(renderHtml(late, WFT0583, ''), /23:47/);
+});
+
+test('renders the next bin collection with its types', () => {
+  const withBins = structuredClone(data);
+  withBins.bins = {
+    // Real Milton Keynes wording (test/fixtures/bins.ts), not invented copy.
+    next: { date: '2026-08-06', types: ['recycling', 'food'] },
+    rawLabels: ['Collect Recycling Red', 'Collect Food and Garden'],
+  };
+  withBins.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
+
+  const html = renderHtml(withBins, WFT0583, '');
+  // 2026-08-06 is a Thursday, not the Wednesday the brief's draft assumed.
+  assert.match(html, /THU 6 AUG/i, 'the date is the headline');
+  assert.match(html, /Collect Recycling Red/, 'the council wording is shown, not our normalised type');
+  assert.match(html, /Collect Food and Garden/);
+  // Match the swatch markup itself, not merely the class name — the
+  // stylesheet defines .bin--recycling and .bin--food unconditionally on
+  // every render, so a bare /bin--recycling/ would pass even if every row
+  // used the same swatch.
+  assert.match(html, /class="bin-swatch bin--recycling"/, 'each type gets its own swatch class');
+  assert.match(html, /class="bin-swatch bin--food"/);
+});
+
+test('bins with no upcoming collection says so rather than looking broken', () => {
+  const quiet = structuredClone(data);
+  quiet.bins = { next: null, rawLabels: [] };
+  quiet.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
+
+  const html = renderHtml(quiet, WFT0583, '');
+  assert.match(html, /No collection scheduled/);
+  assert.doesNotMatch(html, /Bins unavailable/, 'a successful fetch is not a failure');
+});
+
+test('bins unavailable is distinct from bins not set up', () => {
+  const failed = structuredClone(data);
+  failed.bins = null;
+  failed.sourceHealth = [{ id: 'bins', status: 'error', fetchedAt: null, error: 'lookup responded 500' }];
+  assert.match(renderHtml(failed, WFT0583, ''), /Bins unavailable/);
+
+  const unset = structuredClone(data);
+  unset.bins = null;
+  unset.sourceHealth = [];
+  assert.match(renderHtml(unset, WFT0583, ''), /Bins &mdash; not set up|Bins — not set up/);
+});
+
+test('a stale bin collection is shown with its age, not hidden', () => {
+  const stale = structuredClone(data);
+  stale.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['Collect Refuse'] };
+  stale.sourceHealth = [{ id: 'bins', status: 'stale', fetchedAt: '2026-08-04T03:10:00.000Z', error: 'timeout' }];
+
+  const html = renderHtml(stale, WFT0583, '');
+  assert.match(html, /Collect Refuse/, 'stale data is still useful');
+  assert.match(html, /04:10/, 'but its age is shown');
+});
+
+test('an unrecognised bin label still renders', () => {
+  const odd = structuredClone(data);
+  odd.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['Some New Scheme 2027'] };
+  odd.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
+  assert.match(renderHtml(odd, WFT0583, ''), /Some New Scheme 2027/);
 });

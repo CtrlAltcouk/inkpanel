@@ -43,6 +43,7 @@ const FIXTURE: DashboardData = {
   ],
   battery: { volts: 4.02, percent: 87 },
   train: null,
+  bins: null,
 };
 
 test('dashboard layout matches the golden buffer', async (t) => {

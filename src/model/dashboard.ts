@@ -1,4 +1,5 @@
 import type { TrainData } from '../sources/train.ts';
+import type { BinsData } from '../sources/bins.ts';
 
 export interface CalendarEvent {
   uid: string;
@@ -67,9 +68,11 @@ export interface DashboardData {
   today: TodayInfo;
   calendar: CalendarData | null;
   weather: WeatherData | null;
+  bins: BinsData | null;
   train: TrainData | null;
   sourceHealth: SourceHealth[];
   battery: BatteryInfo;
 }
 
 export type { TrainData, TrainDeparture, DepartureStatus } from '../sources/train.ts';
+export type { BinsData, BinCollection, BinType } from '../sources/bins.ts';

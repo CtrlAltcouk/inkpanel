@@ -57,6 +57,18 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 }
 .slot--empty span{background:#fff;padding:4px 10px;border:1px solid #000;}
 
+.bin-date{font-size:30px;line-height:1;margin-bottom:8px;}
+.bin-row{display:flex;align-items:center;gap:9px;font-size:15px;margin-bottom:6px;}
+.bin-swatch{width:13px;height:13px;border:2px solid #000;flex:none;}
+
+/* Bin types are told apart by pattern, not colour — the panel has no colour.
+   Each pattern is built only from pure black and white so thresholding is
+   exact rather than a judgement call. */
+.bin--general{background:#000;}
+.bin--recycling{background:linear-gradient(90deg,#000 0 50%,#fff 50% 100%);}
+.bin--food{background-image:radial-gradient(#000 40%,#fff 40%);background-size:4px 4px;}
+.bin--garden{background-image:repeating-linear-gradient(45deg,#000 0 2px,#fff 2px 5px);}
+
 .footer{height:34px;border-top:2px solid #000;padding:9px 26px;display:flex;justify-content:space-between;
   font-size:11px;letter-spacing:0.08em;text-transform:uppercase;}
 `.trim();

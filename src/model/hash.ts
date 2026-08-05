@@ -15,6 +15,7 @@ export function contentHash(data: DashboardData): string {
     today: data.today,
     calendar: data.calendar,
     weather: data.weather,
+    bins: data.bins,
     train: data.train,
     sourceHealth: data.sourceHealth.map((s) => ({
       id: s.id,
