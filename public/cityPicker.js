@@ -96,9 +96,22 @@ export function renderCityPicker(container, device) {
     timer = setTimeout(() => void search(query), DEBOUNCE_MS);
   });
 
+  // A click is a mousedown followed by a mouseup, and the mousedown moves
+  // focus off the input — which starts the blur timer below. Measured: the
+  // list hid 157ms after mousedown and the option stopped being hit-testable,
+  // so the mouseup landed on <body> and no click event was ever generated.
+  // Choosing a city did nothing at all, because selecting from a list means
+  // pausing to read it, and any deliberate click outlasts that window.
+  //
+  // preventDefault here stops focus moving in the first place, so blur never
+  // fires and the list cannot vanish mid-click. Keyboard use is unaffected —
+  // Enter on a focused option still fires click normally.
+  results.addEventListener('mousedown', (event) => event.preventDefault());
+
   input.addEventListener('blur', () => {
-    // Delay so a click on an option registers before the list disappears.
-    setTimeout(() => { results.hidden = true; }, 150);
+    // Genuine blur — the user moved on without choosing. Hide immediately;
+    // a click on an option can no longer race this, per the handler above.
+    results.hidden = true;
   });
 
   // Seed latitude/longitude immediately so a save that never touches the
