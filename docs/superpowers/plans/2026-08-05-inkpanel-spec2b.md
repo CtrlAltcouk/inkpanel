@@ -1834,38 +1834,179 @@ If the capture fails with 401/403 the subscription has not activated yet; wait
 and retry rather than working around it. **Do not invent a fixture** — the whole
 point of this step is that the mapper meets real data.
 
-- [ ] **Step 2: Add the API key to configuration**
+- [ ] **Step 2: Store the API key as an editable setting, not a hard-coded one**
 
-The key is a server-wide credential, not a per-device setting — the spec's §6
-lists only the three device fields and does not mention it, which is a gap this
-step closes. It belongs with the other secrets, never in the repo.
+The key is a **server-wide** credential, not a per-device one — the spec's §6
+lists only the three device fields. It is editable from the Settings tab so that
+someone running this from the LXC installer never has to edit a file or restart
+a service to change it.
 
-In `src/index.ts`, beside the existing env reads:
+**The honest trade-off**, which `docs/configuration.md` must state plainly: the
+key is stored in clear text in `/data/config.json`, exactly as the Google secret
+calendar URLs already are. That is consistent with the project's existing
+posture and with its standing instruction not to expose this server to the
+internet. It is not encryption, and nothing here pretends it is.
+
+**2a — extend the store.** `StoreFile` is currently `{ devices: DeviceRecord[] }`.
+In `src/devices/types.ts`:
 
 ```ts
-  const trainApiKey = process.env.TRAIN_API_KEY?.trim() || '';
+/** Server-wide settings, distinct from per-device configuration. */
+export interface ServerSettings {
+  /** Rail Data Marketplace key. Empty disables departures for every panel. */
+  trainApiKey: string;
+}
+
+export function defaultSettings(): ServerSettings {
+  return { trainApiKey: '' };
+}
 ```
 
-and pass it into the frame service:
+In `src/devices/store.ts`, add `settings?: ServerSettings` to `StoreFile` and
+default it in `read()` beside the existing `devices` guard — an existing
+`config.json` written before this change has no `settings` key and must still
+load:
+
+```ts
+      return {
+        devices: Array.isArray(parsed.devices) ? parsed.devices : [],
+        settings: { ...defaultSettings(), ...(parsed.settings ?? {}) },
+      };
+```
+
+Then two methods, using the existing `mutate` queue so a settings write cannot
+interleave with a device write:
+
+```ts
+  async getSettings(): Promise<ServerSettings> {
+    return (await this.read()).settings ?? defaultSettings();
+  }
+
+  async updateSettings(patch: Partial<ServerSettings>): Promise<ServerSettings> {
+    return this.mutate((file) => {
+      file.settings = { ...defaultSettings(), ...file.settings, ...patch };
+      return file.settings;
+    });
+  }
+```
+
+**2b — expose it without ever echoing it back.** In `src/http/systemRoutes.ts`,
+beside the existing settings-tab routes:
+
+```ts
+  // The key is never sent to the browser — only whether one is set. A field
+  // that renders the secret back leaks it to anything that can read the page,
+  // and the UI does not need the value to let someone replace it.
+  router.get('/settings', async (_req, res) => {
+    const settings = await deps.store.getSettings();
+    res.json({ trainApiKeySet: settings.trainApiKey.length > 0 });
+  });
+
+  router.put('/settings', async (req, res) => {
+    const parsed = z
+      .object({ trainApiKey: z.string().max(200).optional() })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid settings' });
+      return;
+    }
+    // An omitted field leaves the stored key alone; an explicit empty string
+    // clears it. Without that distinction, saving any other setting would wipe
+    // the key every time the form round-trips.
+    const settings = await deps.store.updateSettings(parsed.data);
+    res.json({ trainApiKeySet: settings.trainApiKey.length > 0 });
+  });
+```
+
+These routes sit behind the session middleware with the rest of the management
+API. **Do not add them to the auth exemption list** — that list exists only for
+`GET /devices/:id/frame` and `/health`, which firmware cannot authenticate.
+
+**2c — read it at fetch time, not at construction.** In
+`src/render/frameService.ts`, `FrameDeps` takes a getter rather than a string,
+so saving a new key takes effect on the next render instead of the next restart:
+
+```ts
+  /** Resolves the Rail Data Marketplace key. Empty disables departures. */
+  trainApiKey?: () => Promise<string>;
+```
+
+In `src/index.ts`, wire it to the store, with the environment as a fallback so
+existing `.env` and Docker setups keep working:
 
 ```ts
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
-    trainApiKey,
+    // The stored setting wins; TRAIN_API_KEY remains a fallback for people who
+    // would rather keep secrets in the environment than in a JSON file.
+    trainApiKey: async () =>
+      (await store.getSettings()).trainApiKey || (process.env.TRAIN_API_KEY?.trim() ?? ''),
   });
 ```
 
-In `src/render/frameService.ts`, add to `FrameDeps`:
+**2d — the field itself.** In the Settings tab's browser module, add a Trains
+section:
 
-```ts
-  /** Rail Data Marketplace key. Empty disables departures server-wide. */
-  trainApiKey?: string;
+```js
+      <h3>Trains</h3>
+      <label for="train-api-key">Rail Data Marketplace API key</label>
+      <input id="train-api-key" name="trainApiKey" type="password" autocomplete="off"
+             placeholder="${state.trainApiKeySet ? 'Saved — type to replace' : 'Not set'}">
+      <p class="meta">Free from <a href="https://raildata.org.uk" target="_blank" rel="noreferrer">raildata.org.uk</a>
+        — subscribe to "Live Departure Board Web Service (LDBWS) — Public".
+        Stored in plain text in your data directory. Leave blank to keep the
+        current key; use Clear to remove it.</p>
 ```
 
-Document `TRAIN_API_KEY` in `docs/configuration.md` alongside
-`INKPANEL_PASSWORD`, noting that without it the trains quadrant stays in its
-not-configured state.
+On save, **omit the field entirely when the input is blank** so an untouched
+form does not wipe a stored key, and send an explicit `""` only from the Clear
+button.
+
+- [ ] **Step 2e: Test the settings round trip**
+
+```ts
+test('a stored key is reported as set but never sent to the browser', async () => {
+  await withServer(async (base, store) => {
+    await store.updateSettings({ trainApiKey: 'secret-value' });
+    const res = await fetch(`${base}/api/settings`);
+    const body = await res.text();
+    assert.match(body, /"trainApiKeySet":true/);
+    assert.doesNotMatch(body, /secret-value/, 'the key must never reach the page');
+  });
+});
+
+test('omitting the key leaves it alone; an empty string clears it', async () => {
+  await withServer(async (base, store) => {
+    await store.updateSettings({ trainApiKey: 'keep-me' });
+
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal((await store.getSettings()).trainApiKey, 'keep-me', 'an untouched form must not wipe the key');
+
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trainApiKey: '' }),
+    });
+    assert.equal((await store.getSettings()).trainApiKey, '');
+  });
+});
+
+test('a config.json written before settings existed still loads', async () => {
+  // Existing installs upgrade in place; a missing settings key must not throw.
+  await withStore(async (store) => {
+    assert.equal((await store.getSettings()).trainApiKey, '');
+  });
+});
+```
+
+Document all of this in `docs/configuration.md`: where the key is stored, that
+`TRAIN_API_KEY` still works as a fallback, and that without a key the trains
+quadrant stays in its not-configured state rather than showing an error.
 
 - [ ] **Step 3: Write the failing mapper test**
 
@@ -2000,8 +2141,13 @@ Add `train: TrainData | null;` to `SourceBundle`, then in `fetchAll`:
     // Trains need an origin, a destination and a server key. Any one missing
     // means the feature is not configured, which contributes no health entry
     // and leaves the quadrant reading "Trains — not set up".
+    //
+    // Resolve the key here rather than reading a value captured at construction,
+    // so saving one in the Settings tab takes effect on the next render instead
+    // of the next restart. `Boolean(fn)` would always be true — the call matters.
+    const trainApiKey = this.deps.trainApiKey ? await this.deps.trainApiKey() : '';
     const trainReady = Boolean(
-      device.trainOriginCrs && device.trainDestinationCrs && this.deps.trainApiKey,
+      device.trainOriginCrs && device.trainDestinationCrs && trainApiKey,
     );
 
     const [calendar, weather, bins, train] = await Promise.all([
@@ -2016,7 +2162,7 @@ Add `train: TrainData | null;` to `SourceBundle`, then in `fetchAll`:
             {
               originCrs: device.trainOriginCrs,
               destinationCrs: device.trainDestinationCrs,
-              apiKey: this.deps.trainApiKey!,
+              apiKey: trainApiKey,
             },
             this.deps.cache,
             SOURCE_TIMEOUT_MS,
@@ -2105,13 +2251,25 @@ call.
 - [ ] **Step 8: Verify against the real API**
 
 ```bash
-TRAIN_API_KEY=<your key> npm start
+npm start
 ```
 
-Set a route of `MKC` → `EUS`, save, and check the preview shows real departure
-times that match [nationalrail.co.uk](https://www.nationalrail.co.uk). Then stop
-the server, restart it **without** `TRAIN_API_KEY`, and confirm the quadrant
-reads "Trains — not set up" rather than "Trains unavailable".
+Paste the key into the **Settings tab** — not the environment; the point of
+Step 2 is that this works without touching a file. Save it, then set a route of
+`MKC` → `EUS` on a panel and check the preview shows real departure times
+matching [nationalrail.co.uk](https://www.nationalrail.co.uk).
+
+Then three checks that the storage actually behaves:
+
+1. **Reload the Settings tab.** The key field must show "Saved — type to
+   replace" and must **not** contain the key. Confirm with View Source, not by
+   eye — a `type="password"` input hides its value on screen while still
+   carrying it in the markup.
+2. **Save some other setting without touching the key field.** Departures must
+   keep working. If they stop, a blank input is wiping the stored key.
+3. **Clear the key.** The quadrant must read "Trains — not set up", not "Trains
+   unavailable" — nothing configured is not the same as something broken. This
+   must take effect on the next render **without restarting the server**.
 
 - [ ] **Step 9: Commit**
 
