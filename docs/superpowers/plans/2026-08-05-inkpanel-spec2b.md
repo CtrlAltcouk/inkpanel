@@ -27,7 +27,7 @@
 ## File Structure
 
 ```
-data/stations.json           ~2,500 CRS codes, committed, generated once
+src/sources/stations.json    ~2,500 CRS codes, committed, generated once
 scripts/build-stations.mjs   one-shot generator, kept for regeneration
 
 src/sources/stations.ts      CRS lookup and search, no network
@@ -52,7 +52,15 @@ test/fixtures/train.ts       TrainData fixtures for rendering
 ### Task 1: Bundled station list
 
 **Files:**
-- Create: `scripts/build-stations.mjs`, `data/stations.json`, `src/sources/stations.ts`, `test/sources/stations.test.ts`
+- Create: `scripts/build-stations.mjs`, `src/sources/stations.json`, `src/sources/stations.ts`, `test/sources/stations.test.ts`
+
+> **It must not go in `data/`.** `.gitignore` excludes both `/data/` and
+> `data/` — that directory is the runtime device registry and frame cache, and
+> `DATA_DIR` relocates it in the LXC install. A station list committed there
+> would be silently refused by `git add` and then be missing on every deploy.
+> It lives beside its only consumer instead, read relative to the module. There
+> is no build step (tsx runs the TypeScript directly), so nothing needs to copy
+> it.
 
 **Interfaces:**
 - Consumes: nothing
@@ -65,13 +73,16 @@ test/fixtures/train.ts       TrainData fixtures for rendering
 - [ ] **Step 1: Generate the station list**
 
 Create `scripts/build-stations.mjs`. It fetches a public CRS dataset, normalises
-it, and writes `data/stations.json`. Kept in the repo so the list can be
+it, and writes `src/sources/stations.json`. Kept in the repo so the list can be
 regenerated when stations change (roughly annually).
 
 ```js
 #!/usr/bin/env node
 /**
- * Build data/stations.json — the CRS list the station picker filters against.
+ * Build src/sources/stations.json — the CRS list the picker filters against.
+ *
+ * Not in data/ — that directory is gitignored runtime state (device registry,
+ * frame cache) and is relocated by DATA_DIR on a real install.
  *
  * Bundled rather than fetched at runtime: the picker then filters instantly,
  * works offline, and costs no API quota. Station codes change perhaps once a
@@ -108,8 +119,8 @@ if (stations.length < 2000 || stations.length > 4000) {
   throw new Error(`expected 2000-4000 stations, got ${stations.length}`);
 }
 
-await writeFile('data/stations.json', `${JSON.stringify(stations, null, 0)}\n`, 'utf8');
-console.log(`wrote data/stations.json: ${stations.length} stations`);
+await writeFile('src/sources/stations.json', `${JSON.stringify(stations, null, 0)}\n`, 'utf8');
+console.log(`wrote src/sources/stations.json: ${stations.length} stations`);
 console.log(`  MKC = ${byCrs.get('MKC').name}`);
 console.log(`  EUS = ${byCrs.get('EUS').name}`);
 ```
@@ -125,7 +136,9 @@ containing "Milton Keynes". **If the source URL is dead**, find any public list
 of CRS/name pairs and adapt the field mapping — the verification block is the
 contract, not the URL.
 
-Commit `data/stations.json`. It is data the product needs, not a build artefact.
+Commit `src/sources/stations.json`. It is data the product needs, not a build
+artefact. Confirm git will actually take it —
+`git check-ignore -v src/sources/stations.json` must print nothing.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -196,12 +209,14 @@ export interface Station {
   name: string;
 }
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Resolved relative to this module, not the working directory — the server is
+// started by systemd with an arbitrary cwd.
+const here = dirname(fileURLToPath(import.meta.url));
 
 // Read once at module load. The file is ~100KB and never changes at runtime,
 // so parsing it per request would be pure waste.
 const stations: Station[] = JSON.parse(
-  readFileSync(join(root, 'data', 'stations.json'), 'utf8'),
+  readFileSync(join(here, 'stations.json'), 'utf8'),
 ) as Station[];
 
 const byCrs = new Map(stations.map((s) => [s.crs, s]));
@@ -251,7 +266,7 @@ Expected: 7 station tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/build-stations.mjs data/stations.json src/sources/stations.ts test/sources/stations.test.ts
+git add scripts/build-stations.mjs src/sources/stations.json src/sources/stations.ts test/sources/stations.test.ts
 git commit -m "feat: bundle the CRS station list for the picker"
 ```
 
