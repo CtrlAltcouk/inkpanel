@@ -1,4 +1,4 @@
-import type { CalendarEvent, DashboardData } from '../model/dashboard.ts';
+import type { CalendarEvent, DashboardData, TrainDeparture } from '../model/dashboard.ts';
 import type { PanelProfile } from '../panel/profile.ts';
 import { panelCss } from './panel.css.ts';
 
@@ -85,6 +85,52 @@ function banner(data: DashboardData): string {
   </div>`;
 }
 
+function departureRow(departure: TrainDeparture): string {
+  // For a delay the revised time is the one to act on, so it takes the large
+  // slot and the original is struck through in the status beside it.
+  const headline = departure.status === 'delayed' && departure.expected
+    ? departure.expected
+    : departure.scheduled;
+
+  let status: string;
+  if (departure.status === 'cancelled') {
+    status = 'Cancelled';
+  } else if (departure.status === 'delayed') {
+    status = departure.expected
+      ? `<span class="dep-was">${esc(departure.scheduled)}</span> ${departure.delayMinutes} late`
+      : 'Delayed';
+  } else {
+    status = 'On time';
+  }
+
+  const timeClass = departure.status === 'cancelled' ? 'dep-time dep-was' : 'dep-time';
+
+  // No platform for a cancelled service — printing one sends someone to it.
+  // An absent platform omits the column rather than rendering an empty one.
+  const platform = departure.status !== 'cancelled' && departure.platform
+    ? `<span class="dep-platform">Plat ${esc(departure.platform)}</span>`
+    : '';
+
+  return `<div class="dep"><span class="${timeClass}">${esc(headline)}</span><span class="dep-status">${status}</span>${platform}</div>`;
+}
+
+function trainLabel(data: DashboardData): string {
+  if (!data.train) return 'Trains';
+  return `${esc(data.train.originName)} &rarr; ${esc(data.train.destinationName)}`;
+}
+
+function trainCell(data: DashboardData): string {
+  const health = data.sourceHealth.find((s) => s.id === 'train');
+
+  if (!health) return emptySlot('Trains — not set up');
+  if (!data.train) return emptySlot('Trains unavailable');
+  // A successful fetch that found nothing is not a failure. It happens every
+  // night, and "No departures" is the true answer.
+  if (data.train.departures.length === 0) return emptySlot('No departures');
+
+  return data.train.departures.map(departureRow).join('');
+}
+
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
   const battery = data.battery.percent === null ? 'Battery --' : `Battery ${data.battery.percent}%`;
   const changed = hhmm(data.contentChangedAt, data.timezone);
@@ -102,7 +148,10 @@ ${banner(data)}
     <div class="label">Next 3 days${staleBadge(data, 'weather')}</div>
     ${forecastCell(data)}
   </div>
-  <div class="cell cell--bl">${emptySlot('Transport — coming soon')}</div>
+  <div class="cell cell--bl">
+    <div class="label">${trainLabel(data)}${staleBadge(data, 'train')}</div>
+    ${trainCell(data)}
+  </div>
   <div class="cell cell--br">${emptySlot('Bins & tasks — coming soon')}</div>
 </div>
 <div class="footer"><span class="tnum">Updated ${esc(changed)}</span><span>${esc(battery)}</span></div>

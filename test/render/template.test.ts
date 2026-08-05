@@ -5,6 +5,7 @@ import { panelCss } from '../../src/render/panel.css.ts';
 import { loadFontCss } from '../../src/render/fonts.ts';
 import { WFT0583 } from '../../src/panel/profile.ts';
 import type { DashboardData } from '../../src/model/dashboard.ts';
+import { mixedBoard } from '../fixtures/train.ts';
 
 const data: DashboardData = {
   generatedAt: '2026-08-03T07:42:00.000Z',
@@ -32,6 +33,7 @@ const data: DashboardData = {
     { id: 'weather', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null },
   ],
   battery: { volts: 4.02, percent: 87 },
+  train: null,
 };
 
 test('renders the event and the temperature', () => {
@@ -135,4 +137,71 @@ test('loads all four faces as embedded woff2, not latin-ext', async () => {
   assert.match(css, /font-family:"Dela Gothic One"/);
   assert.match(css, /font-family:"Inter"/);
   assert.doesNotMatch(css, /url\(\.|https?:/, 'no external or relative references may survive');
+});
+
+test('renders departures with times, statuses and platforms', () => {
+  const withTrains = structuredClone(data);
+  withTrains.train = structuredClone(mixedBoard);
+  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
+
+  const html = renderHtml(withTrains, WFT0583, '');
+  assert.match(html, /MILTON KEYNES CENTRAL|Milton Keynes Central/i, 'the route is the heading');
+  assert.match(html, /London Euston/i);
+  assert.match(html, /07:42/);
+  assert.match(html, /On time/);
+  assert.match(html, /Plat 3/);
+});
+
+test('a delayed service shows the new time large and the old struck through', () => {
+  const withTrains = structuredClone(data);
+  withTrains.train = structuredClone(mixedBoard);
+  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
+
+  const html = renderHtml(withTrains, WFT0583, '');
+  // The panel has no colour, so the strike-through is the whole signal.
+  assert.match(html, /dep-time[^>]*>08:01/, 'the time you must act on is the big one');
+  assert.match(html, /dep-was[^>]*>07:58/, 'the original is struck through beside it');
+  assert.match(html, /9 late/);
+});
+
+test('a cancelled service says so and shows no platform', () => {
+  const withTrains = structuredClone(data);
+  withTrains.train = structuredClone(mixedBoard);
+  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
+
+  const html = renderHtml(withTrains, WFT0583, '');
+  assert.match(html, /Cancelled/);
+  // A platform for a train that is not running would send someone to it.
+  assert.doesNotMatch(html, /Plat\s*&mdash;|Plat\s*—/);
+});
+
+test('no departures is different from trains unavailable', () => {
+  const quiet = structuredClone(data);
+  quiet.train = { ...structuredClone(mixedBoard), departures: [] };
+  quiet.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T23:40:00.000Z', error: null }];
+  const html = renderHtml(quiet, WFT0583, '');
+  assert.match(html, /No departures/);
+  assert.doesNotMatch(html, /Trains unavailable/);
+});
+
+test('trains unavailable is distinct from trains not set up', () => {
+  const failed = structuredClone(data);
+  failed.train = null;
+  failed.sourceHealth = [{ id: 'train', status: 'error', fetchedAt: null, error: 'timeout' }];
+  assert.match(renderHtml(failed, WFT0583, ''), /Trains unavailable/);
+
+  const unset = structuredClone(data);
+  unset.train = null;
+  unset.sourceHealth = [];
+  assert.match(renderHtml(unset, WFT0583, ''), /Trains &mdash; not set up|Trains — not set up/);
+});
+
+test('a single departure renders — late at night that is the whole board', () => {
+  const late = structuredClone(data);
+  late.train = {
+    ...structuredClone(mixedBoard),
+    departures: [{ scheduled: '23:47', expected: null, status: 'on-time', delayMinutes: 0, platform: '1' }],
+  };
+  late.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T23:00:00.000Z', error: null }];
+  assert.match(renderHtml(late, WFT0583, ''), /23:47/);
 });

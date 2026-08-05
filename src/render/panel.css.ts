@@ -42,6 +42,12 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .days .t{font-size:30px;margin:6px 0;}
 .sun{font-size:13px;margin-top:16px;}
 
+.dep{display:flex;gap:12px;align-items:baseline;margin-bottom:7px;}
+.dep-time{font-size:21px;font-weight:700;width:62px;font-variant-numeric:tabular-nums;}
+.dep-status{font-size:12px;}
+.dep-platform{font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums;}
+.dep-was{text-decoration:line-through;}
+
 /* Dimmed appearance without greys: a 45-degree hatch of pure black on white. */
 .slot--empty{
   position:absolute;inset:14px 24px;border:2px solid #000;

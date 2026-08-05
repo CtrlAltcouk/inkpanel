@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { contentHash } from '../../src/model/hash.ts';
 import type { DashboardData } from '../../src/model/dashboard.ts';
+import { mixedBoard } from '../fixtures/train.ts';
 
 function sample(overrides: Partial<DashboardData> = {}): DashboardData {
   return {
@@ -21,6 +22,7 @@ function sample(overrides: Partial<DashboardData> = {}): DashboardData {
     },
     sourceHealth: [{ id: 'ical', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null }],
     battery: { volts: 4.02, percent: 87 },
+    train: null,
     ...overrides,
   };
 }
@@ -90,4 +92,14 @@ test('changes when the day rolls over', () => {
 test('is a stable 32-character hex string', () => {
   assert.match(contentHash(sample()), /^[0-9a-f]{32}$/);
   assert.equal(contentHash(sample()), contentHash(sample()), 'must be deterministic');
+});
+
+test('changes when a departure is delayed', () => {
+  const onTime = sample({ train: structuredClone(mixedBoard) });
+  const delayed = structuredClone(mixedBoard);
+  delayed.departures[0] = { scheduled: '07:42', expected: '07:55', status: 'delayed', delayMinutes: 13, platform: '3' };
+
+  // This is exactly why §4 of the spec accepts more frequent refreshes: live
+  // times are drawn on the panel, so they must be part of the hash.
+  assert.notEqual(contentHash(onTime), contentHash(sample({ train: delayed })));
 });

@@ -1,3 +1,5 @@
+import type { TrainData } from '../sources/train.ts';
+
 export interface CalendarEvent {
   uid: string;
   title: string;
@@ -65,6 +67,9 @@ export interface DashboardData {
   today: TodayInfo;
   calendar: CalendarData | null;
   weather: WeatherData | null;
+  train: TrainData | null;
   sourceHealth: SourceHealth[];
   battery: BatteryInfo;
 }
+
+export type { TrainData, TrainDeparture, DepartureStatus } from '../sources/train.ts';

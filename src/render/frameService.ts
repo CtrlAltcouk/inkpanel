@@ -134,6 +134,9 @@ export class FrameService {
       },
       calendar: bundle.calendar,
       weather: bundle.weather,
+      // No transport yet — Task 7 wires a fetcher into SourceBundle and this
+      // becomes `bundle.train`.
+      train: null,
       sourceHealth: bundle.sourceHealth,
       battery: { volts: batteryVolts, percent: batteryPercent(batteryVolts) },
     };

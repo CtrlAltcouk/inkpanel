@@ -42,6 +42,7 @@ const FIXTURE: DashboardData = {
     { id: 'weather', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null },
   ],
   battery: { volts: 4.02, percent: 87 },
+  train: null,
 };
 
 test('dashboard layout matches the golden buffer', async (t) => {
