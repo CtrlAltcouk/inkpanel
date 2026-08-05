@@ -1260,7 +1260,10 @@ test('renders departures with times, statuses and platforms', () => {
   withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
 
   const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /MILTON KEYNES CENTRAL|Milton Keynes Central/i, 'the route is the heading');
+  // The origin is the CRS code, not the full name. Measured: with both as
+  // full names the heading wraps in the stale state (heading + age badge),
+  // which pushes the third departure row past the footer rule.
+  assert.match(html, /MKC/, 'the route is the heading, origin as a CRS code');
   assert.match(html, /London Euston/i);
   assert.match(html, /07:42/);
   assert.match(html, /On time/);
