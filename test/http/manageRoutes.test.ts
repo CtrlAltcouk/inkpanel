@@ -270,6 +270,47 @@ test('push 404s for an unknown device', async () => {
   });
 });
 
+test('accepts a known CRS pair', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trainOriginCrs: 'mkc', trainDestinationCrs: 'EUS' }),
+    });
+    assert.equal(res.status, 200);
+    const saved = await store.get('esp32-1');
+    assert.equal(saved?.trainOriginCrs, 'MKC', 'stored uppercase regardless of what was typed');
+    assert.equal(saved?.trainDestinationCrs, 'EUS');
+  });
+});
+
+test('rejects a CRS that is well-formed but does not exist', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trainOriginCrs: 'ZZZ' }),
+    });
+    // Three letters is not enough — an unknown code would fail silently at
+    // fetch time, hours later, as "Trains unavailable".
+    assert.equal(res.status, 400);
+  });
+});
+
+test('empty CRS fields are allowed — they mean trains are switched off', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trainOriginCrs: '', trainDestinationCrs: '' }),
+    });
+    assert.equal(res.status, 200);
+  });
+});
+
 test('system info reports version and device count', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');

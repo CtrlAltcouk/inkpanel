@@ -5,6 +5,7 @@ import type { FrameService } from '../render/frameService.ts';
 import { bufferToPng } from '../panel/quantise.ts';
 import { PROFILES, WFT0583 } from '../panel/profile.ts';
 import { geocode } from '../sources/geocode.ts';
+import { findStation, searchStations } from '../sources/stations.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
 
 const patchSchema = z
@@ -22,6 +23,16 @@ const patchSchema = z
     activeIntervalSeconds: z.number().int().min(60).max(86400).optional(),
     lowBatteryIntervalSeconds: z.number().int().min(60).max(86400).optional(),
     lowBatteryVolts: z.number().min(2.5).max(4.2).optional(),
+    trainOriginCrs: z
+      .string()
+      .transform((v) => v.trim().toUpperCase())
+      .refine((v) => v === '' || findStation(v) !== null, 'unknown station code')
+      .optional(),
+    trainDestinationCrs: z
+      .string()
+      .transform((v) => v.trim().toUpperCase())
+      .refine((v) => v === '' || findStation(v) !== null, 'unknown station code')
+      .optional(),
   })
   .strict();
 
@@ -98,6 +109,12 @@ export function manageRoutes(
     } finally {
       clearTimeout(timer);
     }
+  });
+
+  router.get('/stations', (req, res) => {
+    const query = typeof req.query.q === 'string' ? req.query.q : '';
+    // No network, no quota, no failure mode — the list is bundled.
+    res.json({ results: searchStations(query) });
   });
 
   router.post('/devices/:id/push', async (req, res) => {

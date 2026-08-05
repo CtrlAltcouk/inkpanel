@@ -116,6 +116,14 @@ test('new devices carry the Spec 2a fields with safe defaults', async () => {
   });
 });
 
+test('new devices start with no route configured', async () => {
+  await withStore(async (store) => {
+    const device = await store.getOrCreate('esp32-new');
+    assert.equal(device.trainOriginCrs, '');
+    assert.equal(device.trainDestinationCrs, '');
+  });
+});
+
 test('a config file written before Spec 2a still loads', async () => {
   await withStore(async (store, path) => {
     const { writeFile, mkdir } = await import('node:fs/promises');

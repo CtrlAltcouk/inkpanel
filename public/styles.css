@@ -332,6 +332,9 @@ button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); curso
 .city-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-3); }
 .city-current { margin-top: var(--sp-2); }
 
+.station-picker { position: relative; margin-bottom: var(--sp-3); }
+.station-current { margin-top: var(--sp-2); }
+
 .update-log {
   background: var(--bg-0);
   border: 1px solid var(--line-1);

@@ -25,6 +25,11 @@ export interface DeviceRecord {
   /** Human-readable location from the city picker, e.g. "Milton Keynes, England, GB". */
   locationLabel: string;
 
+  /** Origin station CRS, e.g. 'MKC'. Empty disables departures. */
+  trainOriginCrs: string;
+  /** Destination station CRS, e.g. 'EUS'. Both are needed for a board. */
+  trainDestinationCrs: string;
+
   /**
    * What the device was last told to sleep for. Combined with lastSeenAt this
    * gives the next expected check-in, which Push reports back to the user.
@@ -53,6 +58,8 @@ export function defaultDevice(id: string): DeviceRecord {
     lastEtag: null,
     lastFirmwareVersion: null,
     locationLabel: '',
+    trainOriginCrs: '',
+    trainDestinationCrs: '',
     lastWakeSeconds: null,
   };
 }
