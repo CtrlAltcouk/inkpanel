@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **No new npm dependencies**, with one possible exception: if the train API turns out to be SOAP-only, a single XML parser may be added in Task 8, and only there. Everything else in this plan is dependency-free.
+- **No new npm dependencies.** No exceptions. (An earlier draft allowed one XML parser in case the train API was SOAP-only. It is not — Rail Data Marketplace serves LDBWS as REST/JSON, confirmed 2026-08-05 — so the exception is withdrawn and this plan is entirely dependency-free.)
 - Server imports use `.ts` extensions; browser modules are plain ESM with `.js`. Both deliberate.
 - `npm test` and `npm run test:tz` must report the **same count** and stay green across UTC, Europe/London, America/New_York and Pacific/Auckland.
 - **`src/render/panel.css.ts` may contain only `#000` and `#fff`.** No greys, no `rgba`, no `opacity`. Dimmed appearances use hatch or dot patterns. A test enforces this.
@@ -173,8 +173,12 @@ test('searches by name fragment', () => {
 });
 
 test('searches by CRS too, so typing a known code finds it', () => {
-  const hits = searchStations('EUS');
-  assert.equal(hits[0]?.crs, 'EUS', 'an exact CRS match sorts first');
+  // 'AIN' competes with Acton Main Line and Ainsdale, both alphabetically
+  // earlier — so this fails if the exact-CRS-first sort is removed. Do NOT
+  // use 'EUS': it is the only substring match for 'eus' in the whole list,
+  // so the test would pass with the sort deleted and assert nothing.
+  const hits = searchStations('AIN');
+  assert.equal(hits[0]?.crs, 'AIN', 'an exact CRS match sorts first');
 });
 
 test('caps results so the picker never renders hundreds of rows', () => {
@@ -1794,19 +1798,38 @@ git commit -m "feat: add train route configuration and a bundled station picker"
 - Produces: `trainSource: Source<TrainConfig, TrainData>` where
   `interface TrainConfig { originCrs: string; destinationCrs: string; apiKey: string }`
 
-- [ ] **Step 1: Determine the protocol and capture a real response**
+- [ ] **Step 1: Capture a real response**
 
-Sign in to the Rail Data Marketplace and open the Live Departure Boards product.
-If it offers a REST/JSON endpoint, follow **Branch A**. If the only transport is
-SOAP, follow **Branch B**.
+**The protocol is settled: REST/JSON.** Rail Data Marketplace serves LDBWS over
+HTTPS with an `x-apikey` header, confirmed 2026-08-05. There is no SOAP branch
+and no XML parser — the dependency exception in the Global Constraints was
+withdrawn on that basis.
 
-Record the answer in `docs/superpowers/specs/2026-08-05-inkpanel-spec2b-design.md`
-§8, replacing "Open item" with what was found. That section exists precisely to
-be closed.
+Subscribe to **Live Departure Board Web Service (LDBWS) — Public** in the Data
+Product Catalogue at [raildata.org.uk](https://raildata.org.uk). The free tier
+is approved instantly. Put the consumer key in `.env` as `TRAIN_API_KEY=…`.
+**`.env` is gitignored; the key must never reach the repo or a commit message.**
 
-Save one real response to `test/fixtures/trainResponse.ts` as an exported
-string (SOAP) or object (JSON). **Redact the API key from the fixture before
-committing it** — captured responses routinely echo request headers back.
+Capture one real board and save it to `test/fixtures/trainResponse.ts` as an
+exported object:
+
+```bash
+curl -s -H "x-apikey: $TRAIN_API_KEY" \
+  "https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/GetDepartureBoard/MKC?numRows=10&filterCrs=EUS&filterType=to" \
+  | tee /tmp/board.json | head -40
+```
+
+Capture it **on a weekday morning**, when the board is busy enough to contain a
+delay and ideally a cancellation. A fixture captured at 03:00 has no services
+and pins nothing.
+
+**Before committing, read the fixture.** Responses echo request context, so
+check for and remove any `x-apikey` value. Confirm with
+`grep -ri apikey test/fixtures/trainResponse.ts` — it must print nothing.
+
+If the capture fails with 401/403 the subscription has not activated yet; wait
+and retry rather than working around it. **Do not invent a fixture** — the whole
+point of this step is that the mapper meets real data.
 
 - [ ] **Step 2: Add the API key to configuration**
 
@@ -1841,7 +1864,7 @@ Document `TRAIN_API_KEY` in `docs/configuration.md` alongside
 `INKPANEL_PASSWORD`, noting that without it the trains quadrant stays in its
 not-configured state.
 
-- [ ] **Step 3 — Branch A (REST/JSON): write the failing mapper test**
+- [ ] **Step 3: Write the failing mapper test**
 
 Append to `test/sources/train.test.ts`:
 
@@ -1859,6 +1882,17 @@ test('a board with no services maps to an empty array, not a throw', () => {
   assert.deepEqual(mapTrainResponse({ trainServices: null }), []);
   assert.deepEqual(mapTrainResponse({}), []);
   assert.deepEqual(mapTrainResponse(null), []);
+});
+
+test('the isCancelled flag is honoured even when etd disagrees', () => {
+  // Operators have been seen setting the flag without updating etd. Trusting
+  // etd alone would render a cancelled train as running on time — the single
+  // worst thing this panel could tell someone.
+  const raw = mapTrainResponse({
+    trainServices: [{ std: '08:19', etd: 'On time', platform: '2', isCancelled: true }],
+  });
+  assert.equal(raw[0]?.expected, 'Cancelled');
+  assert.equal(buildDepartures(raw)[0]?.status, 'cancelled');
 });
 ```
 
@@ -1878,10 +1912,16 @@ export function mapTrainResponse(body: unknown): RawDeparture[] {
   if (!Array.isArray(services)) return [];
 
   return services.map((service) => {
-    const s = service as { std?: unknown; etd?: unknown; platform?: unknown };
+    const s = service as {
+      std?: unknown; etd?: unknown; platform?: unknown; isCancelled?: unknown;
+    };
     return {
       scheduled: typeof s.std === 'string' ? s.std : '',
-      expected: typeof s.etd === 'string' ? s.etd : null,
+      // LDBWS signals a cancellation two ways: an explicit isCancelled flag and
+      // etd reading "Cancelled". Prefer the flag — it is unambiguous and not
+      // subject to wording changes — but fall back to etd, because operators
+      // have been observed setting one without the other.
+      expected: s.isCancelled === true ? 'Cancelled' : typeof s.etd === 'string' ? s.etd : null,
       platform: typeof s.platform === 'string' ? s.platform : null,
     };
   });
@@ -1902,9 +1942,10 @@ export interface TrainConfig {
   apiKey: string;
 }
 
-// Confirm this against the Rail Data Marketplace product page — it is the one
-// value in this file that cannot be derived from anything already in the repo.
-const ENDPOINT = 'https://api1.raildata.org.uk/1010-live-departure-board-dep/LDBWS/api/20220120/GetDepBoardWithDetails';
+// Rail Data Marketplace's REST wrapper over Darwin. The version segment
+// (dep1_2) and the dated path are both part of the product identity — confirm
+// against the product page if a request 404s.
+const ENDPOINT = 'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/GetDepartureBoard';
 
 export const trainSource: Source<TrainConfig, TrainData> = {
   id: 'train',
@@ -1931,127 +1972,6 @@ export const trainSource: Source<TrainConfig, TrainData> = {
   },
 };
 ```
-
-- [ ] **Step 3 — Branch B (SOAP only): add the parser and write the failing test**
-
-Only if Step 1 found no REST transport. This is the single dependency exception
-the Global Constraints allow, and the reason is recorded here at the point of
-the exception: hand-rolled extraction from a live XML feed would be the most
-fragile code in the repo.
-
-```bash
-npm install fast-xml-parser@^4.5.0
-```
-
-Append to `test/sources/train.test.ts`:
-
-```ts
-import { mapTrainResponse } from '../../src/sources/train.ts';
-import { departureBoardXml } from '../fixtures/trainResponse.ts';
-
-test('maps a real Darwin SOAP response', () => {
-  const raw = mapTrainResponse(departureBoardXml);
-  assert.ok(raw.length > 0, 'the fixture should contain services');
-  assert.match(raw[0]!.scheduled, /^\d{2}:\d{2}$/);
-});
-
-test('a SOAP body with no services maps to an empty array, not a throw', () => {
-  assert.deepEqual(mapTrainResponse('<s:Envelope xmlns:s="x"><s:Body/></s:Envelope>'), []);
-  assert.deepEqual(mapTrainResponse(''), []);
-});
-
-test('a single service is an array of one, not a bare object', () => {
-  // XML has no arrays. A board with exactly one train parses to an object
-  // where a busier board parses to a list, and `.map` on the object throws —
-  // so the quiet late-night case is the one that breaks in production.
-  const one = mapTrainResponse(departureBoardXml.replace(/(<lt5:service>[\s\S]*?<\/lt5:service>)[\s\S]*(?=<\/lt5:trainServices>)/, '$1'));
-  assert.equal(one.length, 1);
-});
-```
-
-Then in `src/sources/train.ts`:
-
-```ts
-import { XMLParser } from 'fast-xml-parser';
-import type { Source, SourceResult } from './types.ts';
-
-export interface TrainConfig {
-  originCrs: string;
-  destinationCrs: string;
-  apiKey: string;
-}
-
-const ENDPOINT = 'https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx';
-const LDB_NS = 'http://thalesgroup.com/RTTI/2021-11-01/ldb/';
-const TOKEN_NS = 'http://thalesgroup.com/RTTI/2013-11-28/Token/types';
-
-// removeNSPrefix collapses lt5:/lt4:/soap: prefixes, which vary by Darwin
-// version — matching on them would break at the next schema bump.
-const parser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true, parseTagValue: false });
-
-function soapRequest(config: TrainConfig): string {
-  return `<?xml version="1.0"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="${TOKEN_NS}" xmlns:ldb="${LDB_NS}">
-  <soap:Header><typ:AccessToken><typ:TokenValue>${config.apiKey}</typ:TokenValue></typ:AccessToken></soap:Header>
-  <soap:Body><ldb:GetDepartureBoardRequest>
-    <ldb:numRows>10</ldb:numRows>
-    <ldb:crs>${config.originCrs}</ldb:crs>
-    <ldb:filterCrs>${config.destinationCrs}</ldb:filterCrs>
-    <ldb:filterType>to</ldb:filterType>
-  </ldb:GetDepartureBoardRequest></soap:Body>
-</soap:Envelope>`;
-}
-
-/** Reduce a Darwin SOAP envelope to `RawDeparture[]`. Never throws. */
-export function mapTrainResponse(xml: string): RawDeparture[] {
-  if (!xml.trim()) return [];
-
-  const parsed = parser.parse(xml) as Record<string, any>;
-  const services =
-    parsed?.Envelope?.Body?.GetDepartureBoardResponse?.GetStationBoardResult?.trainServices?.service;
-  if (!services) return [];
-
-  // XML has no arrays: one service parses to an object, several to a list.
-  const list = Array.isArray(services) ? services : [services];
-
-  return list.map((s: Record<string, unknown>) => ({
-    scheduled: typeof s.std === 'string' ? s.std : '',
-    expected: typeof s.etd === 'string' ? s.etd : null,
-    platform: typeof s.platform === 'string' ? s.platform : null,
-  }));
-}
-
-export const trainSource: Source<TrainConfig, TrainData> = {
-  id: 'train',
-  async fetch(config, signal): Promise<SourceResult<TrainData>> {
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      signal,
-      headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: `${LDB_NS}GetDepartureBoard` },
-      body: soapRequest(config),
-    });
-
-    // SOAP faults arrive as 500 with the reason in the body, so surface it —
-    // a bare "responded 500" on the settings page is not actionable.
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(body)?.[1];
-      throw new Error(`departures responded ${res.status}${fault ? ` — ${fault}` : ''}`);
-    }
-
-    return {
-      status: 'ok',
-      data: buildTrainData(config.originCrs, config.destinationCrs, mapTrainResponse(await res.text())),
-      fetchedAt: new Date().toISOString(),
-    };
-  },
-};
-```
-
-The API key is interpolated into XML. It is a hex token from the marketplace,
-so it contains nothing that needs escaping — but if a key ever arrives
-containing `<` or `&`, escape it here rather than discovering a malformed
-envelope at runtime.
 
 - [ ] **Step 4: Run the mapper tests**
 
@@ -2197,9 +2117,9 @@ git add src/sources/train.ts src/render/frameService.ts src/index.ts docs/config
 git commit -m "feat: fetch live departures and wire trains into the render"
 ```
 
-If Branch B was taken, say so in the commit body along with why the dependency
-was added — the exception should be findable from the history, not only from
-this plan.
+No dependency was added, so `package.json` and `package-lock.json` should be
+unchanged — if they appear in the diff, something was installed that should not
+have been.
 
 ---
 

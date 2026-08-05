@@ -247,12 +247,33 @@ Golden-image coverage extends to a panel with all four quadrants populated.
 
 ---
 
-## 8. Open item at time of writing
+## 8. Resolved: the train API protocol
 
-**The train API protocol.** Whether Rail Data Marketplace serves REST/JSON or
-SOAP determines the implementation inside `src/sources/train.ts` and whether one
-XML-parsing dependency is added. Everything else in this spec is settled and
-independent of the answer.
+**REST/JSON.** Confirmed 2026-08-05. Rail Data Marketplace serves the Live
+Departure Board Web Service as a REST wrapper over Darwin:
 
-The implementation plan should sequence `train.ts` after the answer is known, or
-write it against a fixture first and fill the transport in once confirmed.
+```
+GET https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/GetDepartureBoard/{CRS}
+    ?numRows=10&filterCrs={CRS}&filterType=to
+Header: x-apikey: <consumer key>
+```
+
+The free public tier is approved instantly on subscribing to "Live Departure
+Board Web Service (LDBWS) — Public" in the Data Product Catalogue.
+
+Two consequences:
+
+**No new dependency.** §2's XML-parser fallback was contingent on SOAP being the
+only transport. It is not, so that exception is withdrawn and Spec 2b adds no
+packages at all. The legacy SOAP OpenLDBWS still exists, but there is no reason
+to prefer it.
+
+**One field the spec did not anticipate.** The JSON carries an explicit
+`isCancelled` boolean alongside `etd`. The mapper prefers the flag and falls
+back to `etd` containing "Cancelled", because operators have been observed
+setting one without the other — and rendering a cancelled train as on time is
+the worst error this panel could make.
+
+The API key is a **server-wide** credential, not one of the three per-device
+fields in §6. It lives in `.env` as `TRAIN_API_KEY` and is never committed.
+Without it the trains quadrant stays in its not-configured state.
