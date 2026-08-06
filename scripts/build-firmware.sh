@@ -23,18 +23,13 @@ command -v arduino-cli >/dev/null || {
   exit 1
 }
 
-# Read the version the firmware will actually report, rather than restating it
-# here. Two sources of truth for a version is how a board ends up claiming to
-# be something it is not.
-VERSION="$(grep -oP 'FIRMWARE_VERSION\s*=\s*"\K[^"]+' "$SKETCH/config.h")"
-[ -n "$VERSION" ] || { echo "could not read FIRMWARE_VERSION from config.h" >&2; exit 1; }
-
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
-echo "== compiling $VERSION for $FQBN =="
+echo "== compiling for $FQBN =="
 # --output-dir puts the binaries somewhere predictable; --json makes the
-# build report machine-readable so offsets come from arduino-cli itself.
+# build report machine-readable so the bootloader offset can be read from it
+# directly (see firmware-manifest.mjs for why only that one offset).
 arduino-cli compile \
   --fqbn "$FQBN" \
   --output-dir "$DIST" \
@@ -42,10 +37,11 @@ arduino-cli compile \
   "$SKETCH" >"$DIST/build-report.json"
 
 # arduino-cli emits <sketch>.ino.bootloader.bin, .partitions.bin and .ino.bin.
-# Offsets for the ESP32-S3 come from the build properties in the report rather
-# than being typed here, so a future partition-table change cannot leave this
-# script writing to stale addresses.
-node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$VERSION"
+# The manifest generator reads the version straight out of config.h (instead
+# of it being restated here) and the flash offsets out of its own documented
+# constants plus the build report above — see firmware-manifest.mjs, the one
+# place both live.
+node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$SKETCH"
 
 echo "== wrote $DIST/manifest.json =="
 cat "$DIST/manifest.json"

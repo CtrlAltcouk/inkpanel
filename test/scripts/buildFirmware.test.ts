@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 const SCRIPT = join(process.cwd(), 'scripts', 'build-firmware.sh');
+const MANIFEST_SCRIPT = join(process.cwd(), 'scripts', 'firmware-manifest.mjs');
+const REAL_SKETCH_DIR = join(process.cwd(), 'firmware', 'inkpanel');
 
 test('the build script exists and is executable', async () => {
   const info = await stat(SCRIPT);
@@ -19,17 +23,85 @@ test('the build script fails fast rather than producing a partial dist', async (
   assert.match(text, /set -Eeuo pipefail/, 'a half-written dist would flash a broken board');
 });
 
-test('the build script reads the version from config.h rather than hardcoding it', async () => {
-  // A hardcoded version silently lies about what is on the board.
-  const text = await readFile(SCRIPT, 'utf8');
-  assert.match(text, /FIRMWARE_VERSION/);
-  assert.match(text, /config\.h/);
+// Fakes just enough of an arduino-cli output dir for the manifest generator
+// to run against, without arduino-cli: a build report plus the three binary
+// names it looks for.
+async function makeFakeDist(dir: string) {
+  await writeFile(
+    join(dir, 'build-report.json'),
+    JSON.stringify({ builder_result: { build_properties: ['build.bootloader_addr=0x0'] } }),
+    'utf8',
+  );
+  await writeFile(join(dir, 'inkpanel.ino.bootloader.bin'), 'bootloader', 'utf8');
+  await writeFile(join(dir, 'inkpanel.ino.partitions.bin'), 'partitions', 'utf8');
+  await writeFile(join(dir, 'inkpanel.ino.bin'), 'app', 'utf8');
+}
+
+test('the manifest generator reads the version out of config.h rather than hardcoding it', async () => {
+  // A hardcoded version silently lies about what is on the board. This runs
+  // the real generator, as a real subprocess, against the real firmware
+  // sketch — so it fails if the version is ever hardcoded, or if config.h
+  // stops being consulted. (Substring-matching the shell script's text, as
+  // the old version of this test did, cannot detect either of those: it
+  // passed even when the version was hardcoded, because the script's own
+  // error message still mentioned FIRMWARE_VERSION and config.h.)
+  const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
+  try {
+    await makeFakeDist(dist);
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dist, REAL_SKETCH_DIR], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const configText = await readFile(join(REAL_SKETCH_DIR, 'config.h'), 'utf8');
+    const expected = configText.match(/FIRMWARE_VERSION\s*=\s*"([^"]+)"/)?.[1];
+    assert.equal(expected, '0.1.0', 'sanity check: firmware/inkpanel/config.h is expected to say 0.1.0');
+
+    const manifest = JSON.parse(await readFile(join(dist, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.version, expected);
+  } finally {
+    await rm(dist, { recursive: true, force: true });
+  }
 });
 
-test('the build script derives flash offsets from arduino-cli, not literals', async () => {
-  // Offsets that drift from the partition table brick the board in a way that
-  // looks like a bad cable. They must come from the build, never be typed.
-  const text = await readFile(SCRIPT, 'utf8');
-  assert.doesNotMatch(text, /0x1000\b/, 'hardcoded bootloader offset');
-  assert.doesNotMatch(text, /0x8000\b/, 'hardcoded partition offset');
+test('the manifest generator fails loudly when config.h has no FIRMWARE_VERSION', async () => {
+  const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
+  const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-fw-sketch-'));
+  try {
+    await writeFile(join(sketch, 'config.h'), '#pragma once\n// no version constant in this one\n', 'utf8');
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dist, sketch], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'must not succeed when there is no version to read');
+    assert.match(result.stderr, /FIRMWARE_VERSION/);
+  } finally {
+    await rm(dist, { recursive: true, force: true });
+    await rm(sketch, { recursive: true, force: true });
+  }
+});
+
+test('flash offsets live in exactly one documented place', async () => {
+  // The offsets used to be claimed (in comments) to come from arduino-cli's
+  // build properties, with hardcoded defaults as a fallback. In reality only
+  // the bootloader offset is ever read from build properties; the
+  // partition-table and app offsets are unconditional literals. The old
+  // version of this test asserted the *shell script* contained no 0x8000 or
+  // 0x1000 — true, but only because the shell script never held offsets to
+  // begin with, not because the offsets came from arduino-cli. What actually
+  // matters: the shell script still holds none, and the manifest generator
+  // defines each literal exactly once, as a named constant, rather than the
+  // same number being scattered across the codebase.
+  const shellText = await readFile(SCRIPT, 'utf8');
+  assert.doesNotMatch(shellText, /0x8000/, 'the shell script must not hardcode a flash offset');
+  assert.doesNotMatch(shellText, /0x10000/, 'the shell script must not hardcode a flash offset');
+
+  const manifestText = await readFile(MANIFEST_SCRIPT, 'utf8');
+  assert.equal(
+    (manifestText.match(/0x8000/g) ?? []).length,
+    1,
+    'the partition-table offset should be defined exactly once, as a named constant',
+  );
+  assert.equal(
+    (manifestText.match(/0x10000/g) ?? []).length,
+    1,
+    'the app offset should be defined exactly once, as a named constant',
+  );
 });
