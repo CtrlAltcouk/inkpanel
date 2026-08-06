@@ -48,8 +48,12 @@ export async function buildManifest(dist, sketchDir) {
   const version = await readFirmwareVersion(sketchDir);
 
   const report = JSON.parse(await readFile(join(dist, 'build-report.json'), 'utf8'));
+  const rawProps = report.builder_result?.build_properties ?? report.build_properties;
+  if (!rawProps) {
+    throw new Error(`unexpected build-report.json shape: no build_properties found (keys: ${Object.keys(report)})`);
+  }
   const props = Object.fromEntries(
-    (report.builder_result?.build_properties ?? report.build_properties ?? [])
+    rawProps
       .map((line) => {
         const eq = line.indexOf('=');
         return eq === -1 ? null : [line.slice(0, eq), line.slice(eq + 1)];
@@ -57,11 +61,16 @@ export async function buildManifest(dist, sketchDir) {
       .filter(Boolean),
   );
 
+  const bootloaderAddr = props['build.bootloader_addr'];
+  if (bootloaderAddr === undefined) {
+    throw new Error(`unexpected build-report.json shape: build.bootloader_addr not found in build_properties (keys: ${Object.keys(props)})`);
+  }
+
   const files = await readdir(dist);
   const find = (suffix) => files.find((f) => f.endsWith(suffix));
 
   const parts = [
-    { path: find('.bootloader.bin'), offset: props['build.bootloader_addr'] ?? '0x0' },
+    { path: find('.bootloader.bin'), offset: bootloaderAddr },
     { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
     { path: find('.ino.bin'), offset: APP_OFFSET },
   ];

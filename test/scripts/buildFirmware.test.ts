@@ -105,3 +105,58 @@ test('flash offsets live in exactly one documented place', async () => {
     'the app offset should be defined exactly once, as a named constant',
   );
 });
+
+test('the manifest generator fails when build-report.json lacks build_properties', async () => {
+  const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
+  const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-fw-sketch-'));
+  try {
+    await writeFile(join(sketch, 'config.h'), 'constexpr const char* FIRMWARE_VERSION = "0.1.0";\n', 'utf8');
+    await writeFile(
+      join(dist, 'build-report.json'),
+      JSON.stringify({ some_totally_different_shape: { nested: true } }),
+      'utf8',
+    );
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dist, sketch], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'must not succeed with unrecognised build-report shape');
+    assert.match(result.stderr, /build_properties/, 'error must name the missing build_properties');
+  } finally {
+    await rm(dist, { recursive: true, force: true });
+    await rm(sketch, { recursive: true, force: true });
+  }
+});
+
+test('the manifest generator fails when build.bootloader_addr is missing from build_properties', async () => {
+  const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
+  const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-fw-sketch-'));
+  try {
+    await writeFile(join(sketch, 'config.h'), 'constexpr const char* FIRMWARE_VERSION = "0.1.0";\n', 'utf8');
+    await writeFile(
+      join(dist, 'build-report.json'),
+      JSON.stringify({ builder_result: { build_properties: ['some.other_prop=value'] } }),
+      'utf8',
+    );
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dist, sketch], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'must not succeed when build.bootloader_addr is missing');
+    assert.match(result.stderr, /build.bootloader_addr/, 'error must name the missing property');
+  } finally {
+    await rm(dist, { recursive: true, force: true });
+    await rm(sketch, { recursive: true, force: true });
+  }
+});
+
+test('the manifest generator fails when a required binary file is missing', async () => {
+  const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
+  const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-fw-sketch-'));
+  try {
+    await writeFile(join(sketch, 'config.h'), 'constexpr const char* FIRMWARE_VERSION = "0.1.0";\n', 'utf8');
+    await makeFakeDist(dist);
+    // Delete one of the required binaries
+    await rm(join(dist, 'inkpanel.ino.bootloader.bin'));
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dist, sketch], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'must not succeed when a binary is missing');
+    assert.match(result.stderr, /missing a required binary/, 'error must indicate missing binary');
+  } finally {
+    await rm(dist, { recursive: true, force: true });
+    await rm(sketch, { recursive: true, force: true });
+  }
+});
