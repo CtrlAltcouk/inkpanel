@@ -44,7 +44,14 @@ async function withServer(
 
 async function claim(store: DeviceStore, id: string) {
   await store.getOrCreate(id);
-  await store.update(id, { claimed: true });
+  // Quiet hours off, so X-Next-Wake-Seconds is deterministically the active
+  // interval. The route computes the wake from `new Date()`, so with the
+  // default 23:00-06:00 window these tests asserted 900 but got the seconds
+  // until 06:00 for seven hours of every night — red overnight, green by
+  // morning, for reasons having nothing to do with the code under test.
+  // Quiet-hours behaviour itself is covered properly in
+  // test/schedule/nextWake.test.ts, which injects `now` instead of reading it.
+  await store.update(id, { claimed: true, quietHoursStart: 0, quietHoursEnd: 0 });
 }
 
 test('serves an enrolment frame for an unknown device', async () => {
