@@ -124,6 +124,12 @@ test('new devices start with no route configured', async () => {
   });
 });
 
+test('new devices start with no UPRN configured', async () => {
+  await withStore(async (store) => {
+    assert.equal((await store.getOrCreate('esp32-new')).binsUprn, '');
+  });
+});
+
 test('a config file written before Spec 2a still loads', async () => {
   await withStore(async (store, path) => {
     const { writeFile, mkdir } = await import('node:fs/promises');

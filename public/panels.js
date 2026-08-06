@@ -35,6 +35,12 @@ function detail(device) {
       <textarea id="${esc(device.id)}-cal" name="calendarUrls" rows="3"
         placeholder="https://calendar.google.com/calendar/ical/.../private-xxxx/basic.ics">${esc((device.calendarUrls ?? []).join('\n'))}</textarea>
 
+      <h3>Bins</h3>
+      ${field(device.id, 'binsUprn', 'UPRN', device.binsUprn)}
+      <p class="meta">Milton Keynes only. Find your UPRN at
+        <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.
+        Leave blank to hide the bins panel.</p>
+
       <h3>Trains</h3>
       <div class="station-picker" data-field="trainOriginCrs"></div>
       <div class="station-picker" data-field="trainDestinationCrs"></div>
@@ -109,6 +115,7 @@ async function save(event, root) {
     name: raw.name,
     timezone: raw.timezone,
     calendarUrls: String(raw.calendarUrls || '').split('\n').map((s) => s.trim()).filter(Boolean),
+    binsUprn: raw.binsUprn,
     activeIntervalSeconds: Number(raw.activeIntervalSeconds),
     quietHoursStart: Number(raw.quietHoursStart),
     quietHoursEnd: Number(raw.quietHoursEnd),

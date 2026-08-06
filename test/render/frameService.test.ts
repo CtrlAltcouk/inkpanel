@@ -8,6 +8,7 @@ import { batteryPercent } from '../../src/devices/battery.ts';
 import { SourceCache } from '../../src/sources/cache.ts';
 import { Renderer } from '../../src/render/browser.ts';
 import { defaultDevice } from '../../src/devices/types.ts';
+import { MK_FORECAST } from '../fixtures/openMeteo.ts';
 
 const OK_HEALTH = [{ id: 'ical', status: 'ok' as const, fetchedAt: '2026-08-03T07:00:00.000Z', error: null }];
 const FAILING_HEALTH = [
@@ -48,7 +49,7 @@ test('maps battery volts to a percentage', () => {
 });
 
 test('produces a full-size buffer and skips Chromium when nothing changed', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service, counts) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
 
@@ -71,6 +72,7 @@ test('re-renders when the content actually changes', async () => {
       tomorrow: [],
     },
     weather: null,
+    bins: null,
     sourceHealth: OK_HEALTH,
   });
 
@@ -86,7 +88,7 @@ test('re-renders when the content actually changes', async () => {
 });
 
 test('a battery change that does not move the percent does not re-render', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service, counts) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
     await service.frameFor(device, 4.02);
@@ -96,7 +98,7 @@ test('a battery change that does not move the percent does not re-render', async
 });
 
 test('separate devices keep separate memos', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service, counts) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
     await service.frameFor({ ...defaultDevice('panel-b'), claimed: true }, 4.0);
@@ -136,7 +138,7 @@ test('a different server URL produces a different enrolment frame', async () => 
 });
 
 test('renderNow re-rasterises even when content is unchanged', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service, counts) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
 
@@ -149,7 +151,7 @@ test('renderNow re-rasterises even when content is unchanged', async () => {
 });
 
 test('renderNow does not change contentChangedAt when content is unchanged', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
 
@@ -172,6 +174,7 @@ test('renderNow updates contentChangedAt when content genuinely changed', async 
       tomorrow: [],
     },
     weather: null,
+    bins: null,
     sourceHealth: OK_HEALTH,
   });
 
@@ -205,7 +208,7 @@ test('renders an enrolment frame in the normal format', async () => {
 // "nothing has been rendered yet" — both read as []. renderedDeviceCount()
 // is what lets a caller (e.g. /api/system/info) tell the two apart.
 test('nothing rendered yet reports zero coverage, not a clean bill of health', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service) => {
     assert.equal(service.renderedDeviceCount(), 0, 'nothing has been checked');
     assert.deepEqual(service.sourceIssues(), [], 'an empty issues list here means "unknown", not "healthy"');
@@ -213,7 +216,7 @@ test('nothing rendered yet reports zero coverage, not a clean bill of health', a
 });
 
 test('devices that have been rendered and are healthy count as coverage with no issues', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: OK_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
   await withService(async () => bundle, async (service) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
     await service.frameFor({ ...defaultDevice('panel-b'), claimed: true }, 4.0);
@@ -223,8 +226,82 @@ test('devices that have been rendered and are healthy count as coverage with no 
   });
 });
 
+test('a device with no UPRN does not report bins as broken', async () => {
+  const bundle: SourceBundle = {
+    calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: [],
+  };
+  await withService(async () => bundle, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+    const frame = await service.frameFor(device, 4.0);
+    assert.equal(frame.buffer.length, 48000);
+    // Not configured is silence, not an error. The panel says "not set up".
+    assert.equal(service.sourceIssues().length, 0);
+  });
+});
+
+test('bins data from the bundle reaches the rendered output, not a hardcoded null', async () => {
+  const bundle: SourceBundle = {
+    calendar: { today: [], tomorrow: [] },
+    weather: null,
+    bins: { next: { date: '2026-08-10', types: ['recycling'] }, rawLabels: ['Collect Recycling Red'] },
+    sourceHealth: [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-03T07:00:00.000Z', error: null }],
+  };
+  await withService(async () => bundle, async (service) => {
+    const device = { ...defaultDevice('esp32-test'), claimed: true };
+    const html = await service.previewHtml(device);
+    assert.equal((html.match(/Collect Recycling Red/g) ?? []).length, 1, 'the real collection reaches the page');
+    assert.equal(
+      (html.match(/<div class="slot--empty"><span>Bins (—|unavailable)/g) ?? []).length,
+      0,
+      'a healthy bins fetch must not fall back to an empty slot',
+    );
+  });
+});
+
+// The test above stubs fetchData, so it never actually exercises fetchAll's
+// own guard — it would pass identically even if that guard were deleted.
+// This one runs the real (non-stubbed) fetchAll, with only network calls
+// faked out, so a regression in the guard itself is caught: either by the
+// stray call to the council's API being rejected, or — since bins.ts also
+// short-circuits on an empty UPRN before ever reaching the network — by the
+// rendered markup falling back to "unavailable" once a spurious 'bins'
+// health entry appears.
+test('the real fetchAll pipeline never calls the Milton Keynes bin API when no UPRN is configured', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-frame-real-'));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('milton-keynes.gov.uk')) {
+      throw new Error('must not call the Milton Keynes bin API when no UPRN is configured');
+    }
+    if (url.includes('api.open-meteo.com')) {
+      return new Response(JSON.stringify(MK_FORECAST), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    throw new Error(`unexpected fetch in test: ${url}`);
+  }) as typeof globalThis.fetch;
+
+  try {
+    // previewHtml builds the frame's HTML without touching deps.renderer, so
+    // a stub is enough here — no Chromium needed to prove fetchAll's wiring.
+    const service = new FrameService({ renderer: {} as Renderer, cache: new SourceCache(dir) });
+    const device = { ...defaultDevice('esp32-real'), claimed: true };
+    const html = await service.previewHtml(device);
+    assert.equal(
+      (html.match(/<div class="slot--empty"><span>Bins — not set up<\/span><\/div>/g) ?? []).length,
+      1,
+      'an unconfigured device must show "not set up", not "unavailable"',
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a failing source is reported without hiding that the device was checked', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, sourceHealth: FAILING_HEALTH };
+  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: FAILING_HEALTH };
   await withService(async () => bundle, async (service) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
 

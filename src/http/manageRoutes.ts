@@ -16,6 +16,8 @@ const patchSchema = z
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     locationLabel: z.string().max(120).optional(),
+    // Empty is valid and means "bins off". A UPRN is up to 12 digits.
+    binsUprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits').optional(),
     calendarUrls: z.array(z.string().url()).max(10).optional(),
     panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),

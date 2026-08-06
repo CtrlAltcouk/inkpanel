@@ -7,6 +7,8 @@ import { batteryPercent } from '../devices/battery.ts';
 import type { DeviceRecord } from '../devices/types.ts';
 import { icalSource } from '../sources/ical.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
+import { binsSource } from '../sources/bins.ts';
+import type { BinsData } from '../sources/bins.ts';
 import { runSource } from '../sources/runner.ts';
 import type { SourceCache } from '../sources/cache.ts';
 import type { Renderer } from './browser.ts';
@@ -19,6 +21,7 @@ const SOURCE_TIMEOUT_MS = 8000;
 export interface SourceBundle {
   calendar: CalendarData | null;
   weather: WeatherData | null;
+  bins: BinsData | null;
   sourceHealth: SourceHealth[];
 }
 
@@ -74,7 +77,7 @@ export class FrameService {
   private async fetchAll(device: DeviceRecord): Promise<SourceBundle> {
     if (this.deps.fetchData) return this.deps.fetchData(device);
 
-    const [calendar, weather] = await Promise.all([
+    const [calendar, weather, bins] = await Promise.all([
       runSource(
         icalSource,
         { urls: device.calendarUrls, timezone: device.timezone },
@@ -87,12 +90,18 @@ export class FrameService {
         this.deps.cache,
         SOURCE_TIMEOUT_MS,
       ),
+      device.binsUprn
+        ? runSource(binsSource, { uprn: device.binsUprn }, this.deps.cache, SOURCE_TIMEOUT_MS)
+        : Promise.resolve(null),
     ]);
 
     return {
       calendar: calendar.data,
       weather: weather.data,
-      sourceHealth: [calendar.health, weather.health],
+      bins: bins?.data ?? null,
+      // An unconfigured source contributes no health entry at all, so the
+      // template can tell "not set up" from "failed".
+      sourceHealth: [calendar.health, weather.health, ...(bins ? [bins.health] : [])],
     };
   }
 
@@ -137,9 +146,7 @@ export class FrameService {
       // No transport yet — Task 7 wires a fetcher into SourceBundle and this
       // becomes `bundle.train`.
       train: null,
-      // No bins yet — a later task wires binsSource into SourceBundle and
-      // this becomes `bundle.bins`.
-      bins: null,
+      bins: bundle.bins,
       sourceHealth: bundle.sourceHealth,
       battery: { volts: batteryVolts, percent: batteryPercent(batteryVolts) },
     };

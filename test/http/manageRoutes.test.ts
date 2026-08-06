@@ -311,6 +311,43 @@ test('empty CRS fields are allowed — they mean trains are switched off', async
   });
 });
 
+test('accepts a valid UPRN', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ binsUprn: '100080152345' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await store.get('esp32-1'))?.binsUprn, '100080152345');
+  });
+});
+
+test('rejects a UPRN that is not digits', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ binsUprn: 'not-a-uprn' }),
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('an empty UPRN is allowed — it means bins are switched off', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ binsUprn: '' }),
+    });
+    assert.equal(res.status, 200);
+  });
+});
+
 test('system info reports version and device count', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');
