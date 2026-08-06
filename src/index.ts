@@ -40,6 +40,7 @@ function lanAddress(): string {
 export async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8080);
   const dataDir = resolve(process.env.DATA_DIR ?? './data');
+  const firmwareDir = resolve(process.env.FIRMWARE_DIR ?? './firmware/dist');
   const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${lanAddress()}:${port}`;
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
@@ -51,7 +52,7 @@ export async function main(): Promise<void> {
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
   const server = createApp({
-    store, frames, publicBaseUrl, dataDir, auth: { password, secret }, trustProxy,
+    store, frames, publicBaseUrl, dataDir, firmwareDir, auth: { password, secret }, trustProxy,
   }).listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
     console.log(`data directory: ${dataDir}`);

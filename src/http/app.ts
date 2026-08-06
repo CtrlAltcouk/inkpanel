@@ -6,6 +6,7 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
+import { firmwareRoutes } from './firmwareRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
 import { systemRoutes } from './systemRoutes.ts';
 
@@ -23,6 +24,8 @@ export interface AppDeps {
   publicBaseUrl: string;
   /** Where device config and caches live; used to report free disk space. */
   dataDir: string;
+  /** Where build-firmware.sh wrote its output. */
+  firmwareDir: string;
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -67,6 +70,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', deviceRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
+  app.use('/api', firmwareRoutes(deps.firmwareDir));
 
   // Serve the latin-subset woff2 straight from @fontsource rather than
   // committing a 2.7 MB TTF for one heading in the admin UI.

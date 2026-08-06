@@ -14,7 +14,7 @@ async function withServer(fn: (base: string, dataDir: string) => Promise<void>) 
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-system-'));
   const store = new DeviceStore(join(dir, 'config.json'));
   const server = createApp({
-    store, frames, publicBaseUrl: 'http://test.local:8080', dataDir: dir,
+    store, frames, publicBaseUrl: 'http://test.local:8080', dataDir: dir, firmwareDir: dir,
     auth: { password: null, secret: randomBytes(32) },
   }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));

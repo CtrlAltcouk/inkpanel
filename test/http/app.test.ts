@@ -15,6 +15,7 @@ function makeApp(trustProxy?: boolean | number | string) {
     frames,
     publicBaseUrl: 'http://test:8080',
     dataDir: 'unused',
+    firmwareDir: 'unused',
     auth: { password: null, secret: randomBytes(32) },
     trustProxy,
   });
