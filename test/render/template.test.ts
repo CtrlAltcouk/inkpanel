@@ -308,3 +308,28 @@ test('an unrecognised bin label still renders', () => {
   odd.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
   assert.match(renderHtml(odd, WFT0583, ''), /Some New Scheme 2027/);
 });
+
+test('escapes bin labels to prevent injection', () => {
+  const hostile = structuredClone(data);
+  hostile.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['<script>alert(1)</script>'] };
+  hostile.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
+  const html = renderHtml(hostile, WFT0583, '');
+  assert.ok(!html.includes('<script>alert(1)</script>'), 'must not inject raw markup');
+  assert.match(html, /&lt;script&gt;/, 'hostile label must be escaped');
+});
+
+test('pairs labels with types when their counts differ, falling back to first type', () => {
+  const mismatch = structuredClone(data);
+  mismatch.bins = {
+    next: { date: '2026-08-06', types: ['recycling'] },
+    rawLabels: ['Collect Recycling Red', 'Collect Recycling Blue'],
+  };
+  mismatch.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
+  const html = renderHtml(mismatch, WFT0583, '');
+  // Count occurrences of the full swatch markup to verify both rows have the swatch.
+  // Matching the class in the markup prevents false passes from the stylesheet.
+  const swatchMatches = (html.match(/class="bin-swatch bin--recycling"/g) ?? []).length;
+  assert.equal(swatchMatches, 2, 'both labels must be paired with the single type');
+  assert.match(html, /Collect Recycling Red/);
+  assert.match(html, /Collect Recycling Blue/);
+});
