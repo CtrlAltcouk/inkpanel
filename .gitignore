@@ -39,6 +39,9 @@ firmware/**/build/
 *.elf
 *.bin.hex
 
+# Firmware build output — produced by scripts/build-firmware.sh
+firmware/dist/
+
 # Local dev data directory
 /data-dev/
 
