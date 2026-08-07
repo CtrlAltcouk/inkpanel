@@ -75,7 +75,18 @@ export async function startHttpsListener(
   const material = await ensureCertificate(options.dataDir);
   if (material === null) return null;
 
-  const server = createServer({ cert: material.cert, key: material.key }, app);
-  await new Promise<void>((resolve) => server.listen(options.port, resolve));
-  return server;
+  try {
+    const server = createServer({ cert: material.cert, key: material.key }, app);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port, () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    return server;
+  } catch (err) {
+    console.error('https disabled: failed to start listener:', err);
+    return null;
+  }
 }
