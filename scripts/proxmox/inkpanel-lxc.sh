@@ -159,7 +159,17 @@ ok "container running"
 # pct exec inherits LANG from the Proxmox host, but a fresh Debian template has
 # no generated locales, so perl and apt-listchanges emit a wall of warnings.
 # C.UTF-8 always exists and needs no locale-gen.
-run() { pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash -c "$1"; }
+#
+# PATH is set explicitly for the same class of reason: pct exec's bash -c does
+# not carry the full PATH an interactive login shell would. Node/npm/git/curl
+# all install into /usr/bin via apt, which is on it regardless, so this went
+# unnoticed until arduino-cli, which installs into /usr/local/bin. The real
+# failure was confusing — the arduino-cli install itself succeeded, but its
+# own internal `command -v` check (and this script's, right after it) both
+# reported "not found" for a binary that was genuinely sitting on disk,
+# because neither lookup ever had /usr/local/bin to search. This is the
+# standard Debian secure_path, not a guess at what might be missing.
+run() { pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" bash -c "$1"; }
 
 info "Installing dependencies"
 step "base packages"

@@ -263,6 +263,27 @@ test('the arduino-cli install step is diagnosable when it fails, not silent', as
   );
 });
 
+// The second real reinstall attempt hit this: arduino-cli genuinely
+// installed into /usr/local/bin ("installed successfully" from its own
+// output), but every lookup for it afterward -- its own internal
+// `command -v` check AND the installer's -- reported "not found", because
+// `pct exec ... bash -c` does not carry /usr/local/bin on PATH the way an
+// interactive login shell would. Node/npm/git/curl all install into
+// /usr/bin via apt, which stayed reachable regardless, so this went
+// unnoticed until the first thing that installs into /usr/local/bin.
+//
+// This can't be exercised behaviorally without a real Proxmox host — pct
+// exec's actual PATH behavior is what's in question, and nothing here can
+// simulate it. This is a structural guard only: it fails if run()'s
+// explicit PATH is ever "simplified" away back to whatever pct exec
+// happens to default to.
+test('the installer sets an explicit PATH for every command it runs inside the container', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  const runDef = script.split('\n').find((l) => l.trimStart().startsWith('run()'));
+  assert.ok(runDef, 'could not find the run() helper definition');
+  assert.match(runDef!, /PATH="\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin"/);
+});
+
 test('the installer default disk size accounts for the firmware toolchain', async () => {
   const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
   assert.match(script, /DISK="\$\{DISK:-12\}"/);
