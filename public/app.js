@@ -1,5 +1,6 @@
 import { renderPanels } from './panels.js';
 import { renderSettings } from './settings.js';
+import { renderFlash } from './flash.js';
 import { esc } from './components.js';
 import { resolveRouteName } from './router.js';
 
@@ -8,6 +9,7 @@ const view = document.getElementById('view');
 const ROUTES = {
   panels: renderPanels,
   settings: renderSettings,
+  flash: renderFlash,
 };
 const FALLBACK_ROUTE = 'panels';
 
