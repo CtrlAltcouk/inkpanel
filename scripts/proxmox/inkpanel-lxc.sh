@@ -13,7 +13,7 @@
 # that advice applies to every installer of this shape, including this one.
 #
 # Overrides, all optional:
-#   CTID=910 CT_HOSTNAME=inkpanel CORES=2 RAM=1024 DISK=8
+#   CTID=910 CT_HOSTNAME=inkpanel CORES=2 RAM=1024 DISK=12
 #   BRIDGE=vmbr0 STORAGE=local-lvm TEMPLATE_STORAGE=local
 #   REPO_URL=https://github.com/CtrlAltcouk/inkpanel.git BRANCH=main
 #   UNPRIVILEGED=1 START_ON_BOOT=1
@@ -66,7 +66,7 @@ CTID="${CTID:-$(pvesh get /cluster/nextid)}"
 CT_HOSTNAME="${CT_HOSTNAME:-inkpanel}"
 CORES="${CORES:-2}"
 RAM="${RAM:-1024}"
-DISK="${DISK:-8}"
+DISK="${DISK:-12}"
 BRIDGE="${BRIDGE:-vmbr0}"
 UNPRIVILEGED="${UNPRIVILEGED:-1}"
 START_ON_BOOT="${START_ON_BOOT:-1}"
@@ -184,6 +184,47 @@ run "cd ${APP_DIR}/app && npx --yes playwright install-deps chromium >/dev/null 
 
 step "Chromium browser (this takes a minute)"
 run "cd ${APP_DIR}/app && runuser -u ${APP} -- env PLAYWRIGHT_BROWSERS_PATH=${APP_DIR}/.cache/ms-playwright npx playwright install chromium >/dev/null 2>&1"
+
+# ------------------------------------------------------------ firmware toolchain
+
+# So the Flash tab has something to serve from a fresh install, not just after
+# the first update. The ESP32 core and its Xtensa toolchain land in the app
+# user's home (arduino-cli follows $HOME), same as Playwright's browser above.
+#
+# arduino-cli itself and the ESP32 core are treated as toolchain infrastructure
+# — fatal if they fail to install, same as Node or Chromium above. Actually
+# compiling this project's firmware with them is application-level and must
+# not be: see the non-fatal wrapping on the build step below and the matching
+# comment in scripts/proxmox/files/inkpanel-update.
+info "Installing firmware toolchain"
+
+# Checked from inside the container, after Node/Chromium already used some of
+# it, so this reflects what is actually left. ~1.5-2.5 GB is the core plus its
+# toolchain; 3 GB leaves headroom rather than cutting it fine.
+step "checking disk space"
+MIN_FREE_MB=3072
+AVAIL_MB="$(run "df --output=avail -m / | tail -1" | tr -d '[:space:]')"
+if [[ -z "$AVAIL_MB" ]] || (( AVAIL_MB < MIN_FREE_MB )); then
+  die "only ${AVAIL_MB:-0} MB free in container ${CTID}, need at least ${MIN_FREE_MB} MB for the ESP32 firmware toolchain — resize first: pct resize ${CTID} rootfs +6G"
+fi
+step "${AVAIL_MB} MB free"
+
+step "arduino-cli"
+run "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh >/dev/null 2>&1"
+step "arduino-cli $(run 'arduino-cli version' | tr -d '\r')"
+
+step "ESP32 board core (this takes a minute)"
+run "runuser -u ${APP} -- arduino-cli config init --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json --overwrite >/dev/null 2>&1
+     runuser -u ${APP} -- arduino-cli core update-index >/dev/null 2>&1
+     runuser -u ${APP} -- arduino-cli core install esp32:esp32 >/dev/null 2>&1"
+
+# Non-fatal, deliberately: unlike the toolchain install above, a failure here
+# means only that the Flash tab starts out with nothing to serve — the server
+# itself is unaffected and there is nothing to roll back. The next update that
+# touches firmware/ will try again (see inkpanel-update).
+step "initial firmware build"
+run "cd ${APP_DIR}/app && runuser -u ${APP} -- ./scripts/build-firmware.sh >/dev/null 2>&1" \
+  || warn "firmware build failed — the Flash tab will report no build available until the next successful build"
 
 # ---------------------------------------------------------------------- service
 

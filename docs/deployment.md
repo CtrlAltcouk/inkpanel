@@ -19,8 +19,11 @@ It creates an unprivileged Debian LXC, installs Node and Chromium, clones the
 repo, registers a systemd service, and prints the URL. No Docker involved —
 running the app natively in the LXC avoids nesting containers.
 
-Defaults are 2 cores, 1 GB RAM, 8 GB disk on the first active storage, DHCP on
-`vmbr0`, and the next free CTID. Override any of them:
+Defaults are 2 cores, 1 GB RAM, 12 GB disk on the first active storage, DHCP on
+`vmbr0`, and the next free CTID. The disk default accounts for the ESP32
+firmware toolchain the installer sets up alongside Node and Chromium, so the
+[Flash tab](flashing.md) has something to serve without any extra setup.
+Override any of them:
 
 ```bash
 CTID=910 CT_HOSTNAME=inkpanel RAM=2048 STORAGE=local-lvm BRIDGE=vmbr1 \

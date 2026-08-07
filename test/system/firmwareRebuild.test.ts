@@ -1,0 +1,249 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, mkdir, rm, readFile, writeFile, cp, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const run = promisify(execFile);
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const UPDATER = join(root, 'scripts', 'proxmox', 'files', 'inkpanel-update');
+const WRITE_STATUS = join(root, 'scripts', 'proxmox', 'files', 'write-status.mjs');
+
+/**
+ * The updater is designed to run as root, invoking `runuser -u inkpanel` and
+ * `systemctl` — neither of which this test can or should actually exercise.
+ * These stubs let the REAL updater script run unmodified: `runuser -u USER --
+ * CMD...` becomes a plain exec of CMD, and `systemctl` becomes a no-op that
+ * records it was called. Everything else in the script — git, the firmware
+ * diff, the non-fatal wrapping — runs for real.
+ */
+async function makeStubBin(dir: string): Promise<string> {
+  const bin = join(dir, 'stubbin');
+  await mkdir(bin, { recursive: true });
+  await writeFile(
+    join(bin, 'runuser'),
+    '#!/usr/bin/env bash\nshift 2\nexec "$@"\n',
+  );
+  await writeFile(
+    join(bin, 'systemctl'),
+    '#!/usr/bin/env bash\necho "systemctl $*" >> "$SYSTEMCTL_LOG"\nexit 0\n',
+  );
+  await chmod(join(bin, 'runuser'), 0o755);
+  await chmod(join(bin, 'systemctl'), 0o755);
+  return bin;
+}
+
+interface Fixture {
+  dir: string;
+  upstream: string;
+  appDir: string;
+  buildMarker: string;
+  systemctlLog: string;
+  updaterScript: string;
+}
+
+/**
+ * A real git remote and a real clone, exactly like a genuine deployment —
+ * not a fake filesystem standing in for one. `firmware/` and
+ * `scripts/build-firmware.sh` exist from the first commit so the "before"
+ * commit the updater captures is always well-formed.
+ */
+async function setupFixture(dir: string): Promise<Fixture> {
+  const upstream = join(dir, 'upstream');
+  const appDir = join(dir, 'app-root');
+  const buildMarker = join(dir, 'build-ran.txt');
+  const systemctlLog = join(dir, 'systemctl-calls.txt');
+
+  await mkdir(upstream, { recursive: true });
+  await run('git', ['init', '-q', '-b', 'main'], { cwd: upstream });
+  await run('git', ['config', 'user.email', 't@t.example'], { cwd: upstream });
+  await run('git', ['config', 'user.name', 'test'], { cwd: upstream });
+
+  await mkdir(join(upstream, 'firmware'), { recursive: true });
+  await writeFile(join(upstream, 'firmware', 'marker.txt'), 'old\n');
+  await mkdir(join(upstream, 'scripts'), { recursive: true });
+  // Not the real build-firmware.sh — a stand-in that proves whether it was
+  // invoked. Exit code is set per-test via BUILD_EXIT_CODE.
+  await writeFile(
+    join(upstream, 'scripts', 'build-firmware.sh'),
+    `#!/usr/bin/env bash\necho ran >> "${buildMarker.replace(/\\/g, '/')}"\nexit "\${BUILD_EXIT_CODE:-0}"\n`,
+  );
+  await chmod(join(upstream, 'scripts', 'build-firmware.sh'), 0o755);
+  await run('git', ['add', '-A'], { cwd: upstream });
+  await run('git', ['commit', '-q', '-m', 'initial'], { cwd: upstream });
+
+  await mkdir(join(dir, 'app-parent'), { recursive: true });
+  await run('git', ['clone', '-q', upstream, join(appDir, 'app')]);
+  await run('git', ['config', 'user.email', 't@t.example'], { cwd: join(appDir, 'app') });
+  await run('git', ['config', 'user.name', 'test'], { cwd: join(appDir, 'app') });
+  await mkdir(join(appDir, 'data'), { recursive: true });
+
+  const updaterScript = join(dir, 'inkpanel-update');
+  let script = await readFile(UPDATER, 'utf8');
+  script = script.replace('APP_DIR=/opt/inkpanel', `APP_DIR=${appDir.replace(/\\/g, '/')}`);
+  await writeFile(updaterScript, script);
+  await chmod(updaterScript, 0o755);
+  // write-status.mjs is resolved by the updater relative to its own
+  // location, so it needs to sit alongside the copy above, not the original.
+  await cp(WRITE_STATUS, join(dir, 'write-status.mjs'));
+
+  return { dir, upstream, appDir, buildMarker, systemctlLog, updaterScript };
+}
+
+async function runUpdater(
+  fixture: Fixture,
+  env: Record<string, string> = {},
+): Promise<{ code: number; status: { state: string; log: string[] } }> {
+  const stubbin = await makeStubBin(fixture.dir);
+  let code = 0;
+  try {
+    await run('bash', [fixture.updaterScript], {
+      env: {
+        ...process.env,
+        PATH: `${stubbin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
+        SYSTEMCTL_LOG: fixture.systemctlLog,
+        ...env,
+      },
+    });
+  } catch (err) {
+    code = (err as { code?: number }).code ?? 1;
+  }
+  const status = JSON.parse(
+    await readFile(join(fixture.appDir, 'data', 'update-status.json'), 'utf8'),
+  ) as { state: string; log: string[] };
+  return { code, status };
+}
+
+async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-firmware-rebuild-'));
+  try {
+    await fn(await setupFixture(dir));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('bash -n accepts both proxmox scripts', async () => {
+  await run('bash', ['-n', UPDATER]);
+  await run('bash', ['-n', join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh')]);
+});
+
+test('a pull that touches firmware/ triggers a rebuild, and the update still succeeds', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(join(fixture.upstream, 'firmware', 'marker.txt'), 'new\n');
+    await run('git', ['add', '-A'], { cwd: fixture.upstream });
+    await run('git', ['commit', '-q', '-m', 'firmware change'], { cwd: fixture.upstream });
+
+    const { code, status } = await runUpdater(fixture);
+
+    assert.equal(code, 0);
+    assert.equal(status.state, 'success');
+    assert.ok(
+      status.log.some((l) => /firmware rebuild \(firmware\/ changed\)/.test(l)),
+      'the log should record that the rebuild ran',
+    );
+    assert.ok(status.log.some((l) => /firmware rebuild: ok/.test(l)));
+    await assert.doesNotReject(readFile(fixture.buildMarker, 'utf8'), 'build-firmware.sh must actually have run');
+    assert.ok(
+      status.log.some((l) => l.includes('restart')),
+      'the service must still restart after a successful rebuild',
+    );
+  });
+});
+
+// This is the property the design explicitly calls the most important one in
+// the whole feature: whether an ESP32 compile succeeds has nothing to do
+// with whether the server can keep serving frames to panels it is already
+// running for. A regression here — the build step migrating back onto the
+// `|| fail` pattern used by git pull and npm ci — would mean a firmware-side
+// compile error takes down every panel in the house on the next update.
+test('a failing firmware rebuild does NOT fail the update', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(join(fixture.upstream, 'firmware', 'marker.txt'), 'new\n');
+    await run('git', ['add', '-A'], { cwd: fixture.upstream });
+    await run('git', ['commit', '-q', '-m', 'firmware change, build will fail'], { cwd: fixture.upstream });
+
+    const { code, status } = await runUpdater(fixture, { BUILD_EXIT_CODE: '1' });
+
+    assert.equal(code, 0, 'the updater process itself must exit 0');
+    assert.equal(status.state, 'success', 'the update must still be recorded as successful');
+    assert.ok(
+      status.log.some((l) => /firmware rebuild: FAILED/.test(l)),
+      'the failure must be visible in the log, not swallowed silently',
+    );
+    assert.ok(
+      status.log.some((l) => l.includes('restart')),
+      'the service must still restart even though the rebuild failed',
+    );
+  });
+});
+
+test('a pull that does not touch firmware/ skips the rebuild entirely', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(join(fixture.upstream, 'README.md'), 'unrelated change\n');
+    await run('git', ['add', '-A'], { cwd: fixture.upstream });
+    await run('git', ['commit', '-q', '-m', 'unrelated change'], { cwd: fixture.upstream });
+
+    const { code, status } = await runUpdater(fixture);
+
+    assert.equal(code, 0);
+    assert.equal(status.state, 'success');
+    assert.ok(status.log.some((l) => /firmware rebuild skipped/.test(l)));
+    await assert.rejects(
+      readFile(fixture.buildMarker, 'utf8'),
+      'build-firmware.sh must not have run when firmware/ was untouched',
+    );
+  });
+});
+
+test('the rebuild step in the updater is not wired to the fatal path', async () => {
+  const script = await readFile(UPDATER, 'utf8');
+  const start = script.indexOf('firmware rebuild (firmware/ changed)');
+  const end = script.indexOf('echo "== restart =="');
+  assert.ok(start > -1 && end > start, 'could not locate the firmware rebuild block');
+  const block = script.slice(script.lastIndexOf('\n', start), end);
+
+  assert.doesNotMatch(
+    block,
+    /build-firmware\.sh[^\n]*\|\|\s*fail/,
+    'the build invocation must not use the `|| fail` pattern git pull and npm ci use — that pattern aborts the update',
+  );
+  assert.match(block, /if\s+runuser[\s\S]*then[\s\S]*else[\s\S]*fi/, 'the build must be wrapped in an if/else, which is what keeps a nonzero exit from tripping set -e');
+});
+
+test('the installer runs the ESP32 core install and the initial build as the app user, not root', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  assert.match(script, /runuser -u \$\{APP\} -- arduino-cli core install esp32:esp32/);
+  assert.match(script, /runuser -u \$\{APP\} -- \.\/scripts\/build-firmware\.sh/);
+});
+
+test('the installer checks free disk space before installing the ESP32 core', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  const spaceCheck = script.indexOf('MIN_FREE_MB');
+  const coreInstall = script.indexOf('arduino-cli core install esp32:esp32');
+  assert.ok(spaceCheck > -1, 'no disk space check found');
+  assert.ok(coreInstall > -1, 'no core install found');
+  assert.ok(spaceCheck < coreInstall, 'the space check must run before the core install, not after');
+});
+
+test('the installer default disk size accounts for the firmware toolchain', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  assert.match(script, /DISK="\$\{DISK:-12\}"/);
+});
+
+test('a failed initial firmware build at install time does not abort the installer', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  const buildLine = script
+    .split('\n')
+    .find((l) => l.includes('./scripts/build-firmware.sh') && l.includes('runuser'));
+  assert.ok(buildLine, 'could not find the initial build invocation');
+  // The continuation line carries the non-fatal `|| warn`; die() would abort
+  // the whole install via the script's ERR trap.
+  const idx = script.indexOf(buildLine!);
+  const after = script.slice(idx, idx + 300);
+  assert.match(after, /\|\|\s*warn/, 'the initial build must degrade with warn(), not die()');
+  assert.doesNotMatch(after, /\|\|\s*die/);
+});

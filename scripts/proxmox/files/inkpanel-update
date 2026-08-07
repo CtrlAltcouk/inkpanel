@@ -70,6 +70,12 @@ write_status running
 cd "$REPO_DIR"
 
 LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+# Captured before the pull so the firmware rebuild below can tell whether
+# anything under firmware/ actually changed. `|| true` guarantees this
+# assignment itself never triggers set -e, regardless of git's exit status —
+# an ambiguous "before" is not worth aborting the whole update over, and the
+# diff below degrades to "skip the rebuild" rather than "fail the update".
+COMMIT_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
 
 echo "== git pull ==" >>"$LOG_FILE"
 # Pinned to origin/main so a repointed remote.origin.url or a checked-out
@@ -87,6 +93,31 @@ if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
   runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
 else
   echo "== npm ci skipped (lockfile unchanged) ==" >>"$LOG_FILE"
+fi
+write_status running
+
+# Deliberately outside the fatal path, unlike git pull and npm ci above:
+# whether an ESP32 compile succeeds has nothing to do with whether this
+# server can keep serving frames to panels, and coupling them would mean a
+# firmware-side typo stops every panel in the house getting a dashboard. The
+# `if runuser ...; then ... else ... fi` form is what keeps this exempt from
+# set -e — a bare `runuser ... || fail ...` here would be exactly the mistake
+# this comment exists to prevent.
+#
+# COMMIT_BEFORE can be empty (see its capture above); an empty value makes
+# this diff empty too, which the `-n` test below correctly reads as "nothing
+# changed" rather than "everything changed".
+FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- firmware/ 2>/dev/null || true)"
+
+if [[ -n "$FIRMWARE_DIFF" ]]; then
+  echo "== firmware rebuild (firmware/ changed) ==" >>"$LOG_FILE"
+  if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
+    echo "firmware rebuild: ok" >>"$LOG_FILE"
+  else
+    echo "firmware rebuild: FAILED — Flash tab will keep offering the previous build. This does not fail the update." >>"$LOG_FILE"
+  fi
+else
+  echo "== firmware rebuild skipped (firmware/ unchanged) ==" >>"$LOG_FILE"
 fi
 write_status running
 

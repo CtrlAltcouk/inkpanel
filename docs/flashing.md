@@ -14,10 +14,22 @@ deliberately doesn't.
 
 ## 1. Build the firmware first
 
-The server flashes a build; it does not compile one. This is a manual step you
-run when firmware code changes.
+The server flashes a build; it does not compile one on demand from the Flash
+tab. Something has to produce `firmware/dist/` before the tab has anything to
+offer.
 
-Install [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/),
+**On a Proxmox LXC install, this is automatic.** The installer sets up
+`arduino-cli` and the ESP32 core alongside Node and Chromium, and the updater
+(`pct exec <CTID> -- inkpanel-update`) rebuilds firmware whenever a pull
+actually changes anything under `firmware/` — mirroring how it already only
+runs `npm ci` when the lockfile changes. Most updates touch neither. A build
+failure is logged but never fails the update itself: whether an ESP32 compile
+succeeds has nothing to do with whether the server keeps serving frames to
+panels, so the Flash tab just keeps offering the previous build rather than
+the whole update being blocked on a firmware-side problem.
+
+**Everywhere else — a local checkout, a Docker deployment — it's a manual
+step.** Install [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/),
 then the ESP32 core:
 
 ```bash
@@ -31,14 +43,17 @@ Then build:
 ./scripts/build-firmware.sh
 ```
 
-That writes `firmware/dist/` — three binaries plus a `manifest.json` recording
-the firmware version and each binary's flash offset. The offsets come from
-`arduino-cli`'s own build report rather than being hardcoded, so they cannot
-drift out of step with a change to the partition scheme.
+Run this again whenever firmware code changes.
+
+Either way, the result is the same: `firmware/dist/` — three binaries plus a
+`manifest.json` recording the firmware version and each binary's flash
+offset. The bootloader offset comes from `arduino-cli`'s own build report
+rather than being hardcoded, because it genuinely varies by chip family; the
+other two are documented constants for this board's partition scheme.
 
 `firmware/dist/` is gitignored. It is build output, not source.
 
-Until you have run this, the Flash tab will say no firmware build is available
+Until a build has run, the Flash tab will say no firmware build is available
 rather than offering a flash that would fail.
 
 ---
