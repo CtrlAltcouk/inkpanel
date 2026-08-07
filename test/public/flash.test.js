@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import {
   serialSupported,
   httpsUrl,
@@ -7,7 +9,14 @@ import {
   noBuildNotice,
   readyPanel,
   renderFlash,
+  isEsp32S3,
+  shouldErase,
+  buildFlashParts,
+  fetchBinary,
+  explainFailure,
 } from '../../public/flash.js';
+
+const FLASH_JS_PATH = fileURLToPath(new URL('../../public/flash.js', import.meta.url));
 
 // navigator exists as a Node global (with only a getter, no setter), so it
 // must be overridden with defineProperty rather than plain assignment, and
@@ -44,6 +53,40 @@ async function withFetch(impl, fn) {
   } finally {
     globalThis.fetch = original;
   }
+}
+
+// A minimal DOM stand-in for the one selector set renderFlash's click
+// handler actually queries. Not a general DOM shim — just enough to drive
+// the button's click listener and observe the log element, so the wiring
+// around navigator.serial (cancel handling, error classification, idle
+// return) can be exercised without a browser. Real hardware I/O inside the
+// handler (Transport/ESPLoader) is untouched by this and stays unverified
+// without a board.
+function fakeRoot() {
+  let html = '';
+  const listeners = {};
+  const button = {
+    disabled: false,
+    addEventListener(event, handler) { listeners[event] = handler; },
+    async click() {
+      if (listeners.click) await listeners.click();
+    },
+  };
+  const log = { hidden: true, textContent: '', scrollTop: 0 };
+  let modeValue = 'preserve';
+  return {
+    get innerHTML() { return html; },
+    set innerHTML(value) { html = value; },
+    querySelector(selector) {
+      if (selector === '[data-connect]') return button;
+      if (selector === '.flash-log') return log;
+      if (selector === 'input[name=mode]:checked') return { value: modeValue };
+      return null;
+    },
+    button,
+    log,
+    setMode(value) { modeValue = value; },
+  };
 }
 
 function occurrences(haystack, needle) {
@@ -248,11 +291,235 @@ test('renderFlash shows the ready panel with the manifest data when a build exis
         }),
       }),
       async () => {
-        const root = { innerHTML: '' };
+        const root = fakeRoot();
         await renderFlash(root);
         assert.equal(occurrences(root.innerHTML, '<h3>Flash a panel</h3>'), 1);
         assert.equal(occurrences(root.innerHTML, 'Firmware 1.0.0 &middot; built 2026-08-06T10:00:00.000Z'), 1);
       },
     ),
   );
+});
+
+// The one full-wiring path testable without a board: the port picker being
+// cancelled happens entirely before any esptool-js/hardware call, so it can
+// be driven end-to-end through the real click handler. Everything past
+// requestPort() succeeding (Transport, ESPLoader, chip detection, erase,
+// write) needs real WebSerial and is NOT covered here — see Task 7.
+test('clicking Connect with a cancelled port picker returns to idle silently and touches nothing else', async () => {
+  let binFetches = 0;
+  await withNavigator(
+    { serial: { requestPort: async () => { throw Object.assign(new Error('cancelled'), { name: 'NotFoundError' }); } } },
+    () =>
+      withFetch(
+        async (url) => {
+          if (String(url).includes('/api/firmware/bin/')) binFetches += 1;
+          return {
+            status: 200,
+            ok: true,
+            json: async () => ({
+              available: true,
+              version: '1.0.0',
+              builtAt: '2026-08-06T10:00:00.000Z',
+              parts: [{ path: 'inkpanel.ino.bin', offset: 65536 }],
+            }),
+          };
+        },
+        async () => {
+          const root = fakeRoot();
+          await renderFlash(root);
+          await root.button.click();
+
+          assert.equal(root.log.textContent.trim(), 'Cancelled — no board selected.');
+          assert.equal(root.log.hidden, false);
+          assert.equal(root.button.disabled, false); // re-enabled, not stuck
+          assert.equal(binFetches, 0); // never got far enough to download a firmware image
+        },
+      ),
+  );
+});
+
+// --- Task 6: the parts that can genuinely be unit-tested -------------------
+//
+// esptool-js's ESPLoader.main() talks to real hardware over WebSerial, which
+// does not exist in Node — that half of the flashing flow is NOT YET
+// VERIFIED ON HARDWARE and is left to the Task 7 manual checklist. What
+// follows is the pure logic pulled out of the click handler so it can be
+// checked without a board: chip-string classification, the erase/preserve
+// switch, manifest-offset handling, binary fetching, and error classification.
+
+// The esptool-js bundle is ~380KB. Loading it for every visitor to this tab —
+// including the overwhelming majority who never click Connect — would be a
+// real cost paid for nothing. This is a source-level check because the
+// alternative (asserting it isn't in a stack trace, etc.) can't observe
+// "when" a module was loaded from outside a browser network panel.
+test('flash.js does not statically import the esptool-js vendor bundle at module top level', async () => {
+  const source = await readFile(FLASH_JS_PATH, 'utf8');
+  const staticImportPattern = /^\s*import\s+.*from\s+['"]\.\/vendor\/esptool-js\.js['"]/m;
+  assert.equal(staticImportPattern.test(source), false,
+    'esptool-js must not be a static top-level import — it must be loaded lazily via dynamic import()');
+});
+
+test('flash.js loads esptool-js via a dynamic import, so it is fetched only once a user connects', async () => {
+  const source = await readFile(FLASH_JS_PATH, 'utf8');
+  const dynamicImportPattern = /import\(\s*['"]\.\/vendor\/esptool-js\.js['"]\s*\)/;
+  assert.equal(dynamicImportPattern.test(source), true,
+    'expected a dynamic import(\'./vendor/esptool-js.js\') somewhere in the connect handler');
+});
+
+test('isEsp32S3 accepts real chip-identification strings for an S3', () => {
+  assert.equal(isEsp32S3('ESP32-S3'), true);
+  assert.equal(isEsp32S3('ESP32-S3 (revision v0.2)'), true);
+  assert.equal(isEsp32S3('esp32-s3'), true); // case-insensitive, esptool-js is not consistent about casing
+});
+
+test('isEsp32S3 rejects every other chip family, including near-miss S-series names', () => {
+  assert.equal(isEsp32S3('ESP32'), false);
+  assert.equal(isEsp32S3('ESP32-C3'), false);
+  assert.equal(isEsp32S3('ESP32-S2'), false);
+  assert.equal(isEsp32S3('ESP8266'), false);
+  assert.equal(isEsp32S3(undefined), false);
+  assert.equal(isEsp32S3(''), false);
+});
+
+test('shouldErase is true only for the literal "erase" radio value', () => {
+  assert.equal(shouldErase('erase'), true);
+});
+
+test('shouldErase defaults to preserving data for the "preserve" value and anything unexpected', () => {
+  // These are exactly the values that must NOT trigger an erase: the normal
+  // default value, a missing selection, and a garbled one. Getting this
+  // backwards silently wipes a user's Wi-Fi credentials on a routine update.
+  assert.equal(shouldErase('preserve'), false);
+  assert.equal(shouldErase(undefined), false);
+  assert.equal(shouldErase(''), false);
+  assert.equal(shouldErase('ERASE'), false); // radio values are lowercase; do not case-fold this
+});
+
+test('buildFlashParts takes the write address from manifest.offset, never a hardcoded constant', async () => {
+  // Offsets deliberately do NOT match any real ESP32 bootloader/partition
+  // table/app layout, so a hardcoded fallback in the implementation would
+  // show up immediately as a mismatch here.
+  const parts = [
+    { path: 'weird-a.bin', offset: 0x2222 },
+    { path: 'weird-b.bin', offset: 0x555555 },
+  ];
+  const fetched = [];
+  const fakeFetchBinary = async (path) => {
+    fetched.push(path);
+    return `data-for-${path}`;
+  };
+
+  const result = await buildFlashParts(parts, fakeFetchBinary);
+
+  assert.deepEqual(result, [
+    { address: 0x2222, data: 'data-for-weird-a.bin' },
+    { address: 0x555555, data: 'data-for-weird-b.bin' },
+  ]);
+  assert.deepEqual(fetched, ['weird-a.bin', 'weird-b.bin']);
+});
+
+test('buildFlashParts preserves numeric offsets exactly rather than stringifying them', async () => {
+  const result = await buildFlashParts([{ path: 'x.bin', offset: 65536 }], async () => 'x');
+  assert.equal(typeof result[0].address, 'number');
+  assert.equal(result[0].address, 65536);
+});
+
+test('fetchBinary requests the escaped firmware-name path under /api/firmware/bin/', async () => {
+  let requestedUrl = null;
+  await withFetch(
+    async (url) => {
+      requestedUrl = url;
+      return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    },
+    async () => {
+      await fetchBinary('weird name & stuff.bin');
+    },
+  );
+  assert.equal(requestedUrl, '/api/firmware/bin/weird%20name%20%26%20stuff.bin');
+});
+
+test('fetchBinary converts bytes to a binary string without corrupting bytes above 0x7F', async () => {
+  const bytes = new Uint8Array([0x00, 0x41, 0x7f, 0x80, 0xff]);
+  const result = await withFetch(
+    async () => ({ ok: true, status: 200, arrayBuffer: async () => bytes.buffer }),
+    () => fetchBinary('image.bin'),
+  );
+  assert.equal(result.length, 5);
+  const codes = [...result].map((ch) => ch.charCodeAt(0));
+  assert.deepEqual(codes, [0x00, 0x41, 0x7f, 0x80, 0xff]);
+});
+
+test('fetchBinary chunks across the 0x8000-byte boundary without dropping or duplicating bytes', async () => {
+  // A naive String.fromCharCode(...bytes) on an image this size overflows the
+  // call stack; chunking must not lose the byte at the seam either.
+  const size = 0x8000 * 2 + 10;
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < size; i += 1) bytes[i] = i % 256;
+
+  const result = await withFetch(
+    async () => ({ ok: true, status: 200, arrayBuffer: async () => bytes.buffer }),
+    () => fetchBinary('big.bin'),
+  );
+
+  assert.equal(result.length, size);
+  // Check the seam at the first chunk boundary and the last byte, not just the start.
+  assert.equal(result.charCodeAt(0x8000 - 1), (0x8000 - 1) % 256);
+  assert.equal(result.charCodeAt(0x8000), 0x8000 % 256);
+  assert.equal(result.charCodeAt(size - 1), (size - 1) % 256);
+});
+
+test('fetchBinary throws a message naming the file and status when the download fails', async () => {
+  await assert.rejects(
+    withFetch(
+      async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }),
+      () => fetchBinary('missing.bin'),
+    ),
+    /could not download missing\.bin \(404\)/,
+  );
+});
+
+test('explainFailure reports a cancelled port picker as non-failure, by name', () => {
+  const err = Object.assign(new Error('some message'), { name: 'NotFoundError' });
+  assert.equal(explainFailure(err), 'Cancelled — no board selected.');
+});
+
+test('explainFailure reports a cancelled port picker as non-failure, by message text', () => {
+  // Some browsers surface this as a plain Error rather than a named
+  // NotFoundError, so the message text is checked independently of name.
+  const err = new Error('No port selected by the user.');
+  assert.equal(explainFailure(err), 'Cancelled — no board selected.');
+});
+
+test('explainFailure names "port already in use" for a held serial port, and blames the real cause', () => {
+  const err = new Error('Failed to open serial port');
+  const message = explainFailure(err);
+  assert.match(message, /already in use/);
+  assert.match(message, /Arduino IDE serial monitor/);
+});
+
+test('explainFailure gives BOOT/RESET instructions when the board never enters flashing mode', () => {
+  const err = new Error('Timed out waiting for packet header');
+  const message = explainFailure(err);
+  assert.match(message, /Hold the BOOT button/);
+});
+
+test('explainFailure passes the chip-mismatch message through unchanged', () => {
+  const err = new Error('This tool only flashes ESP32-S3 boards, but found ESP32-C3.');
+  assert.equal(explainFailure(err), 'This tool only flashes ESP32-S3 boards, but found ESP32-C3.');
+});
+
+test('explainFailure falls back to a not-bricked reassurance for anything unrecognised', () => {
+  const err = new Error('some completely unrelated failure');
+  const message = explainFailure(err);
+  assert.match(message, /some completely unrelated failure/);
+  assert.match(message, /not damaged/);
+  assert.match(message, /Hold BOOT, tap RESET/);
+});
+
+test('explainFailure does not classify an unrelated error as the port-in-use case', () => {
+  // Pins the boundary of the "already in use" regex: a message that merely
+  // contains the word "open" in an unrelated sense must not be misclassified.
+  const err = new Error('board did not open the expected response window');
+  const message = explainFailure(err);
+  assert.equal(/Arduino IDE serial monitor/.test(message), false);
 });

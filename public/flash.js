@@ -71,6 +71,92 @@ export function noBuildNotice() {
   </div>`;
 }
 
+/**
+ * Fetch a firmware image as the binary string esptool-js expects.
+ *
+ * Not TextDecoder: this is binary, and any decoding would corrupt bytes above
+ * 0x7F. Chunked because a naive String.fromCharCode(...bytes) on a megabyte
+ * image overflows the call stack.
+ */
+export async function fetchBinary(name) {
+  const res = await fetch(`/api/firmware/bin/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`could not download ${name} (${res.status})`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return out;
+}
+
+/**
+ * True only for a genuine ESP32-S3 chip-identification string. Anything else
+ * (a different chip family, or no chip yet) must stop the flow before any
+ * write is attempted — a mismatched write is exactly the kind of mistake
+ * that leaves a board needing manual recovery.
+ */
+export function isEsp32S3(chip) {
+  return /ESP32-S3/i.test(String(chip));
+}
+
+/**
+ * The 'erase' radio value is the only input that erases the board. Every
+ * other value — including "preserve", a missing selection, or anything
+ * unrecognised — must preserve the NVS partition (the board's Wi-Fi
+ * credentials). Getting this backwards would silently wipe Wi-Fi setup on a
+ * routine firmware update, so this stays a single, explicit equality check
+ * rather than a "not preserve" negation.
+ */
+export function shouldErase(modeValue) {
+  return modeValue === 'erase';
+}
+
+/**
+ * Turn the manifest's parts into the {address, data} pairs esptool-js's
+ * writeFlash wants. Addresses always come from manifest.offset — set at
+ * build time — and never from a constant in this file, so the two cannot
+ * silently drift apart.
+ */
+export async function buildFlashParts(parts, fetchBinaryFn = fetchBinary) {
+  return Promise.all(
+    parts.map(async (part) => ({
+      address: part.offset,
+      data: await fetchBinaryFn(part.path),
+    })),
+  );
+}
+
+/**
+ * Every one of these is a case a person will actually hit. A raw exception
+ * string here reads as "the tool is broken" when the real answer is usually
+ * one sentence long.
+ */
+export function explainFailure(err) {
+  const message = String(err?.message ?? err);
+
+  // Cancelling the port picker is a normal thing to do, not a failure.
+  if (err?.name === 'NotFoundError' || /No port selected/i.test(message)) {
+    return 'Cancelled — no board selected.';
+  }
+  if (/already open|in use|Failed to open serial port/i.test(message)) {
+    return 'That port is already in use. Close the Arduino IDE serial monitor ' +
+           '(or any other serial tool) and try again — only one program can hold a port.';
+  }
+  if (/Failed to connect|Timed out waiting for packet|invalid head of packet/i.test(message)) {
+    return 'Could not put the board into flashing mode. Hold the BOOT button, ' +
+           'tap RESET, release BOOT, then try again.';
+  }
+  if (/only flashes ESP32-S3/i.test(message)) {
+    return message;
+  }
+  // A failed write is recoverable and saying so matters: the instinct is to
+  // assume a half-written board is bricked. The ROM bootloader lives in mask
+  // ROM and no flash write can damage it.
+  return `${message}\n\nThe board is not damaged — the bootloader it starts from ` +
+         'cannot be overwritten. Hold BOOT, tap RESET, and flash again.';
+}
+
 export function readyPanel(manifest) {
   return `<div class="card">
     <h3>Flash a panel</h3>
@@ -109,6 +195,79 @@ export async function renderFlash(root) {
   }
 
   root.innerHTML = readyPanel(manifest);
-  // Task 6 wires the Connect button. Until then it is deliberately inert
-  // rather than half-working.
+
+  const button = root.querySelector('[data-connect]');
+  const log = root.querySelector('.flash-log');
+
+  const write = (line) => {
+    log.hidden = false;
+    log.textContent += `${line}\n`;
+    log.scrollTop = log.scrollHeight;
+  };
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    log.hidden = false;
+    log.textContent = '';
+
+    let transport = null;
+    try {
+      // The browser's own port picker. This dialog is the real consent step:
+      // a page cannot reach a serial port without the user choosing it here.
+      const port = await navigator.serial.requestPort();
+
+      // esptool-js is ~380KB. Importing it here — only once a user has
+      // actually picked a port — keeps it out of the page for every visitor
+      // to this tab who never clicks Connect, instead of a top-level import
+      // that would load it for everyone.
+      const { ESPLoader, Transport } = await import('./vendor/esptool-js.js');
+      transport = new Transport(port, true);
+
+      const loader = new ESPLoader({
+        transport,
+        baudrate: 921600,
+        romBaudrate: 115200,
+        terminal: { clean: () => {}, writeLine: write, write: () => {} },
+      });
+
+      const chip = await loader.main();
+      write(`Detected ${chip}`);
+      if (!isEsp32S3(chip)) {
+        throw new Error(`This tool only flashes ESP32-S3 boards, but found ${chip}.`);
+      }
+
+      const erase = shouldErase(root.querySelector('input[name=mode]:checked').value);
+      if (erase) {
+        // The one explicit extra step. A normal write leaves the NVS partition
+        // alone, which is why "preserve" needs no special handling at all.
+        write('Erasing flash — this takes a moment...');
+        await loader.eraseFlash();
+      }
+
+      const parts = await buildFlashParts(manifest.parts);
+
+      write(`Writing ${parts.length} images...`);
+      await loader.writeFlash({
+        fileArray: parts,
+        flashSize: 'keep',
+        eraseAll: false,
+        compress: true,
+        reportProgress: (index, written, total) => {
+          write(`  image ${index + 1}: ${Math.round((written / total) * 100)}%`);
+        },
+      });
+
+      await loader.after();
+      write(erase
+        ? 'Done. The board will restart and ask for Wi-Fi again.'
+        : 'Done. The board will restart and reconnect on its own.');
+    } catch (err) {
+      write(`\n${explainFailure(err)}`);
+    } finally {
+      // Always release the port: leaving it held means the next attempt fails
+      // with "port already in use" caused by this page itself.
+      try { await transport?.disconnect(); } catch { /* already gone */ }
+      button.disabled = false;
+    }
+  });
 }
