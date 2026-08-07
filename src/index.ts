@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './http/app.ts';
 import { loadOrCreateSecret } from './http/auth.ts';
+import { startHttpsListener } from './https.ts';
 import { DeviceStore } from './devices/store.ts';
 import { FrameService } from './render/frameService.ts';
 import { Renderer } from './render/browser.ts';
@@ -51,13 +52,26 @@ export async function main(): Promise<void> {
   const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
-  const server = createApp({
+  const app = createApp({
     store, frames, publicBaseUrl, dataDir, firmwareDir, auth: { password, secret }, trustProxy,
-  }).listen(port, () => {
+  });
+  const server = app.listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
     console.log(`data directory: ${dataDir}`);
     console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
   });
+
+  // Additive: :8080 keeps serving firmware check-ins over plain HTTP, which
+  // an ESP32 cannot do over a self-signed cert anyway. This second listener
+  // exists so the browser will expose WebSerial, which requires a secure
+  // context — see docs/superpowers/specs/2026-08-06-inkpanel-web-flash-design.md.
+  const httpsPort = Number(process.env.HTTPS_PORT ?? 8443);
+  const httpsServer = await startHttpsListener(app, { dataDir, port: httpsPort });
+  console.log(
+    httpsServer
+      ? `https listening on https://${lanAddress()}:${httpsPort} (self-signed; needed for the Flash tab)`
+      : 'https disabled: could not generate a certificate (openssl missing?) — flashing will be unavailable',
+  );
 
   // Launch Chromium now rather than making the first device wait for it. A cold
   // launch on a modest container can exceed a panel's HTTP read timeout.
@@ -69,6 +83,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async () => {
     server.close();
+    httpsServer?.close();
     await renderer.close();
     process.exit(0);
   };

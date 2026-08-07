@@ -127,6 +127,22 @@ server (usually `1`), or to a comma-separated list of trusted addresses/
 subnets — see [Express's `trust proxy` docs](https://expressjs.com/en/guide/behind-proxies.html)
 for the accepted values.
 
+### HTTPS (`HTTPS_PORT`, default `8443`)
+
+The server also listens on a second, HTTPS port, purely so the browser will
+expose [WebSerial](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API)
+for the firmware Flash tab — WebSerial refuses to run outside a secure
+context. The certificate is **self-signed** and generated once on first boot
+into the data directory, so your browser will show a trust warning the first
+time you open the HTTPS port; accept it once and it will not reappear
+(the certificate is reused, not regenerated, on every restart).
+
+Panels are unaffected: firmware has no way to trust a self-signed certificate,
+so it keeps checking in over the plain-HTTP port exactly as before. If no
+certificate can be generated (for example, `openssl` is not installed), the
+server logs that HTTPS is disabled and continues serving everything else over
+HTTP — only the Flash tab is unavailable.
+
 ## Documentation
 
 - [Spec](docs/superpowers/specs/2026-08-03-inkpanel-spec1-design.md) — the design and why it is shaped this way
