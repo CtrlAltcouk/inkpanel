@@ -229,6 +229,40 @@ test('the installer checks free disk space before installing the ESP32 core', as
   assert.ok(spaceCheck < coreInstall, 'the space check must run before the core install, not after');
 });
 
+// A real install hit this directly: the arduino-cli fetch had its output
+// swallowed by `>/dev/null 2>&1`, so when it silently failed to install
+// anything, the failure only surfaced two steps later as a bare
+// "arduino-cli: command not found" with no indication of what actually went
+// wrong or why. Two properties close that gap, and both are checked here
+// rather than just one, because either alone leaves a blind spot: the first
+// makes a script-level failure (a real `fail()` inside install.sh) visible at
+// the point it happens; the second catches the quieter case where install.sh
+// exits 0 having installed nothing, because curl returned an empty or
+// truncated body that "sh" then executed as a no-op.
+test('the arduino-cli install step is diagnosable when it fails, not silent', async () => {
+  const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
+  const installIdx = script.indexOf('install.sh | BINDIR=/usr/local/bin sh');
+  assert.ok(installIdx > -1, 'could not find the arduino-cli install invocation');
+
+  const installLineStart = script.lastIndexOf('\n', installIdx);
+  const installLineEnd = script.indexOf('\n', installIdx);
+  const installLine = script.slice(installLineStart, installLineEnd);
+  assert.doesNotMatch(
+    installLine,
+    />\s*\/dev\/null/,
+    'the install script\'s own output must not be suppressed — it is the one step that talks to an external host other than the already-proven-reachable Debian/Node mirrors, and a real failure here needs to be visible at the point it happens',
+  );
+
+  const versionCheckIdx = script.indexOf("arduino-cli $(run 'arduino-cli version'");
+  assert.ok(versionCheckIdx > installIdx, 'could not find the arduino-cli version step after the install');
+  const between = script.slice(installIdx, versionCheckIdx);
+  assert.match(
+    between,
+    /command -v arduino-cli[\s\S]*\|\|\s*die/,
+    'an explicit command -v check with a die() must sit between the install and the version step, to catch install.sh exiting 0 with nothing actually installed',
+  );
+});
+
 test('the installer default disk size accounts for the firmware toolchain', async () => {
   const script = await readFile(join(root, 'scripts', 'proxmox', 'inkpanel-lxc.sh'), 'utf8');
   assert.match(script, /DISK="\$\{DISK:-12\}"/);

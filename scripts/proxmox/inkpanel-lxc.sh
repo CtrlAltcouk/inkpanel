@@ -218,7 +218,20 @@ fi
 step "${AVAIL_MB} MB free"
 
 step "arduino-cli"
-run "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh >/dev/null 2>&1"
+# Deliberately NOT redirected to /dev/null like most steps above: this is the
+# one install step that talks to an external host other than the Debian/Node
+# mirrors already proven reachable, so a network hiccup here is real and not
+# hypothetical — the first live run of this script hit exactly that, and with
+# output suppressed the failure surfaced two steps later as a bare "arduino-cli:
+# command not found", with nothing to say why. Letting the install script's own
+# progress output show means a real failure is visible at the point it happens.
+run "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh"
+# A second, explicit check: the install script can exit 0 having installed
+# nothing, if curl returned an empty or truncated body that "sh" then executed
+# as a no-op script. That failure mode produces no error of its own — only this
+# check catches it.
+run "command -v arduino-cli >/dev/null" \
+  || die "arduino-cli did not end up on the PATH after installing — check the container has network access to downloads.arduino.cc, then retry (pct stop ${CTID} && pct destroy ${CTID}, then re-run this installer)"
 step "arduino-cli $(run 'arduino-cli version' | tr -d '\r')"
 
 step "ESP32 board core (this takes a minute)"
