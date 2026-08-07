@@ -166,17 +166,47 @@ end state as holding KEY3 today, just triggered from the browser.
 browser-side flow itself — WebSerial, esptool-js, chip identification, an
 actual preserve-mode flash, an actual erase-mode flash, auto-reset into
 bootloader mode. None of it can run in Node's test runner; it needs a real
-board and a real Chromium browser. This gets a manual checklist instead, and
-— consistent with how the rest of this repo's firmware work has been labeled
-— the implementation plan and its final report will say plainly **"NOT YET
-VERIFIED ON HARDWARE"** until each of these has actually been done:
+board and a real Chromium browser.
 
-1. Connect over `:8443` in Chrome; port picker appears; board identified
-   correctly.
-2. Preserve-mode flash on an *already-provisioned* board (BedRoom) — confirm
-   it reboots straight onto WiFi and checks in as itself, no re-pairing.
-3. Erase-mode flash — confirm it comes up in the captive portal afterward.
-4. Open the tab over plain `:8080` — confirm it points at `:8443` rather than
-   showing a broken button.
-5. Open Arduino IDE's serial monitor on the port first, then try Connect —
-   confirm the "close other serial tools" message.
+### Hardware verification status — **NOT YET VERIFIED ON HARDWARE**
+
+As of 2026-08-07, **none of the five checklist items below has been run.**
+The feature is code-complete and covered by 346 automated tests, but no part
+of it has touched a real board.
+
+Two things block the checklist, both environmental rather than defects:
+
+- **`arduino-cli` is not installed on the development machine**, so
+  `scripts/build-firmware.sh` has never produced a real build. Every test of
+  it runs against synthetic input. With no build in `firmware/dist/`, the
+  Flash tab correctly reports that none is available — which means even the
+  two items needing no board (1 and 4) cannot be completed, because there is
+  nothing to flash.
+- **No board is attached**, and items 2, 3 and 5 need one.
+
+The checklist, all items outstanding:
+
+1. Connect over `:8443` in Chrome; port picker appears; board identified as
+   an ESP32-S3. — **not run**
+2. Preserve-mode flash on an *already-provisioned* board (BedRoom): confirm it
+   reboots straight onto WiFi and checks in as itself, no re-pairing, with
+   `lastSeenAt` updating in the Panels tab. — **not run**
+3. Erase-mode flash: confirm it comes up broadcasting `inkpanel-setup`, can be
+   reconfigured from a phone, and reappears under **the same device id** (the
+   id is MAC-derived, so an erase must not create a duplicate). — **not run**
+4. Open the tab over plain `:8080` from a second machine: confirm the HTTPS
+   notice appears and its link works. — **not run**
+5. Open the Arduino IDE serial monitor on the port, then click Connect:
+   confirm the "close other serial tools" message rather than a raw
+   exception. — **not run**
+
+Items 1 and 4 exercise no hardware, so completing only those would not make
+this feature verified. Item 2 is the one that matters most: it is the routine
+case, and getting preserve-vs-erase backwards silently destroys a user's WiFi
+configuration on what they believed was a routine update.
+
+One further gap worth naming: **nobody has ever loaded the Flash tab over a
+LAN IP on plain HTTP from a second machine**, in any browser. The
+browser/protocol branching is covered by unit tests across all four
+combinations, but has never been observed in a real browser on a real
+network.

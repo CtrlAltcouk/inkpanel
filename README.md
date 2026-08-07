@@ -8,6 +8,12 @@ A small server renders your calendar and weather into a single 1-bit image. A
 battery-powered ESP32 panel wakes up, fetches that image, displays it, and goes
 back to sleep. The panel does almost nothing; the server does almost everything.
 
+Firmware can be flashed to a board from the **Flash tab** in the web UI, over
+USB, without the Arduino IDE. It needs Chrome or Edge and the HTTPS address
+(`https://<server>:8443`), because the browser API it uses only works in a
+secure context — see [docs/flashing.md](docs/flashing.md). Wi-Fi setup is
+unchanged and still happens from a phone.
+
 > **Status: server working, one panel deployed.** The server renders, serves
 > and caches frames, and the whole protocol is exercised by a `fake-device` CLI.
 > The Proxmox LXC installer is tested and working. The firmware is flashed to
@@ -148,6 +154,7 @@ HTTP — only the Flash tab is unavailable.
 - [Spec](docs/superpowers/specs/2026-08-03-inkpanel-spec1-design.md) — the design and why it is shaped this way
 - [Implementation plan](docs/superpowers/plans/2026-08-03-inkpanel-spec1.md) — task by task
 - [Deployment](docs/deployment.md) — Proxmox, TrueNAS, and what to check when it fails
+- [Flashing](docs/flashing.md) — writing firmware to a board from the browser
 
 ## Licence
 
