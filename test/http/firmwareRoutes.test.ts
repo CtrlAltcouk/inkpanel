@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createApp } from '../../src/http/app.ts';
@@ -116,6 +116,45 @@ test('a traversal that keeps a valid .bin extension still cannot escape the dire
 test('a missing binary is 404, not a hang', async () => {
   await withServer(async (base) => {
     assert.equal((await fetch(`${base}/api/firmware/bin/nope.bin`)).status, 404);
+  });
+});
+
+test('a read failure after the stat pre-check fails the request without taking the server down', async () => {
+  // stat() sees a real filesystem entry (so the 404 pre-check passes), but
+  // it is a directory, not a file, so createReadStream(...).pipe(res) fails
+  // asynchronously with EISDIR. This is a deterministic stand-in for the
+  // real-world TOCTOU window (file removed/locked/permission-changed between
+  // stat() and pipe()) without racing anything. Without an 'error' listener
+  // on the stream, this unhandled 'error' event crashes the whole process.
+  await withServer(async (base, _store, dir) => {
+    await mkdir(join(dir, 'oops.bin'));
+
+    let requestFailed = false;
+    try {
+      const res = await fetch(`${base}/api/firmware/bin/oops.bin`);
+      if (res.status === 500) {
+        requestFailed = true;
+      } else {
+        // The stream errored after headers were already sent: the connection
+        // is destroyed instead, which surfaces here as a failed body read or
+        // a rejected fetch, depending on timing.
+        try {
+          await res.arrayBuffer();
+        } catch {
+          requestFailed = true;
+        }
+      }
+    } catch {
+      requestFailed = true;
+    }
+    assert.ok(requestFailed, 'expected the bad read to fail the request one way or another');
+
+    // The actual point of the test: the process must still be alive to
+    // answer a completely unrelated request afterwards. Without the fix,
+    // the stream's unhandled 'error' event brings down the whole process
+    // and this request gets ECONNREFUSED instead of a response.
+    const health = await fetch(`${base}/health`);
+    assert.equal(health.status, 200, 'server should still be alive and serving /health after the failed read');
   });
 });
 
