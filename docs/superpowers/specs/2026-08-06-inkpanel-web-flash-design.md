@@ -54,10 +54,19 @@ the server to fetch build artifacts over the internet at flash time. Instead,
 `scripts/build-firmware.sh` runs `arduino-cli compile` locally, whenever
 firmware code changes, and copies the output into `firmware/dist/`:
 
-- the bootloader, partition table, and app binaries, at whatever flash offsets
-  `arduino-cli` reports for this board profile — captured from its own build
-  output rather than hand-typed, so they can't drift out of sync with a future
-  partition-table change
+- the bootloader, partition table, and app binaries, each with its flash
+  offset. The **bootloader** offset is read from `arduino-cli`'s build
+  properties, because it genuinely varies by chip family (`0x0` on the S3,
+  `0x1000` on the classic ESP32). The **partition-table** (`0x8000`) and
+  **app** (`0x10000`) offsets are documented constants: they are the Arduino
+  ESP32 core's standard values for this board's partition scheme, and
+  `arduino-cli` does not reliably publish them. Changing the partition scheme
+  would mean revisiting them, and a test pins them to a single documented
+  place so they cannot be scattered.
+
+  An earlier draft of this spec claimed all three were derived from the build
+  output. That was never true of the implementation, and is corrected here
+  rather than left as prose that oversells what the code does.
 - `manifest.json`, carrying the firmware version (read directly out of
   `config.h`'s `FIRMWARE_VERSION`) and a build timestamp
 
