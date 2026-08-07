@@ -99,11 +99,19 @@ info "Preparing Debian template"
 pveam update >/dev/null 2>&1 || warn "pveam update failed; using cached template list"
 
 # Prefer the newest Debian standard template available.
+# Debian's own mirror publishes both amd64 and arm64 builds under names that
+# differ only in that suffix (debian-13-standard_13.6-1_arm64.tar.zst vs.
+# ..._amd64.tar.zst). An unfiltered `sort -V | tail -1` compares the whole
+# filename, and "arm64" can sort after "amd64" — which downloads a template
+# LXC cannot boot on this host at all: the container creates successfully and
+# then fails at `pct start` with no clearer signal than that. Filtering to
+# the host's own dpkg architecture is what pct create itself requires anyway.
+HOST_ARCH="$(dpkg --print-architecture)"
 TEMPLATE_NAME="$(pveam available --section system \
   | awk '{print $2}' \
-  | grep -E '^debian-1[0-9]+-standard' \
+  | grep -E "^debian-1[0-9]+-standard_[^_]+_${HOST_ARCH}\.tar\.(gz|zst)\$" \
   | sort -V | tail -1)"
-[[ -n "$TEMPLATE_NAME" ]] || die "no Debian standard template found in pveam"
+[[ -n "$TEMPLATE_NAME" ]] || die "no Debian standard template for ${HOST_ARCH} found in pveam"
 
 if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE_NAME"; then
   step "downloading ${TEMPLATE_NAME}"
