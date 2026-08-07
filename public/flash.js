@@ -22,10 +22,28 @@ export function httpsUrl() {
   return url.toString();
 }
 
+/**
+ * UA sniffing is normally the wrong tool for the job — feature detection is
+ * almost always better. It does not work here: `navigator.serial` is
+ * undefined in *both* of the situations this module needs to tell apart (an
+ * unsupported browser, and an unsupported context on a browser that would
+ * otherwise support WebSerial), so there is no feature left to detect. The
+ * origin's secure-context state alone cannot separate them — only the
+ * browser family can, which is the one thing left to check.
+ */
+function looksLikeChromiumFamily() {
+  const ua = navigator.userAgent || '';
+  return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
+}
+
 export function unsupportedNotice() {
   // An insecure context and an unsupported browser both leave navigator.serial
-  // undefined, but only one of them is fixable by changing the URL.
-  if (window.isSecureContext === false) {
+  // undefined, but only one of them is fixable by changing the URL — and that
+  // is only true for a browser that would support WebSerial given a secure
+  // context. A Firefox/Safari user on plain HTTP needs a different browser,
+  // not a different URL, so the HTTPS-redirect branch is gated on the browser
+  // family too.
+  if (window.isSecureContext === false && looksLikeChromiumFamily()) {
     const target = httpsUrl();
     return `<div class="card">
       <h3>Flashing needs a secure connection</h3>

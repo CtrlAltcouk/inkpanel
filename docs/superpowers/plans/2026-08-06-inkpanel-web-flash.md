@@ -897,10 +897,23 @@ function httpsUrl() {
   return url.toString();
 }
 
+// `isSecureContext` is a property of the *origin*, not the browser: it is
+// false for every browser on plain HTTP, including ones that would support
+// WebSerial fine over HTTPS. Branching on it alone cannot tell "wrong
+// protocol" apart from "wrong browser" — and only the first is fixable by
+// following a link. UA sniffing is normally the wrong tool, but there is no
+// feature to detect here: navigator.serial is undefined in both cases, so
+// the browser family is the only signal left that can separate them.
+function looksLikeChromiumFamily() {
+  const ua = navigator.userAgent || '';
+  return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
+}
+
 function unsupportedNotice() {
   // An insecure context and an unsupported browser both leave navigator.serial
-  // undefined, but only one of them is fixable by changing the URL.
-  if (window.isSecureContext === false) {
+  // undefined, but only one of them is fixable by changing the URL — and only
+  // for a browser that would support WebSerial given a secure context.
+  if (window.isSecureContext === false && looksLikeChromiumFamily()) {
     const target = httpsUrl();
     return `<div class="card">
       <h3>Flashing needs a secure connection</h3>

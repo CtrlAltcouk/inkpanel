@@ -50,6 +50,11 @@ function occurrences(haystack, needle) {
   return haystack.split(needle).length - 1;
 }
 
+// Real user-agent strings, trimmed to the parts the regex cares about.
+const CHROME_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const FIREFOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0';
+
 test('serialSupported reads navigator.serial, not just truthiness of navigator', async () => {
   await withNavigator({ serial: {} }, () => {
     assert.equal(serialSupported(), true);
@@ -73,14 +78,33 @@ test('httpsUrl works from localhost too, for the case the link is copy-pasted', 
 
 // This is the distinction the whole task exists to get right: an insecure
 // HTTP context and a browser that lacks WebSerial both leave
-// navigator.serial undefined, but only the first is fixed by an HTTPS link.
-test('an insecure HTTP context gets the HTTPS-redirect notice, never the unsupported-browser notice', async () => {
-  await withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
-    const html = unsupportedNotice();
-    assert.equal(occurrences(html, '<h3>Flashing needs a secure connection</h3>'), 1);
-    assert.equal(occurrences(html, '<a href="https://192.168.1.50:8443/#flash">Open inkpanel over HTTPS</a>'), 1);
-    assert.equal(occurrences(html, 'This browser cannot flash boards'), 0);
-  });
+// navigator.serial undefined, but only the first is fixed by an HTTPS link —
+// and only for a browser that would support WebSerial given a secure
+// context (Chrome/Edge/Chromium). This test pins the "Chrome + HTTP" quadrant.
+test('an insecure HTTP context on a Chromium browser gets the HTTPS-redirect notice, never the unsupported-browser notice', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
+      const html = unsupportedNotice();
+      assert.equal(occurrences(html, '<h3>Flashing needs a secure connection</h3>'), 1);
+      assert.equal(occurrences(html, '<a href="https://192.168.1.50:8443/#flash">Open inkpanel over HTTPS</a>'), 1);
+      assert.equal(occurrences(html, 'This browser cannot flash boards'), 0);
+    }),
+  );
+});
+
+// The "Firefox + HTTP" quadrant: this is the blind spot that shipped broken.
+// isSecureContext is false here too, but Firefox would not gain WebSerial
+// from an HTTPS link, so it must get the unsupported-browser message instead
+// of being sent on a pointless trip to accept a self-signed cert warning.
+test('an insecure HTTP context on Firefox gets the unsupported-browser notice, never the HTTPS-redirect notice', async () => {
+  await withNavigator({ userAgent: FIREFOX_UA }, () =>
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
+      const html = unsupportedNotice();
+      assert.equal(occurrences(html, '<h3>This browser cannot flash boards</h3>'), 1);
+      assert.equal(occurrences(html, 'Flashing needs a secure connection'), 0);
+      assert.equal(occurrences(html, '<a href'), 0);
+    }),
+  );
 });
 
 test('a secure context with no WebSerial support gets the unsupported-browser notice, never the HTTPS notice', async () => {
@@ -99,13 +123,15 @@ test('the HTTPS notice link target is escaped rather than interpolated raw', asy
   // that would make this test pass against broken code. An ampersand is not
   // percent-encoded by URL, so it is the character that actually
   // distinguishes an escaped link from a raw one here.
-  await withWindow(
-    { isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash&reload=1' } },
-    () => {
-      const html = unsupportedNotice();
-      assert.equal(occurrences(html, 'href="https://192.168.1.50:8443/#flash&amp;reload=1"'), 1);
-      assert.equal(html.includes('href="https://192.168.1.50:8443/#flash&reload=1"'), false);
-    },
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow(
+      { isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash&reload=1' } },
+      () => {
+        const html = unsupportedNotice();
+        assert.equal(occurrences(html, 'href="https://192.168.1.50:8443/#flash&amp;reload=1"'), 1);
+        assert.equal(html.includes('href="https://192.168.1.50:8443/#flash&reload=1"'), false);
+      },
+    ),
   );
 });
 
@@ -135,9 +161,11 @@ test('readyPanel escapes manifest fields rather than interpolating them raw', ()
   assert.equal(occurrences(html, '&lt;script&gt;alert(1)&lt;/script&gt;'), 1);
 });
 
+// "Firefox + HTTPS" quadrant: secure context, but the browser itself lacks
+// WebSerial, so no URL change can help.
 test('renderFlash shows the unsupported-browser notice and never calls the manifest API when WebSerial is simply absent', async () => {
   let fetchCalled = false;
-  await withNavigator({}, () =>
+  await withNavigator({ userAgent: FIREFOX_UA }, () =>
     withWindow({ isSecureContext: true }, () =>
       withFetch(
         async () => {
@@ -155,14 +183,41 @@ test('renderFlash shows the unsupported-browser notice and never calls the manif
   );
 });
 
-test('renderFlash shows the HTTPS-redirect notice when navigator lacks serial because the page is on plain HTTP', async () => {
-  await withNavigator({}, () =>
+// "Chrome + HTTP" quadrant: the browser would support WebSerial, but the
+// origin is not a secure context, so the fix is the HTTPS link.
+test('renderFlash shows the HTTPS-redirect notice when a Chromium browser lacks serial because the page is on plain HTTP', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, async () => {
       const root = { innerHTML: '' };
       await renderFlash(root);
       assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 1);
       assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:8443/#flash'), 1);
+      assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 0);
     }),
+  );
+});
+
+// "Firefox + HTTP" quadrant: this is the defect. Both isSecureContext is
+// false and the browser lacks WebSerial, but only the unsupported-browser
+// notice is correct — an HTTPS link would not give Firefox WebSerial.
+test('renderFlash shows the unsupported-browser notice, not the HTTPS-redirect notice, for Firefox on plain HTTP', async () => {
+  let fetchCalled = false;
+  await withNavigator({ userAgent: FIREFOX_UA }, () =>
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () =>
+      withFetch(
+        async () => {
+          fetchCalled = true;
+          throw new Error('renderFlash must not fetch the manifest when WebSerial is unavailable');
+        },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 1);
+          assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 0);
+          assert.equal(fetchCalled, false);
+        },
+      ),
+    ),
   );
 });
 
