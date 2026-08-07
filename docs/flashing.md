@@ -146,7 +146,16 @@ the board's **BOOT** button, tap **RESET**, release **BOOT**, then try again.
 **"Cancelled — no board selected."**
 You closed the port picker. Nothing happened; just click Connect again.
 
-**The write failed partway through.**
+**"Failed to write ... to flash after seq N failed with status ..."**
+The board connected and entered flashing mode fine — the failure happened
+partway through writing, so holding BOOT won't help here; that's connection
+advice for a problem this isn't. This is the chip's own ROM loader rejecting
+one block, which in practice is almost always the USB link dropping a beat
+during a long transfer: plug directly into the computer's own USB port rather
+than a hub or extension cable, keep the tab in the foreground, and don't let
+the computer sleep while it writes. Then try again.
+
+**Any other write failure partway through.**
 **The board is not damaged.** The ROM bootloader lives in mask ROM and no
 flash write can overwrite it, so the board can always be put back into
 bootloader mode and reflashed. Hold **BOOT**, tap **RESET**, and flash again.

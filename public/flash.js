@@ -147,14 +147,33 @@ export function explainFailure(err) {
     return 'Could not put the board into flashing mode. Hold the BOOT button, ' +
            'tap RESET, release BOOT, then try again.';
   }
+  // Distinct from the connect-time failures above: the board answered, entered
+  // flashing mode, and rejected a specific block partway through writing (the
+  // sequence number is mid-transfer, not zero). "Hold BOOT, tap RESET" is
+  // connection advice and does not apply here — the connection already
+  // worked. This shape is the ROM loader's own status byte coming back
+  // non-zero for one write, which in practice is almost always the USB link
+  // dropping a beat during a long, sustained transfer, not a bootloader
+  // problem.
+  if (/Failed to write.*data to flash after seq \d+ failed with status/i.test(message)) {
+    return `${message}\n\nThe board is not damaged — this is the connection dropping ` +
+           'a beat partway through writing, not a bootloader problem, so holding BOOT ' +
+           "won't help. Plug directly into the computer's own USB port rather than a " +
+           'hub or extension cable, keep this tab in the foreground and the computer ' +
+           'awake while it writes, then try again.';
+  }
   if (/only flashes ESP32-S3/i.test(message)) {
     return message;
   }
   // A failed write is recoverable and saying so matters: the instinct is to
   // assume a half-written board is bricked. The ROM bootloader lives in mask
-  // ROM and no flash write can damage it.
+  // ROM and no flash write can damage it. Deliberately not prescribing a
+  // specific fix here — unlike the two cases above, an unrecognised error
+  // gives no evidence of what actually went wrong, and guessing "hold BOOT"
+  // for every unknown failure is exactly the misdirection the write-failure
+  // case above exists to avoid.
   return `${message}\n\nThe board is not damaged — the bootloader it starts from ` +
-         'cannot be overwritten. Hold BOOT, tap RESET, and flash again.';
+         'cannot be overwritten. It is safe to try again.';
 }
 
 export function readyPanel(manifest) {
@@ -251,7 +270,14 @@ export async function renderFlash(root) {
         fileArray: parts,
         flashSize: 'keep',
         eraseAll: false,
-        compress: true,
+        // Compressed writes ask the ROM stub to inflate on the fly, which
+        // means its decompression buffer can starve if chunks don't arrive
+        // fast enough over WebSerial — a real failure hit exactly this,
+        // rejected mid-transfer with the chip's own non-zero status byte, not
+        // a JS-side timeout. A firmware image this size costs a few extra
+        // seconds uncompressed; that's a better trade than an intermittent
+        // failure on a flow a first-time user is unlikely to retry calmly.
+        compress: false,
         reportProgress: (index, written, total) => {
           write(`  image ${index + 1}: ${Math.round((written / total) * 100)}%`);
         },

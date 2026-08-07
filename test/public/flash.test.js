@@ -366,6 +366,22 @@ test('flash.js loads esptool-js via a dynamic import, so it is fetched only once
     'expected a dynamic import(\'./vendor/esptool-js.js\') somewhere in the connect handler');
 });
 
+// A real flash failed mid-write with the chip's own ROM loader rejecting one
+// block (see the explainFailure tests above for the exact error). Compressed
+// writes ask the ROM stub to inflate on the fly, and its decompression buffer
+// can starve if chunks don't arrive fast enough over WebSerial — a documented
+// cause of exactly this failure shape. Source-level, matching the dynamic-
+// import tests above: writeFlash() talks to real hardware and cannot be
+// exercised without a board, so this pins the option rather than the outcome.
+test('the writeFlash call disables compression, which is a known cause of mid-write failures over WebSerial', async () => {
+  const source = await readFile(FLASH_JS_PATH, 'utf8');
+  const writeFlashCallIdx = source.indexOf('loader.writeFlash({');
+  assert.ok(writeFlashCallIdx > -1, 'could not find the writeFlash call');
+  const closingIdx = source.indexOf('});', writeFlashCallIdx);
+  const callBody = source.slice(writeFlashCallIdx, closingIdx);
+  assert.match(callBody, /compress:\s*false/, 'compress must be false in the writeFlash options');
+});
+
 test('isEsp32S3 accepts real chip-identification strings for an S3', () => {
   assert.equal(isEsp32S3('ESP32-S3'), true);
   assert.equal(isEsp32S3('ESP32-S3 (revision v0.2)'), true);
@@ -513,7 +529,30 @@ test('explainFailure falls back to a not-bricked reassurance for anything unreco
   const message = explainFailure(err);
   assert.match(message, /some completely unrelated failure/);
   assert.match(message, /not damaged/);
-  assert.match(message, /Hold BOOT, tap RESET/);
+});
+
+// A real flash hit this: the board connected and entered flashing mode fine,
+// then the chip's own ROM loader rejected one write block partway through
+// (sequence 36 of the transfer, not the first). The message this used to
+// fall through to told the user to "Hold BOOT, tap RESET" — bootloader-entry
+// advice for a failure that happened well after the bootloader had already
+// been entered successfully, actively pointing at the wrong fix.
+test('explainFailure blames the connection, not the bootloader, for a mid-write rejection', () => {
+  const err = new Error('Failed to write compressed data to flash after seq 36 failed with status 201,0');
+  const message = explainFailure(err);
+  assert.match(message, /not damaged/);
+  assert.doesNotMatch(message, /Hold BOOT/i, 'the connection already worked once — this is not a bootloader-entry problem');
+  assert.match(message, /USB port/i);
+});
+
+test('explainFailure does not misclassify a bootloader-entry failure as a mid-write one', () => {
+  // Pins the boundary between the two: this shape must still get BOOT/RESET
+  // instructions, not the write-failure message that immediately follows it
+  // in the function.
+  const err = new Error('Timed out waiting for packet header');
+  const message = explainFailure(err);
+  assert.match(message, /Hold the BOOT button/);
+  assert.doesNotMatch(message, /USB port/i);
 });
 
 test('explainFailure does not classify an unrelated error as the port-in-use case', () => {
