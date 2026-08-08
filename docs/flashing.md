@@ -155,13 +155,14 @@ InkPanel uses a custom 16 MB partition table that deliberately preserves the
 important existing offsets:
 
 ```text
-NVS      0x009000
-app0     0x010000
-provision 0xFF0000  size 0x1000
+NVS        0x009000
+app0       0x010000
+provision  0xFFF000  size 0x1000
 ```
 
-The final 4 KiB flash sector is reserved as a custom data partition named
-`provision`.
+The final 4 KiB flash sector (`0xFFF000` through `0xFFFFFF`) is reserved as a
+custom data partition named `provision`. A 60 KiB guard gap is intentionally
+left between the end of SPIFFS and this final sector.
 
 The current binary record is:
 
