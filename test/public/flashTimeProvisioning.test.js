@@ -8,7 +8,7 @@ import {
   crc32,
 } from '../../public/flashProvisioningImage.js';
 
-const partition = { offset: 0xFF0000, size: 0x1000, format: 1 };
+const partition = { offset: 0xFFF000, size: 0x1000, format: 1 };
 
 function concat(...parts) {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
