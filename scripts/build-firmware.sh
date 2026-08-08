@@ -81,8 +81,17 @@ if ! "$ARDUINO_CLI" board details --fqbn "$FQBN" >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -rf "$DIST"
-mkdir -p "$DIST"
+# Never destroy the currently-served firmware before we know the replacement is
+# complete. Compile and generate the manifest in a sibling directory, then swap
+# it into place only after every step succeeds. This makes the updater's
+# "failed build keeps the previous good package" guarantee true in practice.
+STAGE="$(mktemp -d "$ROOT/firmware/.dist-build.XXXXXX")"
+OLD_DIST=""
+cleanup() {
+  [[ -z "${STAGE:-}" || ! -e "$STAGE" ]] || rm -rf "$STAGE"
+  [[ -z "${OLD_DIST:-}" || ! -e "$OLD_DIST" ]] || rm -rf "$OLD_DIST"
+}
+trap cleanup EXIT
 
 echo "== compiling for $FQBN =="
 # --output-dir puts the binaries somewhere predictable; --json makes the
@@ -90,22 +99,44 @@ echo "== compiling for $FQBN =="
 # directly (see firmware-manifest.mjs for why only that one offset).
 "$ARDUINO_CLI" compile \
   --fqbn "$FQBN" \
-  --output-dir "$DIST" \
+  --output-dir "$STAGE" \
   --json \
-  "$SKETCH" >"$DIST/build-report.json"
+  "$SKETCH" >"$STAGE/build-report.json"
 
 # arduino-cli emits bootloader, partition-table, application and (for the
 # current ESP32 core) merged binaries. firmware-manifest.mjs exposes the merged
 # image for new installs/recovery and the three region images for NVS-safe
 # routine updates. The firmware version is read directly from config.h.
-node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$SKETCH"
+node "$ROOT/scripts/firmware-manifest.mjs" "$STAGE" "$SKETCH"
 
-# Write this only after every build/manifest step succeeds. If a build fails,
-# the old successful dist directory is already gone for a manual build; on LXC
-# the updater preserves the previously-served build by staging separately in a
-# future improvement. The stamp itself must never claim freshness unless the
-# complete build above succeeded.
-printf '%s\n' "$INPUT_HASH" >"$DIST/input.sha256"
+# Write this only after every build/manifest step succeeds. The updater uses it
+# to prove that the package on disk represents the current firmware sources.
+printf '%s\n' "$INPUT_HASH" >"$STAGE/input.sha256"
+
+# Same filesystem, so directory renames are atomic. There is a tiny interval
+# between moving the old directory aside and moving the new one into place, but
+# a failure in the second move restores the previous package immediately.
+mkdir -p "$(dirname "$DIST")"
+if [[ -e "$DIST" ]]; then
+  OLD_DIST="${DIST}.previous.$$"
+  rm -rf "$OLD_DIST"
+  mv "$DIST" "$OLD_DIST"
+fi
+
+if mv "$STAGE" "$DIST"; then
+  STAGE=""
+  if [[ -n "$OLD_DIST" ]]; then
+    rm -rf "$OLD_DIST"
+    OLD_DIST=""
+  fi
+else
+  if [[ -n "$OLD_DIST" && -e "$OLD_DIST" ]]; then
+    mv "$OLD_DIST" "$DIST"
+    OLD_DIST=""
+  fi
+  echo "could not publish the new firmware build; previous build restored" >&2
+  exit 1
+fi
 
 echo "== wrote $DIST/manifest.json =="
 echo "== firmware input fingerprint: $INPUT_HASH =="
