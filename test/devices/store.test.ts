@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DeviceStore } from '../../src/devices/store.ts';
+import { basename, dirname, join } from 'node:path';
+import { DeviceStore, DeviceStoreError, type DeviceStoreErrorCode } from '../../src/devices/store.ts';
 
 async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dev-'));
@@ -13,6 +13,21 @@ async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function expectStoreError(
+  fn: () => Promise<unknown>,
+  code: DeviceStoreErrorCode,
+): Promise<DeviceStoreError> {
+  let caught: unknown = null;
+  try {
+    await fn();
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof DeviceStoreError, 'expected a DeviceStoreError');
+  assert.equal(caught.code, code);
+  return caught;
 }
 
 test('creates an unclaimed device on first sight', async () => {
@@ -98,13 +113,52 @@ test('id cannot be overwritten by a patch', async () => {
   });
 });
 
-test('a corrupt config file is treated as empty rather than throwing', async () => {
+test('corrupt config is preserved and can never be overwritten by a later mutation', async () => {
   await withStore(async (store, path) => {
     await store.getOrCreate('esp32-a1b2c3');
-    const { writeFile } = await import('node:fs/promises');
-    await writeFile(path, '{ not json', 'utf8');
+
+    const corrupt = '{ not json';
+    await writeFile(path, corrupt, 'utf8');
     const reopened = new DeviceStore(path);
-    assert.deepEqual(await reopened.list(), [], 'must not crash the server on startup');
+
+    const readError = await expectStoreError(() => reopened.list(), 'config_corrupt');
+    assert.ok(readError.backupPath, 'a diagnostic copy should be preserved when possible');
+    assert.equal(await readFile(path, 'utf8'), corrupt, 'the original corrupt bytes stay in place');
+    assert.equal(await readFile(readError.backupPath!, 'utf8'), corrupt, 'backup is an exact copy');
+
+    await expectStoreError(() => reopened.getOrCreate('esp32-new'), 'config_corrupt');
+    assert.equal(
+      await readFile(path, 'utf8'),
+      corrupt,
+      'getOrCreate must fail before it can replace a corrupt store with an empty-derived one',
+    );
+
+    const backupPrefix = `${basename(path)}.corrupt-`;
+    const backups = (await readdir(dirname(path))).filter((name) => name.startsWith(backupPrefix));
+    assert.equal(backups.length, 1, 're-reading identical corruption must not create backup spam');
+  });
+});
+
+test('valid JSON with an invalid top-level store shape also fails closed', async () => {
+  await withStore(async (_store, path) => {
+    const malformed = JSON.stringify({ devices: 'not-an-array' });
+    await writeFile(path, malformed, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    const err = await expectStoreError(() => reopened.list(), 'config_corrupt');
+    assert.match(err.message, /devices array/i);
+    assert.equal(await readFile(path, 'utf8'), malformed);
+  });
+});
+
+test('non-ENOENT filesystem read failures are not disguised as a new installation', async () => {
+  await withStore(async (_store, path) => {
+    // A directory at the config-file path reliably makes readFile fail on the
+    // Linux environment used by CI without relying on chmod/root semantics.
+    await mkdir(path);
+    const reopened = new DeviceStore(path);
+    const err = await expectStoreError(() => reopened.list(), 'config_io');
+    assert.equal(err.backupPath, null);
   });
 });
 
@@ -131,19 +185,17 @@ test('new devices start with no UPRN configured', async () => {
 });
 
 test('a config file written before Spec 2a still loads', async () => {
-  await withStore(async (store, path) => {
-    const { writeFile, mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
-    await mkdir(dirname(path), { recursive: true });
+  await withStore(async (_store, path) => {
     // A record with none of the new fields, as Spec 1 would have written it.
     await writeFile(path, JSON.stringify({
       devices: [{ id: 'esp32-old', name: 'Old panel', claimed: true }],
     }), 'utf8');
 
-    const device = await store.get('esp32-old');
+    const reopened = new DeviceStore(path);
+    const device = await reopened.get('esp32-old');
     assert.equal(device?.name, 'Old panel', 'existing data survives');
-    // Missing fields read as undefined; callers must tolerate that rather than
-    // the store rewriting every record on load.
+    // Missing fields read as undefined for now. The next backlog item adds the
+    // explicit schema/version migration layer that fills these defaults.
     assert.equal(device?.locationLabel, undefined);
     assert.equal(device?.lastWakeSeconds, undefined);
   });
