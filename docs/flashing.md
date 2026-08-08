@@ -27,11 +27,17 @@ tab. Something has to produce `firmware/dist/` before the tab has anything to
 offer.
 
 **On a Proxmox LXC install, this is automatic.** The installer sets up
-`arduino-cli` and the ESP32 core alongside Node and Chromium, and the updater
-(`pct exec <CTID> -- /usr/local/bin/inkpanel-update`) rebuilds firmware whenever
-a pull changes a firmware build input. A firmware-build failure is logged but
-does not take the running dashboard server down; the Flash tab keeps offering
-the previous successful build.
+`arduino-cli` and the ESP32 core alongside Node and Chromium. Every successful
+firmware build writes `firmware/dist/input.sha256`, a fingerprint of the tracked
+firmware sources and build inputs. The updater compares that fingerprint with
+the current checkout on every update and rebuilds whenever the served package
+is missing or stale. It does not rely only on what happened to change during
+the latest `git pull`.
+
+Firmware is compiled into a staging directory and is published to
+`firmware/dist/` only after the compile and manifest generation both succeed.
+A failed firmware build therefore does not take the dashboard server down and
+does not destroy the previous successful WebFlash package.
 
 **Everywhere else — a local checkout or Docker deployment — build manually.**
 Install [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/),
@@ -59,6 +65,34 @@ The build creates two logical image sets in `manifest.json`:
   cannot be overwritten by the full merged image.
 
 `firmware/dist/` is gitignored build output, not source.
+
+### Existing LXC installed before firmware freshness tracking
+
+Older LXCs may have a root-owned `/usr/local/bin/inkpanel-update` from before
+firmware fingerprinting existed. The application checkout can update normally
+while that old privileged helper keeps serving a stale `firmware/dist` package.
+The updater is intentionally not allowed to replace itself from the
+service-user-writable checkout because doing so would create an application-to-root
+privilege escalation.
+
+For an official InkPanel install, repair the privileged helper once from the
+Proxmox host, then rebuild the current firmware:
+
+```bash
+pct exec <CTID> -- bash -lc '
+set -e
+cd /opt/inkpanel/app
+runuser -u inkpanel -- git pull --ff-only origin main
+curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/files/inkpanel-update -o /tmp/inkpanel-update
+bash -n /tmp/inkpanel-update
+install -o root -g root -m 755 /tmp/inkpanel-update /usr/local/bin/inkpanel-update
+runuser -u inkpanel -- ./scripts/build-firmware.sh
+'
+```
+
+Replace `<CTID>` with the InkPanel container id shown by `pct list`. This is a
+one-time repair for an older installation; fresh installations already receive
+the current root-owned helper.
 
 ---
 
@@ -206,6 +240,21 @@ XIAO's normal COM port.
 The firmware is waiting for USB provisioning. Close the Serial Monitor because
 it prevents the browser owning the COM port, then use **Configure an
 unconfigured board**.
+
+**A freshly flashed board immediately prints the old setup lines and never
+prints `INKPANEL_READY_V1`.**
+If serial output looks like:
+
+```text
+[setup] no credentials stored — starting portal
+[setup] portal starting, join WiFi 'inkpanel-setup'
+[setup] open http://192.168.4.1
+```
+
+then the board was flashed with a legacy package even if the website itself is
+current. Firmware `0.1.1` and newer prints the USB-provisioning stage first.
+Repair an older LXC using the one-time command in section 1, reload the Flash
+tab, and flash the new board again.
 
 **The serial monitor says `inkpanel-setup` and `http://192.168.4.1`.**
 The board has no saved Wi-Fi/brain settings. `192.168.4.1` is not your LXC or
