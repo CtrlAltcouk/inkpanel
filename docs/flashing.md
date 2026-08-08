@@ -20,7 +20,8 @@ offer.
 
 **On a Proxmox LXC install, this is automatic.** The installer sets up
 `arduino-cli` and the ESP32 core alongside Node and Chromium, and the updater
-(`pct exec <CTID> -- inkpanel-update`) rebuilds firmware whenever a pull
+(`pct exec <CTID> -- /usr/local/bin/inkpanel-update` — the full path matters;
+see [deployment.md](deployment.md)) rebuilds firmware whenever a pull
 actually changes anything under `firmware/` — mirroring how it already only
 runs `npm ci` when the lockfile changes. Most updates touch neither. A build
 failure is logged but never fails the update itself: whether an ESP32 compile

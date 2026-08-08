@@ -54,8 +54,15 @@ nano /opt/inkpanel/inkpanel.env                             # PUBLIC_BASE_URL
 To update:
 
 ```bash
-pct exec <CTID> -- inkpanel-update
+pct exec <CTID> -- /usr/local/bin/inkpanel-update
 ```
+
+**The full path matters here** — `pct exec` does not carry `/usr/local/bin` on
+`PATH` the way an interactive login shell would, so the bare form
+(`pct exec <CTID> -- inkpanel-update`) fails with "No such file or directory"
+even when the script is genuinely installed and working. This only affects
+running it by hand: the systemd path unit that triggers updates automatically
+already invokes it by full path and is unaffected.
 
 The installer places that script in the container. Do not run `git pull` as root
 in `/opt/inkpanel/app` — the repo belongs to the `inkpanel` service user, so git
