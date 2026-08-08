@@ -12,7 +12,7 @@ const realSketch = join(process.cwd(), 'firmware', 'inkpanel');
 
 test('manifest tooling derives the one-time provisioning sector from partitions.csv', async () => {
   assert.deepEqual(await readProvisioningPartition(realSketch), {
-    offset: 0xFF0000,
+    offset: 0xFFF000,
     size: 0x1000,
     format: 1,
   });
@@ -32,7 +32,7 @@ test('generated firmware manifest publishes the exact provisioning address used 
 
     const manifest = await buildManifest(dist, realSketch);
     assert.deepEqual(manifest.provisioning, {
-      offset: 0xFF0000,
+      offset: 0xFFF000,
       size: 0x1000,
       format: 1,
     });
@@ -47,7 +47,7 @@ test('generated firmware manifest publishes the exact provisioning address used 
 test('manifest tooling refuses an unaligned provisioning address instead of teaching the browser a dangerous offset', async () => {
   const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-bad-partitions-'));
   try {
-    await writeFile(join(sketch, 'partitions.csv'), 'provision,data,0x40,0xFF0001,0x1000,\n');
+    await writeFile(join(sketch, 'partitions.csv'), 'provision,data,0x40,0xFFF001,0x1000,\n');
     await assert.rejects(
       readProvisioningPartition(sketch),
       /4 KiB aligned/,
