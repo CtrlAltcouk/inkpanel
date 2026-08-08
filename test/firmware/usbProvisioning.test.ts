@@ -26,10 +26,23 @@ test('USB and captive-portal setup share the same credential persistence functio
   assert.match(source, /prefs\.putString\("url"/);
 });
 
-test('fresh firmware offers USB provisioning before falling back to 192.168.4.1 portal', async () => {
+test('fresh firmware offers USB provisioning before falling back to the recovery portal', async () => {
   const source = await readFile(SKETCH, 'utf8');
   const usb = source.indexOf('waitForUsbProvisioning(30000)');
   const portal = source.indexOf('no USB credentials received — starting portal fallback');
   assert.ok(usb > -1, 'fresh boards must wait for the browser provisioning channel');
   assert.ok(portal > usb, 'captive portal must be the fallback after USB provisioning, not the primary path');
+});
+
+test('USB provisioning remains live while the 192.168.4.1 recovery portal is running', async () => {
+  const source = await readFile(PROVISIONING, 'utf8');
+  const portal = source.indexOf('void runProvisioningPortal()');
+  assert.ok(portal > -1);
+  const portalBody = source.slice(portal);
+  assert.match(portalBody, /emitUsbReadyIfDue\(\)/,
+    'recovery mode must continue advertising the USB setup protocol');
+  assert.match(portalBody, /serviceUsbProvisioning\(\)/,
+    'recovery mode must keep accepting USB provisioning commands');
+  assert.match(portalBody, /USB credentials saved in recovery mode/,
+    'a successful late USB configuration should restart into normal operation');
 });

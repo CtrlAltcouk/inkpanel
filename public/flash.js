@@ -297,14 +297,17 @@ export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
   }
 
   throw new Error(
-    `The firmware was flashed, but the board did not reappear for USB setup${lastError ? ` (${lastError.message ?? lastError})` : ''}. Unplug and reconnect it, then use Set up a new board again.`,
+    `The board did not appear as a USB setup port${lastError ? ` (${lastError.message ?? lastError})` : ''}. Choose Configure an unconfigured board and select the board's normal COM port.`,
   );
 }
 
 /**
- * Wait for the new firmware's USB setup window, send credentials, and wait for
- * an explicit NVS-save acknowledgement. The password is never written to the
+ * Wait for firmware's USB setup channel, send credentials, and wait for an
+ * explicit NVS-save acknowledgement. The password is never written to the
  * InkPanel log or server; it travels directly from this browser to the board.
+ *
+ * This works both immediately after a flash and later while an unconfigured
+ * board is sitting in its recovery setup mode.
  */
 export async function provisionNewBoard(originalPort, config, write = () => {}, timeoutMs = 30000) {
   const checked = validateNewBoardConfig(config);
@@ -386,8 +389,8 @@ export function explainFailure(err) {
            'tab in the foreground and the computer awake while it writes, then try again.';
   }
   if (/only flashes ESP32-S3/i.test(message)) return message;
-  if (/USB provisioning|USB setup channel|did not reappear/i.test(message)) {
-    return `${message}\n\nThe firmware flash itself completed. Reconnect the same board and run Set up a new board again.`;
+  if (/USB provisioning|USB setup channel|did not appear as a USB setup port/i.test(message)) {
+    return `${message}\n\nThe firmware does not need to be flashed again. Select Configure an unconfigured board, close any Serial Monitor, and choose the board's normal COM port.`;
   }
 
   return `${message}\n\nThe board is not damaged — the bootloader it starts from ` +
@@ -397,7 +400,7 @@ export function explainFailure(err) {
 export function readyPanel(manifest) {
   const serverUrl = esc(String(manifest.serverUrl ?? ''));
   return `<div class="card">
-    <h3>Flash a panel</h3>
+    <h3>Flash or configure a panel</h3>
     <p class="meta">Firmware ${esc(manifest.version)} &middot; built ${esc(manifest.builtAt)}</p>
 
     <fieldset class="flash-mode">
@@ -411,24 +414,28 @@ export function readyPanel(manifest) {
         <span><strong>Set up a new board</strong> <em>&mdash; erase, flash and configure it over USB</em></span>
       </label>
       <label>
+        <input type="radio" name="mode" value="configure">
+        <span><strong>Configure an unconfigured board</strong> <em>&mdash; send Wi-Fi/server settings over USB without reflashing</em></span>
+      </label>
+      <label>
         <input type="radio" name="mode" value="erase">
         <span><strong>Factory reset / recover</strong> <em>&mdash; erase everything and return to setup mode</em></span>
       </label>
     </fieldset>
 
     <div class="new-board-setup" data-new-board-fields hidden>
-      <h3>New board settings</h3>
+      <h3>Board settings</h3>
       <p class="notice">These details go directly from this browser to the ESP32 over USB. The Wi-Fi password is not sent to the InkPanel server.</p>
       <label>Wi-Fi network name (SSID)</label>
       <input type="text" data-new-ssid autocomplete="off" spellcheck="false" placeholder="Your Wi-Fi name">
       <label>Wi-Fi password</label>
       <input type="password" data-new-password autocomplete="new-password" placeholder="Leave blank for an open network">
-      <label>InkPanel server</label>
+      <label>InkPanel brain</label>
       <input type="text" data-new-server value="${serverUrl}" autocapitalize="off" autocorrect="off" spellcheck="false">
-      <p class="meta">Filled automatically from this InkPanel installation. Panels use the HTTP address, even though this Flash page uses HTTPS.</p>
+      <p class="meta">Filled automatically from this InkPanel installation. This is the Proxmox/Raspberry Pi IPv4 address the ESP32 will use for frame requests.</p>
     </div>
 
-    <p class="meta">Close the Arduino IDE serial monitor first if it is open &mdash;
+    <p class="meta">Close the Arduino IDE / VS Code serial monitor first if it is open &mdash;
        only one program can use the port at a time.</p>
 
     <button type="button" data-connect>Connect a board</button>
@@ -471,8 +478,13 @@ export async function renderFlash(root) {
   const selectedMode = () => root.querySelector('input[name=mode]:checked')?.value ?? 'preserve';
   const syncModeUi = () => {
     const mode = selectedMode();
-    if (newFields) newFields.hidden = mode !== 'new';
-    if (button) button.textContent = mode === 'new' ? 'Flash & configure new board' : 'Connect a board';
+    const needsSettings = mode === 'new' || mode === 'configure';
+    if (newFields) newFields.hidden = !needsSettings;
+    if (button) {
+      if (mode === 'new') button.textContent = 'Flash & configure new board';
+      else if (mode === 'configure') button.textContent = 'Configure board over USB';
+      else button.textContent = 'Connect a board';
+    }
   };
   root.querySelectorAll?.('input[name=mode]').forEach((radio) => radio.addEventListener('change', syncModeUi));
   syncModeUi();
@@ -484,7 +496,7 @@ export async function renderFlash(root) {
 
     const mode = selectedMode();
     let newConfig = null;
-    if (mode === 'new') {
+    if (mode === 'new' || mode === 'configure') {
       try {
         newConfig = newBoardConfigFromUi(root);
       } catch (err) {
@@ -496,9 +508,17 @@ export async function renderFlash(root) {
 
     let transport = null;
     try {
-      // No BOOT-button choreography is required for the normal XIAO ESP32-S3
-      // flow. esptool-js toggles the native USB reset lines automatically.
+      // The browser picker is the safety boundary for both flashing and the
+      // configure-only recovery path. In configure mode the selected device is
+      // opened directly as normal firmware USB CDC and no flash write occurs.
       const port = await navigator.serial.requestPort();
+
+      if (mode === 'configure') {
+        write('Opening the board USB setup channel — no firmware will be written...');
+        await provisionNewBoard(port, newConfig, write, 45000);
+        write('Done. The board saved the Wi-Fi and InkPanel brain address and will now join the network.');
+        return;
+      }
 
       // esptool-js is ~380KB. Load it only after the user has selected a port.
       const { ESPLoader, Transport } = await import('./vendor/esptool-js.js');
@@ -550,10 +570,15 @@ export async function renderFlash(root) {
         try { await transport.disconnect(); } catch { /* reset may have closed it */ }
         transport = null;
         write('Firmware flashed successfully. Waiting for the new board to restart...');
-        await provisionNewBoard(port, newConfig, write);
-        write('Done. The board has its Wi-Fi and InkPanel server settings and will now join the network.');
+        try {
+          await provisionNewBoard(port, newConfig, write);
+          write('Done. The board has its Wi-Fi and InkPanel brain settings and will now join the network.');
+        } catch (err) {
+          write(`Automatic USB setup did not complete: ${String(err?.message ?? err)}`);
+          write('The firmware is already installed. Select Configure an unconfigured board and choose the board\'s normal COM port — do not reflash it.');
+        }
       } else if (mode === 'erase') {
-        write('Done. The board will restart in setup mode. You can flash it again with Set up a new board to configure it entirely over USB.');
+        write('Done. The board will restart unconfigured. USB setup remains available, or you can use Configure an unconfigured board without flashing again.');
       } else {
         write('Done. The board will restart and reconnect using its existing settings.');
       }

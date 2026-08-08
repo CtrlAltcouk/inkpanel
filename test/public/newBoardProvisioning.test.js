@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   buildProvisionCommand,
   readyPanel,
@@ -83,7 +85,7 @@ test('routine update refuses to fall back to the full image when safe update reg
   );
 });
 
-test('Flash UI offers a new-board path and prefills the server address supplied by the LXC', () => {
+test('Flash UI offers new-board and configure-only paths and prefills the brain IPv4', () => {
   const html = readyPanel({
     version: '0.1.0',
     builtAt: '2026-08-08T19:00:00.000Z',
@@ -91,7 +93,22 @@ test('Flash UI offers a new-board path and prefills the server address supplied 
   });
   assert.match(html, /Set up a new board/);
   assert.match(html, /value="new"/);
+  assert.match(html, /Configure an unconfigured board/);
+  assert.match(html, /value="configure"/);
+  assert.match(html, /without reflashing/);
   assert.match(html, /data-new-ssid/);
   assert.match(html, /data-new-password/);
+  assert.match(html, /InkPanel brain/);
   assert.match(html, /data-new-server value="http:\/\/192\.168\.1\.50:8080"/);
+});
+
+test('configure-only mode provisions over USB before esptool is imported', async () => {
+  const source = await readFile(join(process.cwd(), 'public', 'flash.js'), 'utf8');
+  const configureBranch = source.indexOf("if (mode === 'configure')");
+  const esptoolImport = source.indexOf("import('./vendor/esptool-js.js')");
+  assert.ok(configureBranch > -1, 'configure-only mode must have its own execution path');
+  assert.ok(esptoolImport > configureBranch,
+    'configure-only mode must return before loading/flashing with esptool');
+  assert.match(source.slice(configureBranch, esptoolImport), /provisionNewBoard\(/);
+  assert.match(source.slice(configureBranch, esptoolImport), /no firmware will be written/);
 });

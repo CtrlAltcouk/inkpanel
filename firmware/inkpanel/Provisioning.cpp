@@ -18,10 +18,13 @@ constexpr const char* USB_SAVED = "INKPANEL_SAVED_V1";
 constexpr const char* USB_ERROR = "INKPANEL_ERROR_V1|";
 constexpr const char* USB_PREFIX = "INKPANEL_PROVISION_V1|";
 constexpr size_t MAX_USB_LINE = 640;
+constexpr uint32_t USB_READY_INTERVAL_MS = 1000;
 
 Preferences prefs;
 DNSServer dns;
 WebServer web(80);
+String usbLine;
+uint32_t lastUsbReady = 0;
 
 bool validCredentials(const Credentials& credentials) {
   if (credentials.ssid[0] == '\0' || credentials.serverUrl[0] == '\0') return false;
@@ -83,6 +86,51 @@ bool handleUsbProvisionLine(const String& line) {
   Serial.println(USB_SAVED);
   Serial.flush();
   return true;
+}
+
+void resetUsbProvisioningState() {
+  usbLine = "";
+  usbLine.reserve(MAX_USB_LINE);
+  lastUsbReady = 0;
+}
+
+void emitUsbReadyIfDue() {
+  const uint32_t now = millis();
+  if (lastUsbReady == 0 || now - lastUsbReady >= USB_READY_INTERVAL_MS) {
+    Serial.println(USB_READY);
+    Serial.flush();
+    lastUsbReady = now;
+  }
+}
+
+/**
+ * Consume any provisioning bytes currently available on USB CDC.
+ *
+ * Kept separate from waitForUsbProvisioning() so the same protocol remains
+ * live while the captive-portal recovery loop is running. That means a board
+ * which missed the browser's first post-flash reconnect can still be configured
+ * over USB later, without another erase/reflash and without visiting 192.168.4.1.
+ */
+bool serviceUsbProvisioning() {
+  while (Serial.available() > 0) {
+    const char c = static_cast<char>(Serial.read());
+    if (c == '\r') continue;
+
+    if (c == '\n') {
+      const bool saved = !usbLine.isEmpty() && handleUsbProvisionLine(usbLine);
+      usbLine = "";
+      if (saved) return true;
+      continue;
+    }
+
+    if (usbLine.length() >= MAX_USB_LINE) {
+      usbLine = "";
+      Serial.printf("%sline-too-long\n", USB_ERROR);
+    } else {
+      usbLine += c;
+    }
+  }
+  return false;
 }
 
 String htmlEscape(const String& value) {
@@ -213,35 +261,12 @@ bool waitForUsbProvisioning(uint32_t timeoutMs) {
   Serial.printf("[setup] USB provisioning available for %lu seconds\n",
                 static_cast<unsigned long>(timeoutMs / 1000));
 
-  String line;
-  line.reserve(MAX_USB_LINE);
+  resetUsbProvisioningState();
   const uint32_t deadline = millis() + timeoutMs;
-  uint32_t lastReady = 0;
 
   while (static_cast<int32_t>(deadline - millis()) > 0) {
-    const uint32_t now = millis();
-    if (lastReady == 0 || now - lastReady >= 1000) {
-      Serial.println(USB_READY);
-      Serial.flush();
-      lastReady = now;
-    }
-
-    while (Serial.available() > 0) {
-      const char c = static_cast<char>(Serial.read());
-      if (c == '\r') continue;
-      if (c == '\n') {
-        if (!line.isEmpty() && handleUsbProvisionLine(line)) return true;
-        line = "";
-        continue;
-      }
-
-      if (line.length() >= MAX_USB_LINE) {
-        line = "";
-        Serial.printf("%sline-too-long\n", USB_ERROR);
-      } else {
-        line += c;
-      }
-    }
+    emitUsbReadyIfDue();
+    if (serviceUsbProvisioning()) return true;
     delay(5);
   }
 
@@ -254,7 +279,9 @@ bool waitForUsbProvisioning(uint32_t timeoutMs) {
 
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID);
-  Serial.printf("[setup] open http://%s\n", WiFi.softAPIP().toString().c_str());
+  Serial.printf("[setup] recovery page http://%s (only reachable while joined to '%s')\n",
+                WiFi.softAPIP().toString().c_str(), AP_SSID);
+  Serial.println("[setup] USB provisioning remains available; the recovery page is not required");
 
   dns.start(53, "*", WiFi.softAPIP());
 
@@ -267,7 +294,20 @@ bool waitForUsbProvisioning(uint32_t timeoutMs) {
   });
   web.begin();
 
+  // The AP is a recovery option, not a dead end. Keep the exact same USB
+  // provisioning protocol alive indefinitely while the portal is running so
+  // the dashboard can configure a board later even if automatic post-flash
+  // USB re-enumeration was missed by Windows/Chromium.
+  resetUsbProvisioningState();
   for (;;) {
+    emitUsbReadyIfDue();
+    if (serviceUsbProvisioning()) {
+      Serial.println("[setup] USB credentials saved in recovery mode — restarting");
+      Serial.flush();
+      delay(200);
+      ESP.restart();
+    }
+
     dns.processNextRequest();
     web.handleClient();
     delay(2);

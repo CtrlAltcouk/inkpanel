@@ -293,7 +293,7 @@ test('renderFlash shows the ready panel with the manifest data when a build exis
       async () => {
         const root = fakeRoot();
         await renderFlash(root);
-        assert.equal(occurrences(root.innerHTML, '<h3>Flash a panel</h3>'), 1);
+        assert.equal(occurrences(root.innerHTML, '<h3>Flash or configure a panel</h3>'), 1);
         assert.equal(occurrences(root.innerHTML, 'Firmware 1.0.0 &middot; built 2026-08-06T10:00:00.000Z'), 1);
       },
     ),
