@@ -34,13 +34,8 @@ jobs:
             echo "checking $script"
             bash -n "$script"
           done
-          # Not a bash script, but it's executed by the one above and ships
-          # alongside it — check it can at least parse. The real behavioural
-          # coverage is test/system/writeStatus.test.ts, run below.
           node --check scripts/proxmox/files/write-status.mjs
 
-      # The render and golden tests need a real browser. --with-deps pulls the
-      # shared libraries Chromium needs on a bare runner.
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         id: playwright-cache
@@ -57,12 +52,39 @@ jobs:
       - name: Test
         run: npm test
 
-      # Date handling here is invisible on a single machine: an all-day calendar
-      # event materialises at local midnight, so a server in London and one in
-      # UTC disagree about which day it falls on. Running the suite under four
-      # zones is the only way to catch that class of bug.
       - name: Test across server timezones
         run: npm run test:tz
+
+  firmware:
+    name: Compile XIAO ESP32-S3 Plus firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Cache Arduino ESP32 core
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-esp32-${{ runner.os }}-v1
+
+      - name: Install ESP32 board core
+        run: |
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Compile production firmware and manifest
+        run: ./scripts/build-firmware.sh
+
+      - name: Check expected firmware outputs
+        run: |
+          test -s firmware/dist/manifest.json
+          test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
 
   golden:
     name: Generate golden reference
