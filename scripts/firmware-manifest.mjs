@@ -80,7 +80,10 @@ export async function buildManifest(dist, sketchDir) {
 
   for (const part of updateParts) {
     if (!part.path) {
-      throw new Error(`missing a required update binary in ${dist}: ${JSON.stringify(updateParts)}`);
+      // Keep the long-standing public error phrase "missing a required binary"
+      // so callers/tests can classify this consistently. The context makes it
+      // clear these are the region binaries required by safe update mode.
+      throw new Error(`missing a required binary for safe update in ${dist}: ${JSON.stringify(updateParts)}`);
     }
   }
 
