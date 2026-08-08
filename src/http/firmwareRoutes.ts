@@ -23,6 +23,12 @@ export function firmwareRoutes(firmwareDir: string, publicBaseUrl = ''): Router 
         parts: Array.isArray(parsed.parts) ? parsed.parts : [],
         // Routine updates use only these regions so NVS/Wi-Fi is untouched.
         updateParts: Array.isArray(parsed.updateParts) ? parsed.updateParts : [],
+        // Exact address/size compiled into partitions.csv. The browser writes
+        // a one-time credential record here during new-board setup rather than
+        // guessing a supposedly-unused flash address.
+        provisioning: parsed.provisioning && typeof parsed.provisioning === 'object'
+          ? parsed.provisioning
+          : null,
       });
     } catch {
       // No build yet, or a half-written one. Both mean "nothing to flash",
@@ -55,18 +61,8 @@ export function firmwareRoutes(firmwareDir: string, publicBaseUrl = ''): Router 
       return;
     }
 
-    // stat() above narrows this to a TOCTOU window, not a certainty: the
-    // file can vanish or become unreadable between stat() and the actual
-    // open (concurrent cleanup, a permission change, antivirus locking, a
-    // storage hiccup). Without this listener, createReadStream's 'error'
-    // event goes unhandled and takes down the whole process — every panel
-    // served by it, not just this request. The listener must be attached
-    // before pipe() starts pulling data.
     const stream = createReadStream(path);
     stream.on('error', () => {
-      // Once the body has started, the status line is already gone, so the
-      // only honest signal left is to break the connection rather than let a
-      // truncated binary look like a complete one.
       if (res.headersSent) res.destroy();
       else res.status(500).json({ error: 'firmware file could not be read' });
     });
