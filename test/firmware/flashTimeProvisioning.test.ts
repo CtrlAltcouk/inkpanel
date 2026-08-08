@@ -31,9 +31,9 @@ test('custom partition table preserves NVS/app offsets and reserves exactly the 
   assert.equal(nvs[3].toLowerCase(), '0x9000', 'existing Preferences/NVS must not move');
   assert.equal(app0[3].toLowerCase(), '0x10000', 'safe-update application offset must remain stable');
   assert.equal(provision[1], 'data');
-  assert.equal(provision[3].toLowerCase(), '0xff0000');
+  assert.equal(provision[3].toLowerCase(), '0xfff000');
   assert.equal(provision[4].toLowerCase(), '0x1000');
-  assert.equal(0xFF0000 + 0x1000, 0x1000000, 'provisioning sector must end exactly at 16 MB');
+  assert.equal(0xFFF000 + 0x1000, 0x1000000, 'provisioning sector must end exactly at 16 MB');
 });
 
 test('firmware record format matches the browser magic/version and validates CRC before NVS save', async () => {
