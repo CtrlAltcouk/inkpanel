@@ -65,22 +65,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Keep the privileged updater itself in step with the checkout. The original
+# installer copied these files into root-owned locations once, but subsequent
+# `git pull`s only updated /opt/inkpanel/app. That meant an old LXC could run an
+# old updater forever even while the website was current.
+#
+# The currently-running script must not be truncated in place. Install to a
+# sibling temporary path and rename it atomically; this process keeps reading
+# its already-open old inode while the next invocation gets the new one.
+sync_update_helpers() {
+  local source="$REPO_DIR/scripts/proxmox/files"
+
+  install -o root -g root -m 755 "$source/inkpanel-update" /usr/local/bin/inkpanel-update.next
+  mv -f /usr/local/bin/inkpanel-update.next /usr/local/bin/inkpanel-update
+
+  install -o root -g root -m 644 "$source/write-status.mjs" /usr/local/bin/write-status.mjs.next
+  mv -f /usr/local/bin/write-status.mjs.next /usr/local/bin/write-status.mjs
+
+  install -o root -g root -m 644 "$source/inkpanel-update.path" /etc/systemd/system/inkpanel-update.path
+  install -o root -g root -m 644 "$source/inkpanel-update.service" /etc/systemd/system/inkpanel-update.service
+  systemctl daemon-reload
+}
+
 write_status running
 
 cd "$REPO_DIR"
 
 LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
-# Captured before the pull so the firmware rebuild below can tell whether
-# anything under firmware/ actually changed. `|| true` guarantees this
-# assignment itself never triggers set -e, regardless of git's exit status —
-# an ambiguous "before" is not worth aborting the whole update over, and the
-# diff below degrades to "skip the rebuild" rather than "fail the update".
-COMMIT_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
 
 echo "== git pull ==" >>"$LOG_FILE"
 # Pinned to origin/main so a repointed remote.origin.url or a checked-out
 # side branch cannot change what gets deployed.
 runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
+write_status running
+
+# The pull may itself have changed the root-side updater or units. Synchronise
+# them now so the next web-requested update uses the version that just landed.
+echo "== sync privileged update helpers ==" >>"$LOG_FILE"
+sync_update_helpers >>"$LOG_FILE" 2>&1 || fail "could not update privileged helper files"
 write_status running
 
 LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
@@ -96,44 +118,40 @@ else
 fi
 write_status running
 
-# Deliberately outside the fatal path, unlike git pull and npm ci above:
-# whether an ESP32 compile succeeds has nothing to do with whether this
-# server can keep serving frames to panels, and coupling them would mean a
-# firmware-side typo stops every panel in the house getting a dashboard. The
-# `if runuser ...; then ... else ... fi` form is what keeps this exempt from
-# set -e — a bare `runuser ... || fail ...` here would be exactly the mistake
-# this comment exists to prevent.
+# Firmware freshness is based on what the served build actually represents,
+# not merely on files changed by this particular pull. The latter failed in a
+# real deployment: a provisioning firmware change was present in the checkout,
+# but an earlier updater had left an old firmware/dist behind. The next update
+# saw no *new* firmware diff and therefore kept serving that old image forever.
 #
-# COMMIT_BEFORE can be empty (see its capture above); an empty value makes
-# this diff empty too, which the `-n` test below correctly reads as "nothing
-# changed" rather than "everything changed".
-# Watch every input the built firmware actually depends on, not just the
-# sketch. The build output is a function of three things: the sketch itself,
-# the build script (which pins the FQBN — the target board), and the manifest
-# generator (which pins the flash offsets).
-#
-# Watching only firmware/ caused a genuinely confusing failure: a fix that
-# corrected the FQBN from XIAO_ESP32S3 to the Plus variant landed in
-# scripts/build-firmware.sh, the updater reported "firmware rebuild skipped
-# (firmware/ unchanged)", and the stale binaries built for the wrong board
-# stayed exactly where they were. The Flash tab kept serving them, the flash
-# kept succeeding, and the board kept failing to boot — with the fix sitting
-# in the checkout, never once compiled.
-FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- \
-  firmware/ \
-  scripts/build-firmware.sh \
-  scripts/firmware-manifest.mjs \
-  2>/dev/null || true)"
+# build-firmware.sh writes input.sha256 only after a successful compile and
+# manifest generation. Missing/mismatched stamps force another build. A build
+# failure remains non-fatal to the dashboard server and, because builds are now
+# staged before publication, the previous successful Flash package survives.
+CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh 2>>"$LOG_FILE" || true)"
+BUILT_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
 
-if [[ -n "$FIRMWARE_DIFF" ]]; then
-  echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
-  if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
-    echo "firmware rebuild: ok" >>"$LOG_FILE"
+if [[ -z "$CURRENT_FIRMWARE_HASH" || "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWARE_HASH" ]]; then
+  if [[ -z "$BUILT_FIRMWARE_HASH" ]]; then
+    echo "== firmware rebuild (no freshness stamp / legacy build) ==" >>"$LOG_FILE"
   else
-    echo "firmware rebuild: FAILED — Flash tab will keep offering the previous build. This does not fail the update." >>"$LOG_FILE"
+    echo "== firmware rebuild (served build is stale) ==" >>"$LOG_FILE"
+    echo "current inputs: $CURRENT_FIRMWARE_HASH" >>"$LOG_FILE"
+    echo "served build:   $BUILT_FIRMWARE_HASH" >>"$LOG_FILE"
+  fi
+
+  if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
+    NEW_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -n "$CURRENT_FIRMWARE_HASH" && "$NEW_FIRMWARE_HASH" == "$CURRENT_FIRMWARE_HASH" ]]; then
+      echo "firmware rebuild: ok ($NEW_FIRMWARE_HASH)" >>"$LOG_FILE"
+    else
+      echo "firmware rebuild: completed but freshness stamp did not match; Flash tab may still be stale" >>"$LOG_FILE"
+    fi
+  else
+    echo "firmware rebuild: FAILED — Flash tab keeps the previous successful build. This does not fail the server update." >>"$LOG_FILE"
   fi
 else
-  echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
+  echo "== firmware rebuild skipped (served build matches current inputs) ==" >>"$LOG_FILE"
 fi
 write_status running
 
