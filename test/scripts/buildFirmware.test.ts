@@ -34,10 +34,15 @@ test('the build script targets the Plus variant, which is the board that actuall
   const text = await readFile(SCRIPT, 'utf8');
   const fqbnLine = text.split('\n').find((l) => /^FQBN=/.test(l));
   assert.ok(fqbnLine, 'could not find the FQBN assignment');
+  // Exact case, deliberately. FQBNs are case-sensitive, and this board's
+  // display name (XIAO_ESP32S3_PLUS) differs in case from its FQBN
+  // (XIAO_ESP32S3_Plus) — so the all-caps form looks correct, matches what a
+  // board listing shows, and is rejected by arduino-cli. That cost a whole
+  // build cycle. A case-insensitive assertion here would not have caught it.
   assert.match(
     fqbnLine!,
-    /XIAO_ESP32S3_PLUS/,
-    'must build for the Plus variant — the plain XIAO_ESP32S3 has 8MB flash and yields an image this board cannot boot',
+    /esp32:esp32:XIAO_ESP32S3_Plus\b/,
+    'must build for the Plus variant, with exactly this casing — the plain XIAO_ESP32S3 has 8MB flash and yields an image this board cannot boot',
   );
 });
 

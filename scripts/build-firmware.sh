@@ -29,7 +29,11 @@ DIST="$ROOT/firmware/dist"
 # for a different flash layout. Nothing anywhere reported an error.
 #
 # Overridable so a different XIAO variant does not need a code change.
-FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_PLUS}"
+# Case matters. FQBNs are case-sensitive, and the board's *display name* is
+# XIAO_ESP32S3_PLUS while its FQBN is XIAO_ESP32S3_Plus — so copying the name
+# out of a board list gives you something that looks right and is rejected.
+# This exact string came from `arduino-cli board listall` on the real machine.
+FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_Plus}"
 
 # Resolve arduino-cli by path, not by trusting PATH to contain it.
 #
