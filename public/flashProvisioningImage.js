@@ -26,8 +26,7 @@ function writeLe32(view, offset, value) {
   view.setUint32(offset, value >>> 0, true);
 }
 
-/** Standard reflected CRC-32 (polynomial 0xEDB88320). */
-export function crc32(bytes, seed = 0xFFFFFFFF) {
+function crc32Update(seed, bytes) {
   let crc = seed >>> 0;
   for (const value of bytes) {
     crc = (crc ^ value) >>> 0;
@@ -38,10 +37,15 @@ export function crc32(bytes, seed = 0xFFFFFFFF) {
   return crc >>> 0;
 }
 
+/** Standard reflected CRC-32 (polynomial 0xEDB88320). */
+export function crc32(bytes) {
+  return (crc32Update(0xFFFFFFFF, bytes) ^ 0xFFFFFFFF) >>> 0;
+}
+
 function finalRecordCrc(metadata, payload) {
-  let crc = crc32(metadata);
-  crc = crc32(payload, crc);
-  return (crc ^ 0xFFFFFFFF) >>> 0;
+  let state = crc32Update(0xFFFFFFFF, metadata);
+  state = crc32Update(state, payload);
+  return (state ^ 0xFFFFFFFF) >>> 0;
 }
 
 function checkedPartition(partition) {
@@ -82,7 +86,7 @@ export function buildFlashProvisioningImage(config, partition) {
 
   const image = new Uint8Array(target.size);
   image.fill(0xFF);
-  image.set(new TextEncoder().encode(FLASH_PROVISION_MAGIC), 0);
+  image.set(encoder.encode(FLASH_PROVISION_MAGIC), 0);
 
   const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
   writeLe16(view, 8, FLASH_PROVISION_VERSION);
