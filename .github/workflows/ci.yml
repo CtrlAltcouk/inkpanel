@@ -30,7 +30,7 @@ jobs:
 
       - name: Shell syntax
         run: |
-          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update; do
+          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/firmware-input-hash.sh; do
             echo "checking $script"
             bash -n "$script"
           done
@@ -84,7 +84,9 @@ jobs:
       - name: Check expected firmware outputs
         run: |
           test -s firmware/dist/manifest.json
+          test -s firmware/dist/input.sha256
           test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
+          test "$(cat firmware/dist/input.sha256)" = "$(bash scripts/firmware-input-hash.sh)"
 
   golden:
     name: Generate golden reference

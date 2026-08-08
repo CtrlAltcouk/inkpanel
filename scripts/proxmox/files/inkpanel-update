@@ -47,16 +47,6 @@ fail() {
 }
 trap 'fail "unexpected error on line $LINENO"' ERR
 
-# Runs on every exit path — normal completion, `fail`'s `exit 1`, or this
-# process being killed (reboot, `systemctl stop`, a start timeout). Without
-# this, an interrupted run leaves the status file stuck at "running" forever,
-# and POST /api/system/update then returns 409 with no way to recover short
-# of editing the file by hand. This also covers the temp log file, which
-# previously was only ever cleaned up on the success path.
-#
-# Note this cannot help against SIGKILL (e.g. some OOM-kill policies) — no
-# trap can run then. That is a real, unavoidable gap; it is not the case this
-# trap is written for.
 cleanup() {
   if [[ "$FINALIZED" -eq 0 ]]; then
     write_status failed "update was interrupted before it finished"
@@ -70,25 +60,26 @@ write_status running
 cd "$REPO_DIR"
 
 LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
-# Captured before the pull so the firmware rebuild below can tell whether
-# anything under firmware/ actually changed. `|| true` guarantees this
-# assignment itself never triggers set -e, regardless of git's exit status —
-# an ambiguous "before" is not worth aborting the whole update over, and the
-# diff below degrades to "skip the rebuild" rather than "fail the update".
+# Keep the old diff signal as a compatibility/fallback path. The freshness
+# fingerprint below is authoritative on current installs, but older checkouts
+# and deployment fixtures may not have the helper yet. More importantly, this
+# gives the log a useful explanation when the current pull itself changed a
+# firmware input.
 COMMIT_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
 
 echo "== git pull ==" >>"$LOG_FILE"
-# Pinned to origin/main so a repointed remote.origin.url or a checked-out
-# side branch cannot change what gets deployed.
 runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
 write_status running
+
+# Do NOT copy this root-owned updater from REPO_DIR here. The checkout belongs
+# to the unprivileged inkpanel account; promoting a file it can modify into a
+# root executable would turn an application compromise into root code
+# execution. Fresh installs receive the current privileged helper from the
+# installer. Upgrading an older helper is an explicit administrator action.
 
 LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
 
 if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
-  # npm ci removes node_modules before reinstalling, so a failure here leaves
-  # the service unable to start. Only pay that risk when dependencies actually
-  # changed — most updates are code-only.
   echo "== npm ci (lockfile changed) ==" >>"$LOG_FILE"
   runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
 else
@@ -96,44 +87,77 @@ else
 fi
 write_status running
 
-# Deliberately outside the fatal path, unlike git pull and npm ci above:
-# whether an ESP32 compile succeeds has nothing to do with whether this
-# server can keep serving frames to panels, and coupling them would mean a
-# firmware-side typo stops every panel in the house getting a dashboard. The
-# `if runuser ...; then ... else ... fi` form is what keeps this exempt from
-# set -e — a bare `runuser ... || fail ...` here would be exactly the mistake
-# this comment exists to prevent.
-#
-# COMMIT_BEFORE can be empty (see its capture above); an empty value makes
-# this diff empty too, which the `-n` test below correctly reads as "nothing
-# changed" rather than "everything changed".
-# Watch every input the built firmware actually depends on, not just the
-# sketch. The build output is a function of three things: the sketch itself,
-# the build script (which pins the FQBN — the target board), and the manifest
-# generator (which pins the flash offsets).
-#
-# Watching only firmware/ caused a genuinely confusing failure: a fix that
-# corrected the FQBN from XIAO_ESP32S3 to the Plus variant landed in
-# scripts/build-firmware.sh, the updater reported "firmware rebuild skipped
-# (firmware/ unchanged)", and the stale binaries built for the wrong board
-# stayed exactly where they were. The Flash tab kept serving them, the flash
-# kept succeeding, and the board kept failing to boot — with the fix sitting
-# in the checkout, never once compiled.
 FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- \
   firmware/ \
   scripts/build-firmware.sh \
   scripts/firmware-manifest.mjs \
+  scripts/firmware-input-hash.sh \
   2>/dev/null || true)"
 
-if [[ -n "$FIRMWARE_DIFF" ]]; then
-  echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
-  if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
-    echo "firmware rebuild: ok" >>"$LOG_FILE"
+# Firmware freshness is based on what the served package actually represents,
+# not merely on files changed by this particular pull. A real LXC reached the
+# state where the web UI was current but firmware/dist still contained the old
+# captive-portal-only image. A later pull had no new firmware diff, so the old
+# updater skipped rebuilding forever.
+#
+# Current builds carry input.sha256. When the helper exists, a missing or
+# mismatched stamp forces a rebuild even if FIRMWARE_DIFF is empty. If the
+# helper does not exist (legacy checkout/test fixture), fall back to the old
+# diff behaviour rather than turning every unrelated update into a build.
+HAVE_FIRMWARE_HASH=0
+CURRENT_FIRMWARE_HASH=""
+BUILT_FIRMWARE_HASH=""
+if [[ -f ./scripts/firmware-input-hash.sh ]]; then
+  CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh 2>>"$LOG_FILE" || true)"
+  if [[ -n "$CURRENT_FIRMWARE_HASH" ]]; then
+    HAVE_FIRMWARE_HASH=1
+    BUILT_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+fi
+
+NEEDS_FIRMWARE_BUILD=0
+if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+  if [[ "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWARE_HASH" ]]; then
+    NEEDS_FIRMWARE_BUILD=1
+  fi
+elif [[ -n "$FIRMWARE_DIFF" ]]; then
+  NEEDS_FIRMWARE_BUILD=1
+fi
+
+if [[ "$NEEDS_FIRMWARE_BUILD" -eq 1 ]]; then
+  if [[ -n "$FIRMWARE_DIFF" ]]; then
+    echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
+  elif [[ "$HAVE_FIRMWARE_HASH" -eq 1 && -z "$BUILT_FIRMWARE_HASH" ]]; then
+    echo "== firmware rebuild (no freshness stamp / legacy build) ==" >>"$LOG_FILE"
   else
-    echo "firmware rebuild: FAILED — Flash tab will keep offering the previous build. This does not fail the update." >>"$LOG_FILE"
+    echo "== firmware rebuild (served build is stale) ==" >>"$LOG_FILE"
+    echo "current inputs: $CURRENT_FIRMWARE_HASH" >>"$LOG_FILE"
+    echo "served build:   $BUILT_FIRMWARE_HASH" >>"$LOG_FILE"
+  fi
+
+  # Deliberately NOT `|| fail`: a firmware compile failure must not take the
+  # already-running dashboard server down. build-firmware.sh now stages output
+  # and publishes only after success, so the previous Flash package survives.
+  if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
+    if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+      NEW_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ "$NEW_FIRMWARE_HASH" == "$CURRENT_FIRMWARE_HASH" ]]; then
+        echo "firmware rebuild: ok ($NEW_FIRMWARE_HASH)" >>"$LOG_FILE"
+      else
+        echo "firmware rebuild: completed but freshness stamp did not match; Flash tab may still be stale" >>"$LOG_FILE"
+      fi
+    else
+      echo "firmware rebuild: ok (legacy freshness mode)" >>"$LOG_FILE"
+    fi
+  else
+    echo "firmware rebuild: FAILED — Flash tab keeps the previous successful build. This does not fail the server update." >>"$LOG_FILE"
   fi
 else
-  echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
+  if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+    echo "== firmware rebuild skipped (served build matches current inputs) ==" >>"$LOG_FILE"
+  else
+    echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
+  fi
 fi
 write_status running
 

@@ -35,6 +35,14 @@ DIST="$ROOT/firmware/dist"
 # This exact string came from `arduino-cli board listall` on the real machine.
 FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_Plus}"
 
+# Capture the exact source/build-input state represented by this build. The
+# updater compares this stamp with the current checkout instead of looking only
+# at files changed by the most recent `git pull`. That distinction matters if a
+# previous build failed or an older updater skipped it: a stale binary must not
+# become permanently "current" just because a later pull contains no new
+# firmware changes.
+INPUT_HASH="$(FQBN="$FQBN" bash "$ROOT/scripts/firmware-input-hash.sh")"
+
 # Resolve arduino-cli by path, not by trusting PATH to contain it.
 #
 # This script is invoked several ways, and only an interactive shell is
@@ -73,8 +81,17 @@ if ! "$ARDUINO_CLI" board details --fqbn "$FQBN" >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -rf "$DIST"
-mkdir -p "$DIST"
+# Never destroy the currently-served firmware before we know the replacement is
+# complete. Compile and generate the manifest in a sibling directory, then swap
+# it into place only after every step succeeds. This makes the updater's
+# "failed build keeps the previous good package" guarantee true in practice.
+STAGE="$(mktemp -d "$ROOT/firmware/.dist-build.XXXXXX")"
+OLD_DIST=""
+cleanup() {
+  [[ -z "${STAGE:-}" || ! -e "$STAGE" ]] || rm -rf "$STAGE"
+  [[ -z "${OLD_DIST:-}" || ! -e "$OLD_DIST" ]] || rm -rf "$OLD_DIST"
+}
+trap cleanup EXIT
 
 echo "== compiling for $FQBN =="
 # --output-dir puts the binaries somewhere predictable; --json makes the
@@ -82,15 +99,45 @@ echo "== compiling for $FQBN =="
 # directly (see firmware-manifest.mjs for why only that one offset).
 "$ARDUINO_CLI" compile \
   --fqbn "$FQBN" \
-  --output-dir "$DIST" \
+  --output-dir "$STAGE" \
   --json \
-  "$SKETCH" >"$DIST/build-report.json"
+  "$SKETCH" >"$STAGE/build-report.json"
 
 # arduino-cli emits bootloader, partition-table, application and (for the
 # current ESP32 core) merged binaries. firmware-manifest.mjs exposes the merged
 # image for new installs/recovery and the three region images for NVS-safe
 # routine updates. The firmware version is read directly from config.h.
-node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$SKETCH"
+node "$ROOT/scripts/firmware-manifest.mjs" "$STAGE" "$SKETCH"
+
+# Write this only after every build/manifest step succeeds. The updater uses it
+# to prove that the package on disk represents the current firmware sources.
+printf '%s\n' "$INPUT_HASH" >"$STAGE/input.sha256"
+
+# Same filesystem, so directory renames are atomic. There is a tiny interval
+# between moving the old directory aside and moving the new one into place, but
+# a failure in the second move restores the previous package immediately.
+mkdir -p "$(dirname "$DIST")"
+if [[ -e "$DIST" ]]; then
+  OLD_DIST="${DIST}.previous.$$"
+  rm -rf "$OLD_DIST"
+  mv "$DIST" "$OLD_DIST"
+fi
+
+if mv "$STAGE" "$DIST"; then
+  STAGE=""
+  if [[ -n "$OLD_DIST" ]]; then
+    rm -rf "$OLD_DIST"
+    OLD_DIST=""
+  fi
+else
+  if [[ -n "$OLD_DIST" && -e "$OLD_DIST" ]]; then
+    mv "$OLD_DIST" "$DIST"
+    OLD_DIST=""
+  fi
+  echo "could not publish the new firmware build; previous build restored" >&2
+  exit 1
+fi
 
 echo "== wrote $DIST/manifest.json =="
+echo "== firmware input fingerprint: $INPUT_HASH =="
 cat "$DIST/manifest.json"

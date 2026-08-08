@@ -37,4 +37,7 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 45'000;
 constexpr uint32_t FALLBACK_WAKE_SECONDS = 900;
 constexpr uint32_t MAX_BACKOFF_SECONDS = 3600;
 
-constexpr const char* FIRMWARE_VERSION = "0.1.0";
+// Bumped whenever behaviour visible on the physical panel changes. Keeping
+// this distinct makes serial output a quick proof that WebFlash served the
+// build we intended rather than a stale firmware/dist package.
+constexpr const char* FIRMWARE_VERSION = "0.1.1";
