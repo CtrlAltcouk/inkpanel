@@ -6,9 +6,9 @@
   scheduling — that lives in TypeScript where it can be tested and changed
   without reflashing.
 
-  First boot with no stored credentials waits briefly for USB provisioning
-  from the InkPanel web flasher, then falls back to the captive portal.
-  Hold KEY3 while resetting to wipe credentials and return to the portal.
+  First boot with no stored credentials first imports the one-time provisioning
+  record written during WebFlash. USB provisioning and the captive portal stay
+  available as recovery paths. Hold KEY3 while resetting to wipe credentials.
 */
 #include <Arduino.h>
 #include <WiFi.h>
@@ -16,6 +16,7 @@
 #include <esp_sleep.h>
 
 #include "config.h"
+#include "FlashProvisioning.h"
 #include "FrameClient.h"
 #include "OldV2EPD.h"
 #include "Provisioning.h"
@@ -68,8 +69,6 @@ static bool connectWifi() {
       return true;
     }
 
-    // A failed association can leave the stack in a state a plain retry does
-    // not clear, so tear it down before trying again.
     Serial.printf("[wifi] attempt %u failed (status %d)\n", attempt, WiFi.status());
     WiFi.disconnect(true);
     delay(500);
@@ -102,12 +101,9 @@ static void sleepFor(uint32_t seconds) {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
-  // Panel rail off — the image persists without power.
   pinMode(Hardware::EPD_ENABLE, OUTPUT);
   digitalWrite(Hardware::EPD_ENABLE, LOW);
 
-  // KEY1 wakes for an immediate refresh. GPIO 2 is RTC-capable on the S3, and
-  // the buttons are active low, so the pullup must be held through sleep.
   const gpio_num_t key1 = static_cast<gpio_num_t>(Hardware::KEY1);
   rtc_gpio_pullup_en(key1);
   rtc_gpio_pulldown_dis(key1);
@@ -139,26 +135,34 @@ void setup() {
   const char* reason = wakeReason();
   Serial.printf("\n[inkpanel] %s device=%s wake=%s\n", FIRMWARE_VERSION, id, reason);
 
-  // KEY3 held at boot wipes stored credentials. Checked before anything else
-  // so a bad server address cannot lock the panel out of being reconfigured.
+  // KEY3 is a genuine factory-configuration reset: clear both durable NVS and
+  // any one-time WebFlash record so a pending record cannot immediately put
+  // credentials back after the user deliberately wiped them.
   pinMode(Hardware::KEY3, INPUT_PULLUP);
   delay(50);
   if (digitalRead(Hardware::KEY3) == LOW) {
-    Serial.println("[setup] KEY3 held — clearing credentials");
+    Serial.println("[setup] KEY3 held — clearing credentials and one-time setup record");
     clearCredentials();
+    clearFlashProvisioning();
     runProvisioningPortal();
   }
 
   if (!obtainCredentials()) {
-    // A freshly flashed board is still connected to the computer that flashed
-    // it. Give that browser a window to send Wi-Fi + server details over the
-    // same USB cable, so normal setup never depends on joining 192.168.4.1.
-    Serial.println("[setup] no credentials stored — waiting for USB provisioning");
-    if (waitForUsbProvisioning(30000) && obtainCredentials()) {
-      Serial.println("[setup] USB credentials saved");
+    // Normal new-board setup is now completed entirely inside the flash
+    // operation: the browser writes a CRC-protected record into the dedicated
+    // provisioning partition. Import it before depending on USB re-enumeration.
+    Serial.println("[setup] no credentials stored — checking flash-time provisioning");
+    if (importFlashProvisioning() && obtainCredentials()) {
+      Serial.println("[setup] flash-time credentials imported");
     } else {
-      Serial.println("[setup] no USB credentials received — starting portal fallback");
-      runProvisioningPortal();
+      // USB remains a recovery path for an already-flashed unconfigured board.
+      Serial.println("[setup] no flash-time credentials — waiting for USB provisioning");
+      if (waitForUsbProvisioning(30000) && obtainCredentials()) {
+        Serial.println("[setup] USB credentials saved");
+      } else {
+        Serial.println("[setup] no USB credentials received — starting portal fallback");
+        runProvisioningPortal();
+      }
     }
   }
 
@@ -185,7 +189,6 @@ void setup() {
   if (outcome.result == FetchResult::Updated) {
     if (display.begin() && display.display(display.framebuffer())) {
       display.sleep();
-      // Only record the ETag once the pixels are actually on the panel.
       snprintf(storedEtag, sizeof(storedEtag), "%s", outcome.etag);
       Serial.println("[epd] drawn");
     } else {

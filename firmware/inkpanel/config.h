@@ -40,4 +40,4 @@ constexpr uint32_t MAX_BACKOFF_SECONDS = 3600;
 // Bumped whenever behaviour visible on the physical panel changes. Keeping
 // this distinct makes serial output a quick proof that WebFlash served the
 // build we intended rather than a stale firmware/dist package.
-constexpr const char* FIRMWARE_VERSION = "0.1.1";
+constexpr const char* FIRMWARE_VERSION = "0.1.2";

@@ -7,6 +7,7 @@
 // cases are distinguished below.
 import { getJson } from './api.js';
 import { esc } from './components.js';
+import { addFlashProvisioning } from './flashProvisioningImage.js';
 
 const HTTPS_PORT = 8443;
 const USB_BAUD = 115200;
@@ -42,12 +43,6 @@ function looksLikeChromiumFamily() {
 }
 
 export function unsupportedNotice() {
-  // An insecure context and an unsupported browser both leave navigator.serial
-  // undefined, but only one of them is fixable by changing the URL — and that
-  // is only true for a browser that would support WebSerial given a secure
-  // context. A Firefox/Safari user on plain HTTP needs a different browser,
-  // not a different URL, so the HTTPS-redirect branch is gated on the browser
-  // family too.
   if (window.isSecureContext === false && looksLikeChromiumFamily()) {
     const target = httpsUrl();
     return `<div class="card">
@@ -89,8 +84,6 @@ export async function fetchBinary(name) {
   if (!res.ok) throw new Error(`could not download ${name} (${res.status})`);
   const bytes = new Uint8Array(await res.arrayBuffer());
 
-  // esptool-js silently continues past zero-length images. Refuse them here
-  // rather than reporting a successful flash that cannot boot.
   if (bytes.length === 0) {
     throw new Error(
       `${name} is empty. Rebuild the firmware — flashing this would silently skip it and leave the board unbootable.`,
@@ -155,13 +148,6 @@ export async function buildFlashParts(parts, fetchBinaryFn = fetchBinary) {
 /**
  * Convert downloaded firmware into the exact byte arrays esptool-js 0.6.x
  * expects, and sanity-check the image that will live at flash address 0.
- *
- * The downloader historically returns a "binary string" (one JS character
- * per byte). That is reversible while every character is <= 0xFF, but passing
- * the string directly to writeFlash is not safe: pako treats it as text and
- * UTF-8 encodes bytes above 0x7F. The first ESP image byte 0xE9 therefore
- * becomes 0xC3 0xA9 — exactly the corruption that produces
- * "invalid header: 0x0203a9c3" on boot.
  */
 export function prepareFlashParts(parts) {
   const prepared = parts.map((part, index) => {
@@ -243,7 +229,7 @@ function base64Utf8(value) {
   return btoa(binary);
 }
 
-/** Build the one-line protocol record understood by Provisioning.cpp. */
+/** Build the one-line recovery protocol record understood by Provisioning.cpp. */
 export function buildProvisionCommand(config) {
   const checked = validateNewBoardConfig(config);
   return `${PROVISION_PREFIX}${base64Utf8(checked.ssid)}|${base64Utf8(checked.password)}|${base64Utf8(checked.serverUrl)}\n`;
@@ -265,12 +251,7 @@ async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Native USB briefly disappears while the freshly-flashed ESP32-S3 resets.
- * Re-open the port the user already granted rather than asking for another
- * picker gesture. If Chromium re-created the SerialPort object during USB
- * re-enumeration, use the one authorised matching device from getPorts().
- */
+/** Re-open an already authorised board for the configure-only recovery path. */
 export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -282,9 +263,6 @@ export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
     const matching = granted.filter((candidate) => sameUsbIdentity(candidate, originalPort));
     const candidates = [originalPort, ...matching.filter((candidate) => candidate !== originalPort)];
 
-    // If there are multiple identical authorised boards, the original object
-    // remains first. We deliberately do not pick an unrelated board merely
-    // because it has the same USB VID/PID.
     for (const candidate of candidates) {
       try {
         await candidate.open({ baudRate: USB_BAUD });
@@ -302,12 +280,9 @@ export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
 }
 
 /**
- * Wait for firmware's USB setup channel, send credentials, and wait for an
- * explicit NVS-save acknowledgement. The password is never written to the
- * InkPanel log or server; it travels directly from this browser to the board.
- *
- * This works both immediately after a flash and later while an unconfigured
- * board is sitting in its recovery setup mode.
+ * Recovery provisioning for a board that is already running InkPanel firmware.
+ * Normal new-board setup no longer depends on this post-reset USB handshake;
+ * its settings are written to flash before the first boot.
  */
 export async function provisionNewBoard(originalPort, config, write = () => {}, timeoutMs = 30000) {
   const checked = validateNewBoardConfig(config);
@@ -411,11 +386,11 @@ export function readyPanel(manifest) {
       </label>
       <label>
         <input type="radio" name="mode" value="new">
-        <span><strong>Set up a new board</strong> <em>&mdash; erase, flash and configure it over USB</em></span>
+        <span><strong>Set up a new board</strong> <em>&mdash; erase, flash and configure it in one pass</em></span>
       </label>
       <label>
         <input type="radio" name="mode" value="configure">
-        <span><strong>Configure an unconfigured board</strong> <em>&mdash; send Wi-Fi/server settings over USB without reflashing</em></span>
+        <span><strong>Configure an unconfigured board</strong> <em>&mdash; recovery setup over USB without reflashing</em></span>
       </label>
       <label>
         <input type="radio" name="mode" value="erase">
@@ -425,7 +400,7 @@ export function readyPanel(manifest) {
 
     <div class="new-board-setup" data-new-board-fields hidden>
       <h3>Board settings</h3>
-      <p class="notice">These details go directly from this browser to the ESP32 over USB. The Wi-Fi password is not sent to the InkPanel server.</p>
+      <p class="notice">For a new board these details are written directly into a one-time ESP32 setup sector during the flash. The firmware imports them into NVS on first boot and immediately erases the temporary copy. The Wi-Fi password is never sent to the InkPanel server.</p>
       <label>Wi-Fi network name (SSID)</label>
       <input type="text" data-new-ssid autocomplete="off" spellcheck="false" placeholder="Your Wi-Fi name">
       <label>Wi-Fi password</label>
@@ -508,9 +483,6 @@ export async function renderFlash(root) {
 
     let transport = null;
     try {
-      // The browser picker is the safety boundary for both flashing and the
-      // configure-only recovery path. In configure mode the selected device is
-      // opened directly as normal firmware USB CDC and no flash write occurs.
       const port = await navigator.serial.requestPort();
 
       if (mode === 'configure') {
@@ -520,14 +492,11 @@ export async function renderFlash(root) {
         return;
       }
 
-      // esptool-js is ~380KB. Load it only after the user has selected a port.
       const { ESPLoader, Transport } = await import('./vendor/esptool-js.js');
       transport = new Transport(port, true);
 
       const loader = new ESPLoader({
         transport,
-        // Keep these equal on the XIAO's native USB connection. A baud change
-        // adds no throughput here and previously destabilised a real flash.
         baudrate: 115200,
         romBaudrate: 115200,
         terminal: { clean: () => {}, writeLine: write, write: () => {} },
@@ -546,15 +515,21 @@ export async function renderFlash(root) {
       }
 
       const manifestParts = selectFlashManifestParts(manifest, mode);
-      const parts = prepareFlashParts(await buildFlashParts(manifestParts));
+      let parts = prepareFlashParts(await buildFlashParts(manifestParts));
+
+      if (mode === 'new') {
+        if (!manifest.provisioning) {
+          throw new Error('This firmware build has no flash-time provisioning partition. Rebuild firmware on the server.');
+        }
+        parts = addFlashProvisioning(parts, newConfig, manifest.provisioning);
+        write('Embedding one-time Wi-Fi and InkPanel brain settings in the firmware flash...');
+      }
 
       write(`Writing ${parts.length} image${parts.length === 1 ? '' : 's'}...`);
       await loader.writeFlash({
         fileArray: parts,
         flashSize: 'keep',
         eraseAll: false,
-        // Full merged installs are mostly 0xFF padding; compression makes them
-        // practical. updateParts also work through the same proven path.
         compress: true,
         reportProgress: (index, written, total) => {
           write(`  image ${index + 1}: ${Math.round((written / total) * 100)}%`);
@@ -564,19 +539,8 @@ export async function renderFlash(root) {
       await loader.after();
 
       if (mode === 'new') {
-        // esptool has finished with the port. Release it, let native USB
-        // re-enumerate into the freshly flashed firmware, then open the same
-        // authorised device as an ordinary 115200 CDC serial connection.
-        try { await transport.disconnect(); } catch { /* reset may have closed it */ }
-        transport = null;
-        write('Firmware flashed successfully. Waiting for the new board to restart...');
-        try {
-          await provisionNewBoard(port, newConfig, write);
-          write('Done. The board has its Wi-Fi and InkPanel brain settings and will now join the network.');
-        } catch (err) {
-          write(`Automatic USB setup did not complete: ${String(err?.message ?? err)}`);
-          write('The firmware is already installed. Select Configure an unconfigured board and choose the board\'s normal COM port — do not reflash it.');
-        }
+        write('Done. Firmware and board settings were written in one pass.');
+        write('The ESP32 will import the Wi-Fi and InkPanel brain address on first boot, erase the temporary setup record, join the network and appear under Panels.');
       } else if (mode === 'erase') {
         write('Done. The board will restart unconfigured. USB setup remains available, or you can use Configure an unconfigured board without flashing again.');
       } else {
