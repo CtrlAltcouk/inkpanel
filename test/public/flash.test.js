@@ -373,6 +373,32 @@ test('flash.js loads esptool-js via a dynamic import, so it is fetched only once
 // cause of exactly this failure shape. Source-level, matching the dynamic-
 // import tests above: writeFlash() talks to real hardware and cannot be
 // exercised without a board, so this pins the option rather than the outcome.
+// ESPLoader.main() calls changeBaud() whenever baudrate !== romBaudrate, and
+// the vendored bundle guards that call with nothing — it has
+// usesUsbJtagSerial()/usesUsbOtg() detection but applies it only to reset
+// sequences, never to the baud change. esptool.py skips the baud change
+// entirely on native-USB chips. The XIAO ESP32-S3 is native USB, where the
+// baud rate is a fiction (bytes move at USB speed regardless), so a
+// renegotiation to 921600 bought no throughput and destabilised the link: a
+// real flash died mid-transfer at block 36. Keeping these equal is what stops
+// changeBaud() being reached at all.
+test('the ESPLoader baudrate matches romBaudrate, so changeBaud() is never reached on a native-USB board', async () => {
+  const source = await readFile(FLASH_JS_PATH, 'utf8');
+  const ctorIdx = source.indexOf('new ESPLoader({');
+  assert.ok(ctorIdx > -1, 'could not find the ESPLoader constructor call');
+  const ctorBody = source.slice(ctorIdx, source.indexOf('});', ctorIdx));
+
+  const baudrate = /(?<!rom)baudrate:\s*(\d+)/i.exec(ctorBody);
+  const romBaudrate = /romBaudrate:\s*(\d+)/i.exec(ctorBody);
+  assert.ok(baudrate, 'no baudrate found in the ESPLoader options');
+  assert.ok(romBaudrate, 'no romBaudrate found in the ESPLoader options');
+  assert.equal(
+    baudrate[1],
+    romBaudrate[1],
+    'baudrate and romBaudrate must be equal, or ESPLoader.main() calls the unguarded changeBaud()',
+  );
+});
+
 test('the writeFlash call disables compression, which is a known cause of mid-write failures over WebSerial', async () => {
   const source = await readFile(FLASH_JS_PATH, 'utf8');
   const writeFlashCallIdx = source.indexOf('loader.writeFlash({');

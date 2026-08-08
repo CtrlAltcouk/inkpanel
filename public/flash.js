@@ -244,7 +244,18 @@ export async function renderFlash(root) {
 
       const loader = new ESPLoader({
         transport,
-        baudrate: 921600,
+        // baudrate MUST equal romBaudrate. ESPLoader.main() calls changeBaud()
+        // whenever they differ, and this bundle guards that call with nothing
+        // — it has usesUsbJtagSerial()/usesUsbOtg() detection but only applies
+        // it to reset sequences, never to the baud change. esptool.py skips
+        // the baud change entirely on native-USB chips, for good reason.
+        //
+        // The XIAO ESP32-S3 is native USB, where the "baud rate" is a fiction:
+        // bytes move at USB speed no matter what number is negotiated. So the
+        // renegotiation bought nothing and destabilised the link — a real
+        // flash died mid-transfer at block 36 with the ROM loader's own
+        // non-zero status byte. Matching these costs no throughput here.
+        baudrate: 115200,
         romBaudrate: 115200,
         terminal: { clean: () => {}, writeLine: write, write: () => {} },
       });
