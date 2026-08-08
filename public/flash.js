@@ -72,7 +72,15 @@ export function noBuildNotice() {
 }
 
 /**
- * Fetch a firmware image as the binary string esptool-js expects.
+ * Fetch a firmware image as a one-byte-per-character binary string.
+ *
+ * This representation is kept for the existing browser download path only.
+ * It MUST NOT be handed directly to esptool-js 0.6.x: writeFlash expects a
+ * Uint8Array, and its compression layer UTF-8 encodes JavaScript strings.
+ * That turns an ESP image's required leading byte 0xE9 into 0xC3 0xA9 and the
+ * ROM then boot-loops with e.g. "invalid header: 0x0203a9c3".
+ * prepareFlashParts() converts this string back to exact bytes before any
+ * esptool call.
  *
  * Not TextDecoder: this is binary, and any decoding would corrupt bytes above
  * 0x7F. Chunked because a naive String.fromCharCode(...bytes) on a megabyte
@@ -136,6 +144,63 @@ export async function buildFlashParts(parts, fetchBinaryFn = fetchBinary) {
       data: await fetchBinaryFn(part.path),
     })),
   );
+}
+
+/**
+ * Convert downloaded firmware into the exact byte arrays esptool-js 0.6.x
+ * expects, and sanity-check the image that will live at flash address 0.
+ *
+ * The downloader historically returns a "binary string" (one JS character
+ * per byte). That is reversible while every character is <= 0xFF, but passing
+ * the string directly to writeFlash is not safe: pako treats it as text and
+ * UTF-8 encodes bytes above 0x7F. The first ESP image byte 0xE9 therefore
+ * becomes 0xC3 0xA9 — exactly the corruption that produces
+ * "invalid header: 0x0203a9c3" on boot.
+ */
+export function prepareFlashParts(parts) {
+  const prepared = parts.map((part, index) => {
+    let data;
+
+    if (part.data instanceof Uint8Array) {
+      data = part.data;
+    } else if (typeof part.data === 'string') {
+      data = new Uint8Array(part.data.length);
+      for (let i = 0; i < part.data.length; i += 1) {
+        const value = part.data.charCodeAt(i);
+        if (value > 0xff) {
+          throw new Error(
+            `firmware image ${index + 1} contains a non-binary character at byte ${i}; refusing to flash`,
+          );
+        }
+        data[i] = value;
+      }
+    } else {
+      throw new Error(`firmware image ${index + 1} is not binary data; refusing to flash`);
+    }
+
+    return { address: part.address, data };
+  });
+
+  // For this ESP32-S3 build the merged image (or fallback bootloader) starts
+  // at address 0 and must begin with Espressif's image magic byte 0xE9. This
+  // is deliberately checked immediately before writeFlash, after every data
+  // conversion, so a future encoding regression is caught before it can make
+  // a board boot-loop.
+  const bootImage = prepared.find((part) => Number(part.address) === 0);
+  if (bootImage) {
+    const magic = bootImage.data[0];
+    if (magic !== 0xe9) {
+      const first = Array.from(bootImage.data.slice(0, 4))
+        .map((value) => value.toString(16).padStart(2, '0'))
+        .join(' ')
+        .toUpperCase();
+      throw new Error(
+        `firmware image at 0x0 has invalid ESP header ${first || '(empty)'}; expected E9 as the first byte. Refusing to flash.`,
+      );
+    }
+  }
+
+  return prepared;
 }
 
 /**
@@ -285,7 +350,11 @@ export async function renderFlash(root) {
         await loader.eraseFlash();
       }
 
-      const parts = await buildFlashParts(manifest.parts);
+      // buildFlashParts retains the historical binary-string download
+      // representation. Convert it back to exact bytes before esptool-js sees
+      // it; otherwise its compressor UTF-8 encodes 0xE9 as 0xC3 0xA9 and writes
+      // an invalid ESP image header to flash.
+      const parts = prepareFlashParts(await buildFlashParts(manifest.parts));
 
       write(`Writing ${parts.length} images...`);
       await loader.writeFlash({
