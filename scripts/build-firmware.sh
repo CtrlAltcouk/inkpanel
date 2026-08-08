@@ -35,6 +35,14 @@ DIST="$ROOT/firmware/dist"
 # This exact string came from `arduino-cli board listall` on the real machine.
 FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_Plus}"
 
+# Capture the exact source/build-input state represented by this build. The
+# updater compares this stamp with the current checkout instead of looking only
+# at files changed by the most recent `git pull`. That distinction matters if a
+# previous build failed or an older updater skipped it: a stale binary must not
+# become permanently "current" just because a later pull contains no new
+# firmware changes.
+INPUT_HASH="$(FQBN="$FQBN" bash "$ROOT/scripts/firmware-input-hash.sh")"
+
 # Resolve arduino-cli by path, not by trusting PATH to contain it.
 #
 # This script is invoked several ways, and only an interactive shell is
@@ -92,5 +100,13 @@ echo "== compiling for $FQBN =="
 # routine updates. The firmware version is read directly from config.h.
 node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$SKETCH"
 
+# Write this only after every build/manifest step succeeds. If a build fails,
+# the old successful dist directory is already gone for a manual build; on LXC
+# the updater preserves the previously-served build by staging separately in a
+# future improvement. The stamp itself must never claim freshness unless the
+# complete build above succeeded.
+printf '%s\n' "$INPUT_HASH" >"$DIST/input.sha256"
+
 echo "== wrote $DIST/manifest.json =="
+echo "== firmware input fingerprint: $INPUT_HASH =="
 cat "$DIST/manifest.json"
