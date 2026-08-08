@@ -1,0 +1,30 @@
+.new-board-setup {
+  border: 1px solid var(--brand-pink-line);
+  background: var(--brand-pink-dim);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-4);
+  margin: var(--sp-4) 0;
+}
+
+.new-board-setup h3 {
+  margin-top: 0;
+}
+
+.new-board-setup input[type="text"],
+.new-board-setup input[type="password"] {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  color: var(--fg-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  padding: var(--sp-3);
+}
+
+.new-board-setup input:focus {
+  outline: none;
+  border-color: var(--brand-pink);
+  box-shadow: var(--shadow-glow);
+}
