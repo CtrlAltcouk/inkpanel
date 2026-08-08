@@ -77,21 +77,22 @@ export class FrameService {
   private async fetchAll(device: DeviceRecord): Promise<SourceBundle> {
     if (this.deps.fetchData) return this.deps.fetchData(device);
 
+    const runOptions = { deviceId: device.id, timeoutMs: SOURCE_TIMEOUT_MS };
     const [calendar, weather, bins] = await Promise.all([
       runSource(
         icalSource,
         { urls: device.calendarUrls, timezone: device.timezone },
         this.deps.cache,
-        SOURCE_TIMEOUT_MS,
+        runOptions,
       ),
       runSource(
         openMeteoSource,
         { latitude: device.latitude, longitude: device.longitude, timezone: device.timezone },
         this.deps.cache,
-        SOURCE_TIMEOUT_MS,
+        runOptions,
       ),
       device.binsUprn
-        ? runSource(binsSource, { uprn: device.binsUprn }, this.deps.cache, SOURCE_TIMEOUT_MS)
+        ? runSource(binsSource, { uprn: device.binsUprn }, this.deps.cache, runOptions)
         : Promise.resolve(null),
     ]);
 
