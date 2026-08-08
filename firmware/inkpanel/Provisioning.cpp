@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <mbedtls/base64.h>
 
 #include "config.h"
 
@@ -12,9 +13,77 @@ namespace {
 constexpr const char* NVS_NAMESPACE = "inkpanel";
 constexpr const char* AP_SSID = "inkpanel-setup";
 
+constexpr const char* USB_READY = "INKPANEL_READY_V1";
+constexpr const char* USB_SAVED = "INKPANEL_SAVED_V1";
+constexpr const char* USB_ERROR = "INKPANEL_ERROR_V1|";
+constexpr const char* USB_PREFIX = "INKPANEL_PROVISION_V1|";
+constexpr size_t MAX_USB_LINE = 640;
+
 Preferences prefs;
 DNSServer dns;
 WebServer web(80);
+
+bool validCredentials(const Credentials& credentials) {
+  if (credentials.ssid[0] == '\0' || credentials.serverUrl[0] == '\0') return false;
+  // Panel check-ins intentionally use the server's plain-HTTP listener. The
+  // HTTPS listener has a local/self-signed certificate and exists for the
+  // browser Flash tab, not for the ESP32 HTTP client.
+  return strncmp(credentials.serverUrl, "http://", 7) == 0;
+}
+
+bool decodeBase64Field(const String& encoded, char* output, size_t outputSize) {
+  if (outputSize < 2) return false;
+
+  size_t decodedLength = 0;
+  const int rc = mbedtls_base64_decode(
+      reinterpret_cast<unsigned char*>(output), outputSize - 1, &decodedLength,
+      reinterpret_cast<const unsigned char*>(encoded.c_str()), encoded.length());
+  if (rc != 0 || decodedLength >= outputSize) return false;
+
+  output[decodedLength] = '\0';
+  // NVS/WiFi credentials are C strings. Embedded NULs would otherwise make
+  // the browser and firmware disagree about what was saved, so reject them.
+  return strlen(output) == decodedLength;
+}
+
+bool handleUsbProvisionLine(const String& line) {
+  if (!line.startsWith(USB_PREFIX)) return false;
+
+  const int first = line.indexOf('|');
+  const int second = line.indexOf('|', first + 1);
+  const int third = line.indexOf('|', second + 1);
+  if (first < 0 || second < 0 || third < 0 || line.indexOf('|', third + 1) >= 0) {
+    Serial.printf("%smalformed\n", USB_ERROR);
+    return false;
+  }
+
+  Credentials incoming{};
+  if (!decodeBase64Field(line.substring(first + 1, second), incoming.ssid, sizeof(incoming.ssid))) {
+    Serial.printf("%sssid\n", USB_ERROR);
+    return false;
+  }
+  if (!decodeBase64Field(line.substring(second + 1, third), incoming.password, sizeof(incoming.password))) {
+    Serial.printf("%spassword\n", USB_ERROR);
+    return false;
+  }
+  if (!decodeBase64Field(line.substring(third + 1), incoming.serverUrl, sizeof(incoming.serverUrl))) {
+    Serial.printf("%sserver-url\n", USB_ERROR);
+    return false;
+  }
+  if (!validCredentials(incoming)) {
+    Serial.printf("%sinvalid-credentials\n", USB_ERROR);
+    return false;
+  }
+
+  if (!saveCredentials(incoming)) {
+    Serial.printf("%snvs-write\n", USB_ERROR);
+    return false;
+  }
+
+  Serial.println(USB_SAVED);
+  Serial.flush();
+  return true;
+}
 
 String htmlEscape(const String& value) {
   String out;
@@ -72,22 +141,29 @@ String setupPage() {
 
 void handleSave() {
   const String ssid = web.arg("ssid");
+  const String pass = web.arg("pass");
   const String url = web.arg("url");
 
-  if (ssid.isEmpty() || url.isEmpty()) {
+  if (ssid.isEmpty() || url.isEmpty() || ssid.length() > 32 || pass.length() > 64 || url.length() > 127) {
     web.send(400, "text/html",
              "<body style='background:#0a0a0b;color:#f5f5f6;font-family:sans-serif;padding:24px'>"
-             "<h1 style='color:#e85a56'>Missing details</h1>"
-             "<p>A network and a server address are both required.</p>"
+             "<h1 style='color:#e85a56'>Invalid details</h1>"
+             "<p>A network and HTTP server address are required and must fit the panel limits.</p>"
              "<p><a style='color:#f7a4a2' href='/'>Back</a></p></body>");
     return;
   }
 
-  prefs.begin(NVS_NAMESPACE, false);
-  prefs.putString("ssid", ssid);
-  prefs.putString("pass", web.arg("pass"));
-  prefs.putString("url", url);
-  prefs.end();
+  Credentials incoming{};
+  snprintf(incoming.ssid, sizeof(incoming.ssid), "%s", ssid.c_str());
+  snprintf(incoming.password, sizeof(incoming.password), "%s", pass.c_str());
+  snprintf(incoming.serverUrl, sizeof(incoming.serverUrl), "%s", url.c_str());
+  if (!saveCredentials(incoming)) {
+    web.send(400, "text/html",
+             "<body style='background:#0a0a0b;color:#f5f5f6;font-family:sans-serif;padding:24px'>"
+             "<h1 style='color:#e85a56'>Could not save</h1>"
+             "<p>Check the server address begins with http:// and try again.</p></body>");
+    return;
+  }
 
   web.send(200, "text/html",
            "<body style='background:#0a0a0b;color:#f5f5f6;font-family:sans-serif;padding:24px'>"
@@ -111,13 +187,66 @@ bool loadCredentials(Credentials& out) {
   snprintf(out.ssid, sizeof(out.ssid), "%s", ssid.c_str());
   snprintf(out.password, sizeof(out.password), "%s", pass.c_str());
   snprintf(out.serverUrl, sizeof(out.serverUrl), "%s", url.c_str());
-  return true;
+  return validCredentials(out);
+}
+
+bool saveCredentials(const Credentials& credentials) {
+  if (!validCredentials(credentials)) return false;
+
+  prefs.begin(NVS_NAMESPACE, false);
+  const size_t ssidBytes = prefs.putString("ssid", credentials.ssid);
+  // An empty password is valid for an open network; Preferences returns 0 for
+  // an empty string, so it must not be treated as a failed write.
+  prefs.putString("pass", credentials.password);
+  const size_t urlBytes = prefs.putString("url", credentials.serverUrl);
+  prefs.end();
+  return ssidBytes > 0 && urlBytes > 0;
 }
 
 void clearCredentials() {
   prefs.begin(NVS_NAMESPACE, false);
   prefs.clear();
   prefs.end();
+}
+
+bool waitForUsbProvisioning(uint32_t timeoutMs) {
+  Serial.printf("[setup] USB provisioning available for %lu seconds\n",
+                static_cast<unsigned long>(timeoutMs / 1000));
+
+  String line;
+  line.reserve(MAX_USB_LINE);
+  const uint32_t deadline = millis() + timeoutMs;
+  uint32_t lastReady = 0;
+
+  while (static_cast<int32_t>(deadline - millis()) > 0) {
+    const uint32_t now = millis();
+    if (lastReady == 0 || now - lastReady >= 1000) {
+      Serial.println(USB_READY);
+      Serial.flush();
+      lastReady = now;
+    }
+
+    while (Serial.available() > 0) {
+      const char c = static_cast<char>(Serial.read());
+      if (c == '\r') continue;
+      if (c == '\n') {
+        if (!line.isEmpty() && handleUsbProvisionLine(line)) return true;
+        line = "";
+        continue;
+      }
+
+      if (line.length() >= MAX_USB_LINE) {
+        line = "";
+        Serial.printf("%sline-too-long\n", USB_ERROR);
+      } else {
+        line += c;
+      }
+    }
+    delay(5);
+  }
+
+  Serial.println("[setup] USB provisioning window expired");
+  return false;
 }
 
 [[noreturn]] void runProvisioningPortal() {
