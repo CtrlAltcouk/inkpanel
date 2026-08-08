@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { DeviceStore, DeviceStoreError, type DeviceStoreErrorCode } from '../../src/devices/store.ts';
+import {
+  defaultDevice,
+  DeviceStore,
+  DeviceStoreError,
+  type DeviceStoreErrorCode,
+} from '../../src/devices/store.ts';
+import { deviceRecordSchema } from '../../src/devices/schema.ts';
 
 async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dev-'));
@@ -63,6 +69,7 @@ test('writes valid JSON atomically', async () => {
   await withStore(async (store, path) => {
     await store.getOrCreate('esp32-a1b2c3');
     const parsed = JSON.parse(await readFile(path, 'utf8'));
+    assert.equal(parsed.schemaVersion, 1);
     assert.ok(Array.isArray(parsed.devices));
   });
 });
@@ -82,14 +89,14 @@ test('rejects updates to unknown devices', async () => {
 
 test('serialises concurrent writes without losing one', async () => {
   await withStore(async (store) => {
-    await store.getOrCreate('a');
-    await store.getOrCreate('b');
+    await store.getOrCreate('aa');
+    await store.getOrCreate('bb');
     await Promise.all([
-      store.update('a', { name: 'Alpha' }),
-      store.update('b', { name: 'Bravo' }),
+      store.update('aa', { name: 'Alpha' }),
+      store.update('bb', { name: 'Bravo' }),
     ]);
-    assert.equal((await store.get('a'))?.name, 'Alpha');
-    assert.equal((await store.get('b'))?.name, 'Bravo');
+    assert.equal((await store.get('aa'))?.name, 'Alpha');
+    assert.equal((await store.get('bb'))?.name, 'Bravo');
   });
 });
 
@@ -146,7 +153,7 @@ test('valid JSON with an invalid top-level store shape also fails closed', async
 
     const reopened = new DeviceStore(path);
     const err = await expectStoreError(() => reopened.list(), 'config_corrupt');
-    assert.match(err.message, /devices array/i);
+    assert.match(err.message, /devices.*array/i);
     assert.equal(await readFile(path, 'utf8'), malformed);
   });
 });
@@ -184,7 +191,7 @@ test('new devices start with no UPRN configured', async () => {
   });
 });
 
-test('a config file written before Spec 2a still loads', async () => {
+test('a minimal legacy config migrates in memory to a complete current record', async () => {
   await withStore(async (_store, path) => {
     // A record with none of the new fields, as Spec 1 would have written it.
     await writeFile(path, JSON.stringify({
@@ -194,9 +201,153 @@ test('a config file written before Spec 2a still loads', async () => {
     const reopened = new DeviceStore(path);
     const device = await reopened.get('esp32-old');
     assert.equal(device?.name, 'Old panel', 'existing data survives');
-    // Missing fields read as undefined for now. The next backlog item adds the
-    // explicit schema/version migration layer that fills these defaults.
-    assert.equal(device?.locationLabel, undefined);
-    assert.equal(device?.lastWakeSeconds, undefined);
+    assert.equal(device?.claimed, true, 'existing boolean configuration survives');
+    assert.equal(device?.locationLabel, '', 'missing fields receive current defaults');
+    assert.equal(device?.lastWakeSeconds, null);
+    assert.deepEqual(
+      Object.keys(device!).sort(),
+      Object.keys(defaultDevice('esp32-old')).sort(),
+      'every current DeviceRecord field is populated',
+    );
+    assert.equal(deviceRecordSchema.safeParse(device).success, true);
+  });
+});
+
+test('a complete V1 store round-trips unchanged', async () => {
+  await withStore(async (_store, path) => {
+    const device = {
+      ...defaultDevice('esp32-current'),
+      name: 'Kitchen panel',
+      claimed: true,
+      latitude: 51.5074,
+      longitude: -0.1278,
+      calendarUrls: ['https://example.com/calendar.ics'],
+    };
+    const original = JSON.stringify({ schemaVersion: 1, devices: [device] }, null, 2);
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    assert.deepEqual(await reopened.list(), [device]);
+    assert.equal(await readFile(path, 'utf8'), original, 'a read does not rewrite current config');
+  });
+});
+
+test('an incomplete V1 record fails closed instead of receiving legacy defaults', async () => {
+  await withStore(async (_store, path) => {
+    const original = JSON.stringify({
+      schemaVersion: 1,
+      devices: [{ id: 'esp32-incomplete', name: 'Incomplete', claimed: false }],
+    });
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    await expectStoreError(() => reopened.list(), 'config_corrupt');
+    assert.equal(await readFile(path, 'utf8'), original);
+  });
+});
+
+test('legacy migration preserves explicit user configuration and defaults only missing fields', async () => {
+  await withStore(async (_store, path) => {
+    const original = JSON.stringify({
+      devices: [{
+        id: 'esp32-legacy',
+        name: 'Hallway',
+        claimed: true,
+        latitude: 40.7128,
+        longitude: -74.006,
+        calendarUrls: ['https://example.com/home.ics'],
+      }],
+    });
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    const device = await reopened.get('esp32-legacy');
+    assert.equal(device?.name, 'Hallway');
+    assert.equal(device?.claimed, true);
+    assert.equal(device?.latitude, 40.7128);
+    assert.equal(device?.longitude, -74.006);
+    assert.deepEqual(device?.calendarUrls, ['https://example.com/home.ics']);
+    assert.equal(device?.activeIntervalSeconds, 900);
+    assert.equal(await readFile(path, 'utf8'), original, 'migration during reads is in memory');
+
+    await reopened.update('esp32-legacy', { name: 'Updated hallway' });
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as {
+      schemaVersion: number;
+      devices: unknown[];
+    };
+    assert.equal(persisted.schemaVersion, 1);
+    assert.equal(deviceRecordSchema.safeParse(persisted.devices[0]).success, true);
+  });
+});
+
+test('an explicitly invalid legacy value fails instead of being defaulted', async () => {
+  await withStore(async (_store, path) => {
+    const original = JSON.stringify({
+      devices: [{ id: 'esp32-invalid', activeIntervalSeconds: 'invalid' }],
+    });
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    await expectStoreError(() => reopened.list(), 'config_corrupt');
+    await expectStoreError(() => reopened.getOrCreate('esp32-new'), 'config_corrupt');
+    assert.equal(await readFile(path, 'utf8'), original);
+  });
+});
+
+test('duplicate device ids fail closed', async () => {
+  await withStore(async (_store, path) => {
+    const original = JSON.stringify({
+      devices: [{ id: 'esp32-duplicate' }, { id: 'esp32-duplicate' }],
+    });
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    const err = await expectStoreError(() => reopened.list(), 'config_corrupt');
+    assert.match(err.message, /duplicate device id/i);
+    assert.equal(await readFile(path, 'utf8'), original);
+  });
+});
+
+test('invalid persisted IANA timezone fails closed', async () => {
+  await withStore(async (_store, path) => {
+    const original = JSON.stringify({
+      schemaVersion: 1,
+      devices: [{ ...defaultDevice('esp32-timezone'), timezone: 'Not/A_Timezone' }],
+    });
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    const err = await expectStoreError(() => reopened.list(), 'config_corrupt');
+    assert.match(err.message, /IANA timezone/i);
+    assert.equal(await readFile(path, 'utf8'), original);
+  });
+});
+
+test('a future schema version is unsupported and remains byte-for-byte unchanged', async () => {
+  await withStore(async (_store, path) => {
+    const original = '{"schemaVersion":2,"devices":[],"futureFeature":true}\n';
+    await writeFile(path, original, 'utf8');
+
+    const reopened = new DeviceStore(path);
+    const err = await expectStoreError(() => reopened.list(), 'config_unsupported_version');
+    assert.match(err.message, /newer InkPanel version/i);
+    await expectStoreError(
+      () => reopened.getOrCreate('esp32-new'),
+      'config_unsupported_version',
+    );
+    assert.equal(await readFile(path, 'utf8'), original);
+  });
+});
+
+test('an invalid prospective record is never committed', async () => {
+  await withStore(async (store, path) => {
+    await store.getOrCreate('esp32-safe');
+    const original = await readFile(path, 'utf8');
+
+    await expectStoreError(
+      () => store.update('esp32-safe', { timezone: 'Definitely/Invalid' }),
+      'config_invalid',
+    );
+    assert.equal(await readFile(path, 'utf8'), original);
   });
 });

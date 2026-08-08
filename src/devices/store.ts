@@ -3,19 +3,29 @@ import { constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import { defaultDevice, type DeviceRecord } from './types.ts';
+import {
+  CURRENT_DEVICE_STORE_SCHEMA_VERSION,
+  currentDeviceStoreSchema,
+  deviceRecordSchema,
+  parseDeviceStoreFile,
+  UnsupportedDeviceStoreVersionError,
+  type CurrentDeviceStoreFile,
+} from './schema.ts';
 
-interface StoreFile {
-  devices: DeviceRecord[];
-}
-
-export type DeviceStoreErrorCode = 'config_corrupt' | 'config_io';
+export type DeviceStoreErrorCode =
+  | 'config_corrupt'
+  | 'config_invalid'
+  | 'config_io'
+  | 'config_unsupported_version';
 
 /**
  * A storage failure that callers must not reinterpret as an empty installation.
  *
  * `config_corrupt` means the original file was readable but could not safely be
- * interpreted as an InkPanel store. `config_io` means the filesystem itself
- * prevented a reliable read/write. Both are fail-closed conditions.
+ * interpreted as an InkPanel store. `config_unsupported_version` protects a
+ * valid file created by newer InkPanel code. `config_invalid` refuses a bad
+ * prospective mutation, and `config_io` represents filesystem failure. Every
+ * code is a fail-closed condition.
  */
 export class DeviceStoreError extends Error {
   readonly name = 'DeviceStoreError';
@@ -35,15 +45,16 @@ function errnoCode(err: unknown): string | null {
   return typeof code === 'string' ? code : null;
 }
 
-function storeShape(parsed: unknown): StoreFile | null {
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const devices = (parsed as { devices?: unknown }).devices;
-  if (!Array.isArray(devices)) return null;
-
-  // Per-device schema/default migration is deliberately a separate layer. This
-  // guard establishes only the top-level persistence boundary: a valid store
-  // must be an object containing a devices array, never an arbitrary JSON value.
-  return { devices: devices as DeviceRecord[] };
+function validationReason(err: unknown): string {
+  if (!(err instanceof Error) || !('issues' in err) || !Array.isArray(err.issues)) {
+    return 'invalid configuration structure';
+  }
+  return err.issues
+    .map((issue: { path?: PropertyKey[]; message?: string }) => {
+      const path = issue.path?.map(String).join('.') || 'configuration';
+      return `${path}: ${issue.message ?? 'invalid value'}`;
+    })
+    .join('; ');
 }
 
 /**
@@ -84,14 +95,14 @@ export class DeviceStore {
     );
   }
 
-  private async read(): Promise<StoreFile> {
+  private async read(): Promise<CurrentDeviceStoreFile> {
     let raw: Buffer;
     try {
       raw = await readFile(this.path);
     } catch (err) {
       if (errnoCode(err) === 'ENOENT') {
         // This is the one and only condition that means a genuinely new install.
-        return { devices: [] };
+        return { schemaVersion: CURRENT_DEVICE_STORE_SCHEMA_VERSION, devices: [] };
       }
       const code = errnoCode(err) ?? 'I/O error';
       throw new DeviceStoreError(
@@ -107,16 +118,31 @@ export class DeviceStore {
       return this.corruption(raw, 'invalid JSON');
     }
 
-    const file = storeShape(parsed);
-    if (!file) return this.corruption(raw, 'expected an object with a devices array');
-    return file;
+    try {
+      return parseDeviceStoreFile(parsed);
+    } catch (err) {
+      if (err instanceof UnsupportedDeviceStoreVersionError) {
+        throw new DeviceStoreError(
+          'config_unsupported_version',
+          `device configuration schema version ${err.version} was created by a newer InkPanel version; upgrade InkPanel before making configuration changes`,
+        );
+      }
+      return this.corruption(raw, validationReason(err));
+    }
   }
 
-  private async write(file: StoreFile): Promise<void> {
+  private async write(file: CurrentDeviceStoreFile): Promise<void> {
+    const validation = currentDeviceStoreSchema.safeParse(file);
+    if (!validation.success) {
+      throw new DeviceStoreError(
+        'config_invalid',
+        `refusing to write invalid device configuration (${validationReason(validation.error)})`,
+      );
+    }
     try {
       await mkdir(dirname(this.path), { recursive: true });
       const tmp = `${this.path}.tmp`;
-      await writeFile(tmp, JSON.stringify(file, null, 2), 'utf8');
+      await writeFile(tmp, JSON.stringify(validation.data, null, 2), 'utf8');
       await rename(tmp, this.path);
     } catch (err) {
       const code = errnoCode(err) ?? 'I/O error';
@@ -135,7 +161,7 @@ export class DeviceStore {
    * unreadable store therefore rejects here and can never flow into a fresh
    * empty StoreFile that gets written over the original configuration.
    */
-  private mutate<T>(fn: (file: StoreFile) => Promise<T> | T): Promise<T> {
+  private mutate<T>(fn: (file: CurrentDeviceStoreFile) => Promise<T> | T): Promise<T> {
     const next = this.queue.then(async () => {
       const file = await this.read();
       const result = await fn(file);
@@ -158,7 +184,14 @@ export class DeviceStore {
     return this.mutate((file) => {
       const existing = file.devices.find((d) => d.id === id);
       if (existing) return existing;
-      const created = defaultDevice(id);
+      const validation = deviceRecordSchema.safeParse(defaultDevice(id));
+      if (!validation.success) {
+        throw new DeviceStoreError(
+          'config_invalid',
+          `refusing to create invalid device (${validationReason(validation.error)})`,
+        );
+      }
+      const created = validation.data;
       file.devices.push(created);
       return created;
     });
@@ -169,7 +202,14 @@ export class DeviceStore {
       const index = file.devices.findIndex((d) => d.id === id);
       if (index === -1) throw new Error(`unknown device: ${id}`);
       // id last, so a patch can never rename a device out from under itself.
-      const updated = { ...file.devices[index]!, ...patch, id };
+      const validation = deviceRecordSchema.safeParse({ ...file.devices[index]!, ...patch, id });
+      if (!validation.success) {
+        throw new DeviceStoreError(
+          'config_invalid',
+          `refusing to update device with invalid values (${validationReason(validation.error)})`,
+        );
+      }
+      const updated = validation.data;
       file.devices[index] = updated;
       return updated;
     });
