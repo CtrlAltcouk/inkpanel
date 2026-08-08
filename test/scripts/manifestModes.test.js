@@ -19,6 +19,10 @@ async function fixture(withMerged) {
     await writeFile(join(dist, 'inkpanel.ino.merged.bin'), Buffer.from([0xe9, 9, 8, 7]));
   }
   await writeFile(join(sketch, 'config.h'), 'constexpr const char* FIRMWARE_VERSION = "test";\n');
+  await writeFile(
+    join(sketch, 'partitions.csv'),
+    'provision,data,0x40,0xFFF000,0x1000,\n',
+  );
   return { dist, sketch };
 }
 
@@ -38,6 +42,7 @@ test('manifest exposes merged image for fresh install and separate regions for s
       { path: 'inkpanel.ino.partitions.bin', offset: 32768 },
       { path: 'inkpanel.ino.bin', offset: 65536 },
     ]);
+    assert.deepEqual(manifest.provisioning, { offset: 0xFFF000, size: 0x1000, format: 1 });
   } finally {
     await cleanup(dist, sketch);
   }
@@ -49,6 +54,7 @@ test('fresh install falls back to the same region images if merged output is una
     const manifest = await buildManifest(dist, sketch);
     assert.deepEqual(manifest.parts, manifest.updateParts);
     assert.equal(manifest.parts.length, 3);
+    assert.deepEqual(manifest.provisioning, { offset: 0xFFF000, size: 0x1000, format: 1 });
   } finally {
     await cleanup(dist, sketch);
   }
