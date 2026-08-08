@@ -399,13 +399,21 @@ test('the ESPLoader baudrate matches romBaudrate, so changeBaud() is never reach
   );
 });
 
-test('the writeFlash call disables compression, which is a known cause of mid-write failures over WebSerial', async () => {
+// The image written is now the full 16MB merged flash image, overwhelmingly
+// 0xFF padding. Writing that raw takes minutes for no benefit, so compression
+// is required rather than optional here.
+//
+// This reverses an earlier assertion that pinned compress:false. That was a
+// response to a write dying mid-transfer, but the cause turned out to be baud
+// renegotiation on a native-USB board; with that removed the write completed
+// cleanly, so compression was never the culprit.
+test('the writeFlash call compresses, which a 16MB mostly-blank merged image requires', async () => {
   const source = await readFile(FLASH_JS_PATH, 'utf8');
   const writeFlashCallIdx = source.indexOf('loader.writeFlash({');
   assert.ok(writeFlashCallIdx > -1, 'could not find the writeFlash call');
   const closingIdx = source.indexOf('});', writeFlashCallIdx);
   const callBody = source.slice(writeFlashCallIdx, closingIdx);
-  assert.match(callBody, /compress:\s*false/, 'compress must be false in the writeFlash options');
+  assert.match(callBody, /compress:\s*true/, 'compress must be true in the writeFlash options');
 });
 
 test('isEsp32S3 accepts real chip-identification strings for an S3', () => {

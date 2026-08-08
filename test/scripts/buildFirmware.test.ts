@@ -257,6 +257,56 @@ test('the manifest generator fails when build.bootloader_addr is missing from bu
 // because nothing was written to 0x0. A missing file was already caught; an
 // empty one was not, and it is the more dangerous of the two precisely
 // because everything downstream reports success.
+// The merged image is one complete flash image with the bootloader,
+// partition table and application already positioned inside it by the
+// toolchain. Writing it at 0 is what esp-web-tools and the other mainstream
+// browser flashers do, and it removes every offset this project could get
+// wrong. The three-image write it replaces was correct on paper — verified
+// offsets, valid non-empty images, a flash that reported success — and still
+// left a board reading zeros at 0x0.
+test('the manifest prefers the single merged image, written at offset 0', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-merged-'));
+  try {
+    await makeFakeDist(dir);
+    await writeFile(join(dir, 'inkpanel.ino.merged.bin'), 'merged image', 'utf8');
+
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dir, REAL_SKETCH_DIR], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.parts.length, 1, 'a merged image is a single write, not three');
+    assert.equal(manifest.parts[0].path, 'inkpanel.ino.merged.bin');
+    assert.equal(manifest.parts[0].offset, 0, 'the merged image starts at the beginning of flash');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the manifest falls back to the three separate images when no merged one exists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-unmerged-'));
+  try {
+    // makeFakeDist deliberately writes no merged.bin.
+    await makeFakeDist(dir);
+
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dir, REAL_SKETCH_DIR], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.parts.length, 3);
+    assert.deepEqual(
+      manifest.parts.map((p: { offset: number }) => p.offset),
+      [0, 32768, 65536],
+      'bootloader at 0x0, partition table at 0x8000, application at 0x10000',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('the manifest generator fails when a required binary is empty, not just missing', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-empty-bin-'));
   try {

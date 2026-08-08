@@ -69,11 +69,29 @@ export async function buildManifest(dist, sketchDir) {
   const files = await readdir(dist);
   const find = (suffix) => files.find((f) => f.endsWith(suffix));
 
-  const parts = [
-    { path: find('.bootloader.bin'), offset: bootloaderAddr },
-    { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
-    { path: find('.ino.bin'), offset: APP_OFFSET },
-  ];
+  // Flash the single merged image, not the three separate ones.
+  //
+  // arduino-cli emits <sketch>.ino.merged.bin: one complete flash image, with
+  // the bootloader, partition table and application already positioned inside
+  // it at their correct offsets by the toolchain itself. Writing it at 0 is
+  // what esp-web-tools and the other mainstream browser flashers do.
+  //
+  // The three-image write it replaces was correct on paper — the offsets were
+  // verified right, every image was non-empty and valid, and the flash
+  // reported success — and still produced a board that sat in a boot loop
+  // reading zeros at 0x0. Rather than keep bisecting a write path with three
+  // offsets, three erases and an ordering between them, this hands the
+  // toolchain's own known-good image to the chip as one write. There is no
+  // offset arithmetic left in this project to get wrong.
+  const merged = find('.merged.bin');
+  const parts = merged
+    ? [{ path: merged, offset: '0x0' }]
+    : [
+        // Fallback for a toolchain that does not emit a merged image.
+        { path: find('.bootloader.bin'), offset: bootloaderAddr },
+        { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
+        { path: find('.ino.bin'), offset: APP_OFFSET },
+      ];
 
   for (const part of parts) {
     if (!part.path) throw new Error(`missing a required binary in ${dist}: ${JSON.stringify(parts)}`);

@@ -292,14 +292,18 @@ export async function renderFlash(root) {
         fileArray: parts,
         flashSize: 'keep',
         eraseAll: false,
-        // Compressed writes ask the ROM stub to inflate on the fly, which
-        // means its decompression buffer can starve if chunks don't arrive
-        // fast enough over WebSerial — a real failure hit exactly this,
-        // rejected mid-transfer with the chip's own non-zero status byte, not
-        // a JS-side timeout. A firmware image this size costs a few extra
-        // seconds uncompressed; that's a better trade than an intermittent
-        // failure on a flow a first-time user is unlikely to retry calmly.
-        compress: false,
+        // Compression is required now, not optional: the merged image is the
+        // full 16MB flash, overwhelmingly 0xFF padding, and writing that raw
+        // would take minutes for no benefit. Compressed it is a small
+        // fraction of that.
+        //
+        // This reverses an earlier decision to disable it. That was a
+        // reasonable response to a write dying mid-transfer, but the actual
+        // cause turned out to be the baud renegotiation on a native-USB board
+        // (see the ESPLoader options above) — with that removed, the write
+        // completed cleanly. Compression was not the culprit, and this is
+        // also what esp-web-tools does for exactly this kind of image.
+        compress: true,
         reportProgress: (index, written, total) => {
           write(`  image ${index + 1}: ${Math.round((written / total) * 100)}%`);
         },
