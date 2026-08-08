@@ -1,9 +1,49 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 import { defaultDevice, type DeviceRecord } from './types.ts';
 
 interface StoreFile {
   devices: DeviceRecord[];
+}
+
+export type DeviceStoreErrorCode = 'config_corrupt' | 'config_io';
+
+/**
+ * A storage failure that callers must not reinterpret as an empty installation.
+ *
+ * `config_corrupt` means the original file was readable but could not safely be
+ * interpreted as an InkPanel store. `config_io` means the filesystem itself
+ * prevented a reliable read/write. Both are fail-closed conditions.
+ */
+export class DeviceStoreError extends Error {
+  readonly name = 'DeviceStoreError';
+
+  constructor(
+    readonly code: DeviceStoreErrorCode,
+    message: string,
+    readonly backupPath: string | null = null,
+  ) {
+    super(message);
+  }
+}
+
+function errnoCode(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
+
+function storeShape(parsed: unknown): StoreFile | null {
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const devices = (parsed as { devices?: unknown }).devices;
+  if (!Array.isArray(devices)) return null;
+
+  // Per-device schema/default migration is deliberately a separate layer. This
+  // guard establishes only the top-level persistence boundary: a valid store
+  // must be an object containing a devices array, never an arbitrary JSON value.
+  return { devices: devices as DeviceRecord[] };
 }
 
 /**
@@ -15,26 +55,85 @@ export class DeviceStore {
 
   constructor(private readonly path: string) {}
 
-  private async read(): Promise<StoreFile> {
+  /**
+   * Keep an exact, content-addressed copy of a corrupt file without touching
+   * the original. The digest makes repeated reads/restarts idempotent for the
+   * same damaged bytes while preserving a new snapshot if the corruption later
+   * changes. Failure to create the diagnostic copy must never hide the primary
+   * corruption error; the original file is already preserved in place.
+   */
+  private async preserveCorrupt(raw: Buffer): Promise<string | null> {
+    const digest = createHash('sha256').update(raw).digest('hex').slice(0, 16);
+    const backup = `${this.path}.corrupt-${digest}`;
     try {
-      const parsed = JSON.parse(await readFile(this.path, 'utf8')) as StoreFile;
-      return { devices: Array.isArray(parsed.devices) ? parsed.devices : [] };
-    } catch {
-      // Missing or corrupt: start empty rather than refusing to boot.
-      return { devices: [] };
+      await copyFile(this.path, backup, fsConstants.COPYFILE_EXCL);
+      return backup;
+    } catch (err) {
+      if (errnoCode(err) === 'EEXIST') return backup;
+      return null;
     }
   }
 
+  private async corruption(raw: Buffer, reason: string): Promise<never> {
+    const backup = await this.preserveCorrupt(raw);
+    const backupNote = backup ? ` Diagnostic copy: ${basename(backup)}.` : '';
+    throw new DeviceStoreError(
+      'config_corrupt',
+      `device configuration is corrupt (${reason}); the original file was left untouched.${backupNote}`,
+      backup,
+    );
+  }
+
+  private async read(): Promise<StoreFile> {
+    let raw: Buffer;
+    try {
+      raw = await readFile(this.path);
+    } catch (err) {
+      if (errnoCode(err) === 'ENOENT') {
+        // This is the one and only condition that means a genuinely new install.
+        return { devices: [] };
+      }
+      const code = errnoCode(err) ?? 'I/O error';
+      throw new DeviceStoreError(
+        'config_io',
+        `could not read device configuration (${code}); no configuration changes were made`,
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.toString('utf8')) as unknown;
+    } catch {
+      return this.corruption(raw, 'invalid JSON');
+    }
+
+    const file = storeShape(parsed);
+    if (!file) return this.corruption(raw, 'expected an object with a devices array');
+    return file;
+  }
+
   private async write(file: StoreFile): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const tmp = `${this.path}.tmp`;
-    await writeFile(tmp, JSON.stringify(file, null, 2), 'utf8');
-    await rename(tmp, this.path);
+    try {
+      await mkdir(dirname(this.path), { recursive: true });
+      const tmp = `${this.path}.tmp`;
+      await writeFile(tmp, JSON.stringify(file, null, 2), 'utf8');
+      await rename(tmp, this.path);
+    } catch (err) {
+      const code = errnoCode(err) ?? 'I/O error';
+      throw new DeviceStoreError(
+        'config_io',
+        `could not write device configuration (${code}); the requested change was not committed`,
+      );
+    }
   }
 
   /**
    * Serialise mutations. Two devices waking at once — or one device retrying —
    * would otherwise read-modify-write over each other and lose a record.
+   *
+   * The read happens before the mutation callback and write. A corrupt or
+   * unreadable store therefore rejects here and can never flow into a fresh
+   * empty StoreFile that gets written over the original configuration.
    */
   private mutate<T>(fn: (file: StoreFile) => Promise<T> | T): Promise<T> {
     const next = this.queue.then(async () => {
