@@ -6,7 +6,7 @@ import { join, basename } from 'node:path';
 /** Only ever a plain filename produced by the build: no separators, no dots. */
 const BIN_NAME = /^[A-Za-z0-9._-]+\.bin$/;
 
-export function firmwareRoutes(firmwareDir: string): Router {
+export function firmwareRoutes(firmwareDir: string, publicBaseUrl = ''): Router {
   const router = Router();
 
   router.get('/firmware/manifest', async (_req, res) => {
@@ -16,7 +16,13 @@ export function firmwareRoutes(firmwareDir: string): Router {
         available: true,
         version: String(parsed.version ?? 'unknown'),
         builtAt: String(parsed.builtAt ?? ''),
+        // The browser uses this for fresh installs so a user never has to know
+        // or type the LXC address. It is the same URL firmware check-ins use.
+        serverUrl: publicBaseUrl,
+        // `parts` is the fresh-install/recovery set (normally merged.bin).
         parts: Array.isArray(parsed.parts) ? parsed.parts : [],
+        // Routine updates use only these regions so NVS/Wi-Fi is untouched.
+        updateParts: Array.isArray(parsed.updateParts) ? parsed.updateParts : [],
       });
     } catch {
       // No build yet, or a half-written one. Both mean "nothing to flash",
