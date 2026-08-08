@@ -107,17 +107,33 @@ write_status running
 # COMMIT_BEFORE can be empty (see its capture above); an empty value makes
 # this diff empty too, which the `-n` test below correctly reads as "nothing
 # changed" rather than "everything changed".
-FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- firmware/ 2>/dev/null || true)"
+# Watch every input the built firmware actually depends on, not just the
+# sketch. The build output is a function of three things: the sketch itself,
+# the build script (which pins the FQBN — the target board), and the manifest
+# generator (which pins the flash offsets).
+#
+# Watching only firmware/ caused a genuinely confusing failure: a fix that
+# corrected the FQBN from XIAO_ESP32S3 to the Plus variant landed in
+# scripts/build-firmware.sh, the updater reported "firmware rebuild skipped
+# (firmware/ unchanged)", and the stale binaries built for the wrong board
+# stayed exactly where they were. The Flash tab kept serving them, the flash
+# kept succeeding, and the board kept failing to boot — with the fix sitting
+# in the checkout, never once compiled.
+FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- \
+  firmware/ \
+  scripts/build-firmware.sh \
+  scripts/firmware-manifest.mjs \
+  2>/dev/null || true)"
 
 if [[ -n "$FIRMWARE_DIFF" ]]; then
-  echo "== firmware rebuild (firmware/ changed) ==" >>"$LOG_FILE"
+  echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
   if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
     echo "firmware rebuild: ok" >>"$LOG_FILE"
   else
     echo "firmware rebuild: FAILED — Flash tab will keep offering the previous build. This does not fail the update." >>"$LOG_FILE"
   fi
 else
-  echo "== firmware rebuild skipped (firmware/ unchanged) ==" >>"$LOG_FILE"
+  echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
 fi
 write_status running
 

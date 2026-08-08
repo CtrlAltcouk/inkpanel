@@ -142,7 +142,7 @@ test('a pull that touches firmware/ triggers a rebuild, and the update still suc
     assert.equal(code, 0);
     assert.equal(status.state, 'success');
     assert.ok(
-      status.log.some((l) => /firmware rebuild \(firmware\/ changed\)/.test(l)),
+      status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
       'the log should record that the rebuild ran',
     );
     assert.ok(status.log.some((l) => /firmware rebuild: ok/.test(l)));
@@ -153,6 +153,44 @@ test('a pull that touches firmware/ triggers a rebuild, and the update still suc
     );
   });
 });
+
+// The built firmware is a function of three inputs, not one: the sketch, the
+// build script (which pins the FQBN — the target board), and the manifest
+// generator (which pins the flash offsets). Watching only firmware/ produced
+// a genuinely confusing real failure: a fix correcting the FQBN to the right
+// board variant landed in scripts/build-firmware.sh, the updater logged
+// "firmware rebuild skipped", and the stale binaries built for the WRONG
+// board stayed in place. The Flash tab kept serving them, every flash
+// reported success, and the board kept refusing to boot — with the fix
+// sitting in the checkout, never once compiled. Nothing anywhere said so.
+for (const changedFile of ['scripts/build-firmware.sh', 'scripts/firmware-manifest.mjs']) {
+  test(`a pull that changes ${changedFile} triggers a rebuild too`, async () => {
+    await withFixture(async (fixture) => {
+      const target = join(fixture.upstream, ...changedFile.split('/'));
+      await mkdir(dirname(target), { recursive: true });
+      // Append rather than overwrite: build-firmware.sh is the stub the
+      // fixture relies on to record that a build ran, and replacing it
+      // wholesale would make this test pass for the wrong reason.
+      const existing = await readFile(target, 'utf8').catch(() => '#!/usr/bin/env bash\n');
+      await writeFile(target, `${existing}\n# touched by the test\n`);
+      await run('git', ['add', '-A'], { cwd: fixture.upstream });
+      await run('git', ['commit', '-q', '-m', `change ${changedFile}`], { cwd: fixture.upstream });
+
+      const { code, status } = await runUpdater(fixture);
+
+      assert.equal(code, 0);
+      assert.equal(status.state, 'success');
+      assert.ok(
+        status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
+        `changing ${changedFile} must trigger a rebuild — it changes what gets built`,
+      );
+      await assert.doesNotReject(
+        readFile(fixture.buildMarker, 'utf8'),
+        'build-firmware.sh must actually have run',
+      );
+    });
+  });
+}
 
 // This is the property the design explicitly calls the most important one in
 // the whole feature: whether an ESP32 compile succeeds has nothing to do
@@ -201,7 +239,7 @@ test('a pull that does not touch firmware/ skips the rebuild entirely', async ()
 
 test('the rebuild step in the updater is not wired to the fatal path', async () => {
   const script = await readFile(UPDATER, 'utf8');
-  const start = script.indexOf('firmware rebuild (firmware/ changed)');
+  const start = script.indexOf('firmware rebuild (firmware inputs changed)');
   const end = script.indexOf('echo "== restart =="');
   assert.ok(start > -1 && end > start, 'could not locate the firmware rebuild block');
   const block = script.slice(script.lastIndexOf('\n', start), end);
