@@ -23,6 +23,43 @@ test('the build script fails fast rather than producing a partial dist', async (
   assert.match(text, /set -Eeuo pipefail/, 'a half-written dist would flash a broken board');
 });
 
+// The board is a XIAO ESP32-S3 *Plus* (16MB flash), not the plain
+// XIAO_ESP32S3 (8MB). Building for the wrong one produced the single most
+// misleading failure in this project's history: arduino-cli compiled a valid
+// image, the manifest offsets were correct, the web flasher wrote all three
+// images and reported success — and the board then boot-looped printing
+// "invalid header: 0x00000000", because the ROM cannot boot an image built
+// for a different flash layout. Not one step in the chain reported an error.
+test('the build script targets the Plus variant, which is the board that actually exists', async () => {
+  const text = await readFile(SCRIPT, 'utf8');
+  const fqbnLine = text.split('\n').find((l) => /^FQBN=/.test(l));
+  assert.ok(fqbnLine, 'could not find the FQBN assignment');
+  assert.match(
+    fqbnLine!,
+    /XIAO_ESP32S3_PLUS/,
+    'must build for the Plus variant — the plain XIAO_ESP32S3 has 8MB flash and yields an image this board cannot boot',
+  );
+});
+
+test('the build script rejects an unknown FQBN instead of building for the wrong board', async () => {
+  const text = await readFile(SCRIPT, 'utf8');
+  // Comment lines are stripped first: the explanatory comment above the FQBN
+  // contains the phrase "arduino-cli compiled a perfectly valid image", which
+  // a naive substring search matches ahead of the real compile step and
+  // inverts the ordering check. Prose is not code.
+  const code = text
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+
+  // The check must come before the compile, or it cannot prevent anything.
+  const validation = code.indexOf('board details --fqbn');
+  const compile = code.indexOf('arduino-cli compile');
+  assert.ok(validation > -1, 'no FQBN validation found');
+  assert.ok(compile > -1, 'no compile step found');
+  assert.ok(validation < compile, 'the FQBN check must run before the compile, not after');
+});
+
 // Fakes just enough of an arduino-cli output dir for the manifest generator
 // to run against, without arduino-cli: a build report plus the three binary
 // names it looks for.
