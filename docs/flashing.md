@@ -1,14 +1,21 @@
-# Flashing a panel from the browser
+# Flashing and setting up a panel from the browser
 
 The Flash tab writes firmware to a XIAO ESP32-S3 over USB, straight from
-inkpanel's web UI. It replaces opening the Arduino IDE to compile and upload.
+InkPanel's web UI. For a new board it can also send Wi-Fi and server settings
+over the same USB cable, so normal onboarding needs neither Arduino IDE nor the
+ESP32's temporary `192.168.4.1` setup page.
 
-**It does not touch Wi-Fi setup.** A newly-erased board still opens its own
-`inkpanel-setup` access point, and you still configure the network and server
-address from a phone, exactly as before. This tab replaces compiling and
-uploading — nothing else. That is worth stating plainly, because a tool that
-flashes boards sounds like it should also handle onboarding, and this one
-deliberately doesn't.
+There are three deliberately separate operations:
+
+| Mode | What it does | When to use it |
+|---|---|---|
+| **Update existing board** (default) | Writes only the bootloader, partition table and application regions. NVS is not touched, so Wi-Fi credentials and the server address survive. | Routine firmware updates. |
+| **Set up a new board** | Erases the chip, writes the complete install image, then provisions Wi-Fi and the InkPanel server directly over USB. | A new XIAO, or a board you want to onboard from scratch without using `192.168.4.1`. |
+| **Factory reset / recover** | Erases the chip and writes the complete install image, but does not send credentials. | Recovery/testing, or deliberately returning a board to unconfigured setup mode. |
+
+The device identity survives all three modes. A panel id such as
+`esp32-85bf98` is derived from the chip's MAC address, which is burned into
+silicon rather than stored in flash.
 
 ---
 
@@ -20,17 +27,13 @@ offer.
 
 **On a Proxmox LXC install, this is automatic.** The installer sets up
 `arduino-cli` and the ESP32 core alongside Node and Chromium, and the updater
-(`pct exec <CTID> -- /usr/local/bin/inkpanel-update` — the full path matters;
-see [deployment.md](deployment.md)) rebuilds firmware whenever a pull
-actually changes anything under `firmware/` — mirroring how it already only
-runs `npm ci` when the lockfile changes. Most updates touch neither. A build
-failure is logged but never fails the update itself: whether an ESP32 compile
-succeeds has nothing to do with whether the server keeps serving frames to
-panels, so the Flash tab just keeps offering the previous build rather than
-the whole update being blocked on a firmware-side problem.
+(`pct exec <CTID> -- /usr/local/bin/inkpanel-update`) rebuilds firmware whenever
+a pull changes a firmware build input. A firmware-build failure is logged but
+does not take the running dashboard server down; the Flash tab keeps offering
+the previous successful build.
 
-**Everywhere else — a local checkout, a Docker deployment — it's a manual
-step.** Install [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/),
+**Everywhere else — a local checkout or Docker deployment — build manually.**
+Install [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/),
 then the ESP32 core:
 
 ```bash
@@ -46,120 +49,170 @@ Then build:
 
 Run this again whenever firmware code changes.
 
-Either way, the result is the same: `firmware/dist/` — three binaries plus a
-`manifest.json` recording the firmware version and each binary's flash
-offset. The bootloader offset comes from `arduino-cli`'s own build report
-rather than being hardcoded, because it genuinely varies by chip family; the
-other two are documented constants for this board's partition scheme.
+The build creates two logical image sets in `manifest.json`:
 
-`firmware/dist/` is gitignored. It is build output, not source.
+- `parts` — the fresh-install/recovery set, normally the single toolchain-built
+  `.merged.bin` at address zero.
+- `updateParts` — the bootloader, partition table and application images at
+  their individual offsets. Routine updates use this set so the NVS partition
+  cannot be overwritten by the full merged image.
 
-Until a build has run, the Flash tab will say no firmware build is available
-rather than offering a flash that would fail.
+`firmware/dist/` is gitignored build output, not source.
 
 ---
 
 ## 2. Open the Flash tab over HTTPS
 
-**The Flash tab only works over HTTPS.** This is a browser rule, not a choice
-inkpanel makes: WebSerial — the API that talks to the USB port — is only
-available in a *secure context*. On plain HTTP, `navigator.serial` simply does
-not exist, and no amount of code can work around it.
+**The Flash tab only works over HTTPS.** WebSerial — the browser API used to
+talk to USB — is available only in a secure context. InkPanel therefore keeps
+its normal panel-facing HTTP listener on port 8080 and adds a browser-only
+HTTPS listener, normally on port 8443:
 
-So inkpanel serves a **second listener on port 8443** with a self-signed
-certificate, generated once on first boot and reused thereafter:
-
-```
+```text
 https://<your-server-ip>:8443/#flash
 ```
 
-Your browser will warn that the certificate is not trusted. That is expected —
-the certificate is self-signed, because a private LAN address cannot obtain a
-publicly-trusted one. Click through the warning.
+The certificate is self-signed on a local installation, so the browser may
+warn the first time. Accept the warning for your own InkPanel host.
 
-The certificate is stable across restarts, so you should see that warning once
-per browser, not every time. If it reappears on every visit, something is
-regenerating the certificate and that is worth investigating.
+Panels themselves continue using plain HTTP on port 8080. The ESP32 does not
+need to trust the browser-facing self-signed certificate.
 
-**Port 8080 is completely unchanged.** Your panels keep checking in over plain
-HTTP — they have no way to trust a self-signed certificate, so they must. If
-HTTPS fails to start for any reason, the server logs it, disables the Flash
-tab, and carries on serving panels normally.
-
-If you open the Flash tab on `http://…:8080` instead, it will tell you and give
-you a link to the right address.
-
-### Browser support
-
-**Chrome or Edge** (or another Chromium-based browser). WebSerial does not
-exist in Firefox or Safari, and both projects have said it will not be added,
-so there is nothing to wait for — use Chrome or Edge for this one tab.
-
-The tab tells these two situations apart: a Firefox user is told to change
-browser, and a Chrome user on plain HTTP is told to change address. They are
-different problems with different fixes.
+Use Chrome, Edge, Brave, Opera or another Chromium browser with WebSerial.
+Firefox and Safari do not expose WebSerial.
 
 ---
 
-## 3. Preserve or erase
+## 3. Recommended new-board experience
 
-| Mode | What it does | When to use it |
-|---|---|---|
-| **Update firmware only** (default) | Writes the bootloader, partition table and app. Leaves the NVS partition alone, so **Wi-Fi credentials and the server address survive**. | Routine firmware updates. The board reboots and rejoins your network by itself. |
-| **Erase everything** | Wipes the whole chip first, then writes. The board comes back blank. | Starting over, or clearing a bad configuration. You will need to redo Wi-Fi setup from a phone. |
+For somebody downloading InkPanel and setting up a new panel, this is the
+normal workflow:
 
-Preserving is the default and needs no special handling — a normal flash was
-never touching the credentials partition in the first place. Erasing is the
-extra step, and it is opt-in.
+1. Attach the Wi-Fi antenna and connect the XIAO/EE04 to the computer with a
+   data-capable USB cable.
+2. Open **InkPanel → Flash** over HTTPS.
+3. Select **Set up a new board**.
+4. Enter the Wi-Fi network name and password.
+5. Check the **InkPanel server** field. It is pre-filled from
+   `PUBLIC_BASE_URL`, normally something like:
 
-**The device identity survives either mode.** A panel's id (`esp32-85bf98` and
-so on) is derived from the chip's MAC address, which is burned into silicon
-rather than stored in flash. Erasing a board does not give you a duplicate
-entry in the Panels tab — it comes back as the same panel.
+   ```text
+   http://192.168.1.50:8080
+   ```
+
+   so a user normally does not need to know or type the LXC IPv4 address.
+6. Click **Flash & configure new board** and select the XIAO in Chromium's USB
+   picker.
+7. InkPanel erases and flashes the complete firmware image.
+8. The XIAO restarts. Native USB disappears briefly and comes back as the new
+   firmware's USB CDC serial port.
+9. The browser reopens the already-authorised device, waits for
+   `INKPANEL_READY_V1`, and sends the Wi-Fi and server details directly to the
+   ESP32.
+10. The ESP32 stores them in NVS, acknowledges with `INKPANEL_SAVED_V1`, joins
+    Wi-Fi and contacts the InkPanel server.
+11. The new device appears in the Panels view ready to claim/configure.
+
+The Wi-Fi password **is not POSTed to the InkPanel server**. It remains in the
+browser and travels only across the local USB serial connection to the board.
+
+### No BOOT button in the normal flow
+
+The XIAO ESP32-S3 normally enters Espressif's flashing mode automatically over
+USB. Do not hold BOOT as a normal step. Only use BOOT + RESET as a recovery
+fallback if repeated automatic connection attempts genuinely fail.
 
 ---
 
-## 4. Flashing
+## 4. Updating an existing board
 
-1. Plug the board into the machine running the browser (not necessarily the
-   machine running inkpanel).
-2. Click **Connect**. Your browser shows its own port picker — this is the
-   browser's UI, and it is the real safety gate: nothing can be flashed
-   without you explicitly choosing a port here.
-3. The board is identified. If it is not an ESP32-S3, the flow stops there
-   rather than attempting a mismatched write.
-4. Choose preserve or erase, then click **Flash**. Progress and a log appear.
-5. The board resets automatically when the write finishes.
+Choose **Update existing board** for routine firmware changes.
+
+This mode deliberately does **not** use the full merged image. The manifest
+provides separate bootloader, partition-table and application images, and the
+browser writes only those regions. That preserves the NVS partition containing:
+
+- Wi-Fi SSID
+- Wi-Fi password
+- InkPanel server URL
+
+After the flash the board restarts and rejoins the network without being set up
+again.
+
+If a firmware build does not contain the safe `updateParts` image set, the
+browser refuses a preserve-mode flash rather than silently falling back to the
+full image and risking credentials.
+
+---
+
+## 5. Factory reset / recovery
+
+Choose **Factory reset / recover** when you deliberately want to wipe the
+board. InkPanel erases the chip and installs the complete image but does not
+send new credentials.
+
+A board with no credentials first waits for USB provisioning for about 30
+seconds. If none arrives, it falls back to the original recovery access point:
+
+```text
+Wi-Fi: inkpanel-setup
+Page:  http://192.168.4.1
+```
+
+`192.168.4.1` is an address on the temporary private Wi-Fi network created by
+the ESP32 itself. It is **not** the LXC/server address and it is not retained
+after the panel joins normal Wi-Fi.
+
+The captive portal is kept as a fallback, not as the recommended onboarding
+path.
 
 ---
 
 ## Troubleshooting
 
 **"That port is already in use."**
-Only one program can hold a serial port. Close the Arduino IDE serial monitor,
-or any other serial tool, and try again. This is the most common problem.
+Only one program can hold a serial port. Close Arduino IDE Serial Monitor or
+any other serial tool and try again.
 
-**"Could not put the board into flashing mode."**
-The automatic reset into the bootloader did not take — it is reliable most of
-the time but not universally, across every OS and cable. Do it by hand: hold
-the board's **BOOT** button, tap **RESET**, release **BOOT**, then try again.
+**"Could not put the board into flashing mode automatically."**
+First unplug and reconnect the XIAO and retry; normal flashing should need no
+buttons. If repeated attempts still fail, use the recovery sequence: hold
+**BOOT**, tap **RESET**, release **BOOT**, then retry.
+
+**The firmware flashes but USB provisioning times out.**
+The flash itself succeeded. Leave the board connected directly to the computer,
+close any serial monitor, and run **Set up a new board** again. Native USB
+briefly re-enumerates after flashing and the browser waits for the authorised
+port to return.
+
+**The serial monitor says `INKPANEL_READY_V1`.**
+The new firmware is waiting for browser provisioning. Close the Serial Monitor
+(it prevents the browser owning the port) and run **Set up a new board**.
+
+**The serial monitor says the board is starting `inkpanel-setup` and
+`http://192.168.4.1`.**
+The USB setup window expired without receiving credentials. The board is not
+broken. Either use the captive portal fallback or reconnect USB and use
+**Set up a new board**.
 
 **"Cancelled — no board selected."**
-You closed the port picker. Nothing happened; just click Connect again.
+You closed the browser's port picker. Nothing was written; click again.
 
 **"Failed to write ... to flash after seq N failed with status ..."**
-The board connected and entered flashing mode fine — the failure happened
-partway through writing, so holding BOOT won't help here; that's connection
-advice for a problem this isn't. This is the chip's own ROM loader rejecting
-one block, which in practice is almost always the USB link dropping a beat
-during a long transfer: plug directly into the computer's own USB port rather
-than a hub or extension cable, keep the tab in the foreground, and don't let
-the computer sleep while it writes. Then try again.
+The board already entered flashing mode, so BOOT is not the fix. Plug directly
+into the computer rather than a hub/extension, keep the tab in the foreground,
+and prevent the computer sleeping while it writes, then retry.
+
+**`invalid header: 0x0203a9c3`.**
+That specific historic failure was caused by firmware bytes being passed to
+`esptool-js` as a JavaScript string, causing the ESP image magic byte `0xE9` to
+be UTF-8-expanded to `0xC3 0xA9`. WebFlash now converts to `Uint8Array` before
+writing and refuses any image at address zero whose first byte is not `0xE9`.
 
 **Any other write failure partway through.**
-**The board is not damaged.** The ROM bootloader lives in mask ROM and no
-flash write can overwrite it, so the board can always be put back into
-bootloader mode and reflashed. Hold **BOOT**, tap **RESET**, and flash again.
+The ESP32-S3 ROM bootloader cannot be overwritten by a flash operation, so a
+failed application write does not permanently brick the board. Retry through
+WebFlash; use BOOT + RESET only if automatic bootloader entry will not work.
 
 **The Flash tab says no firmware build is available.**
 Run `./scripts/build-firmware.sh` — see section 1.
@@ -168,9 +221,7 @@ Run `./scripts/build-firmware.sh` — see section 1.
 Check the address bar. If you are on `http://…:8080`, switch to
 `https://…:8443`. If you are in Firefox or Safari, switch to Chrome or Edge.
 
-**The board flashed fine but never appears in Panels.**
-That is a network problem, not a flashing one. After an erase, the board needs
-Wi-Fi setup again — look for the `inkpanel-setup` access point. If it was a
-preserve-mode flash and it still does not check in, check the antenna is
-seated on its U.FL connector; a loose antenna shows up as repeated Wi-Fi
-association failures in the serial log.
+**The board has credentials but never appears in Panels.**
+Check the Wi-Fi antenna is clipped onto the XIAO's U.FL connector and inspect
+serial output for association failures. Also verify the server URL shown in the
+Flash form is reachable from the panel's Wi-Fi network.

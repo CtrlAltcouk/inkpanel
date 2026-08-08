@@ -6,8 +6,9 @@
   scheduling — that lives in TypeScript where it can be tested and changed
   without reflashing.
 
-  First boot with no stored credentials opens a captive portal.
-  Hold KEY3 while resetting to wipe credentials and return to it.
+  First boot with no stored credentials waits briefly for USB provisioning
+  from the InkPanel web flasher, then falls back to the captive portal.
+  Hold KEY3 while resetting to wipe credentials and return to the portal.
 */
 #include <Arduino.h>
 #include <WiFi.h>
@@ -20,7 +21,7 @@
 #include "Provisioning.h"
 
 // Optional development shortcut. Copy secrets.example.h to secrets.h to skip
-// the portal on your own bench; the repo compiles and works without it.
+// provisioning on your own bench; the repo compiles and works without it.
 #if __has_include("secrets.h")
 #include "secrets.h"
 #define HAVE_COMPILED_CREDENTIALS 1
@@ -149,8 +150,16 @@ void setup() {
   }
 
   if (!obtainCredentials()) {
-    Serial.println("[setup] no credentials stored — starting portal");
-    runProvisioningPortal();
+    // A freshly flashed board is still connected to the computer that flashed
+    // it. Give that browser a window to send Wi-Fi + server details over the
+    // same USB cable, so normal setup never depends on joining 192.168.4.1.
+    Serial.println("[setup] no credentials stored — waiting for USB provisioning");
+    if (waitForUsbProvisioning(30000) && obtainCredentials()) {
+      Serial.println("[setup] USB credentials saved");
+    } else {
+      Serial.println("[setup] no USB credentials received — starting portal fallback");
+      runProvisioningPortal();
+    }
   }
 
   const float volts = readBatteryVoltage();

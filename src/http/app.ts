@@ -70,7 +70,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', deviceRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
-  app.use('/api', firmwareRoutes(deps.firmwareDir));
+  app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
   // Serve the latin-subset woff2 straight from @fontsource rather than
   // committing a 2.7 MB TTF for one heading in the admin UI.

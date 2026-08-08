@@ -2,10 +2,10 @@
 #
 # Build the firmware and stage it for the web flasher.
 #
-# Run this by hand whenever firmware source changes. It is deliberately NOT
-# wired into npm start, CI, or the LXC installer: the Arduino toolchain is a
-# large dependency, and the server never needs to compile anything — it only
-# serves what this produced.
+# Run this by hand for local/non-LXC development. The Proxmox installer and
+# updater install the Arduino toolchain and call this automatically when
+# firmware build inputs change; CI also runs it against the production board
+# target so firmware changes cannot merge without compiling.
 #
 # Requires arduino-cli with the esp32 core installed:
 #   arduino-cli core install esp32:esp32
@@ -37,15 +37,13 @@ FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_Plus}"
 
 # Resolve arduino-cli by path, not by trusting PATH to contain it.
 #
-# This script is invoked three different ways, and only one of them has a
-# normal login PATH: by hand from a shell, by the LXC installer, and by
-# inkpanel-update via `runuser -u inkpanel`. runuser resets the environment
-# for the target user, and the inkpanel service user has /usr/sbin/nologin as
-# its shell — so /usr/local/bin, where arduino-cli installs, is not on PATH
-# there. The failure that produced was quiet and expensive: the updater's
-# rebuild step is deliberately non-fatal, so every automatic rebuild would
-# have logged "arduino-cli not found" and carried on reporting the update a
-# success, while the Flash tab kept serving whatever stale build was on disk.
+# This script is invoked several ways, and only an interactive shell is
+# guaranteed a normal login PATH: by hand, by CI, by the LXC installer, and by
+# inkpanel-update via `runuser -u inkpanel`. runuser resets the environment for
+# the target user, and the inkpanel service user has /usr/sbin/nologin as its
+# shell — so /usr/local/bin, where arduino-cli commonly installs, may not be on
+# PATH. Resolve the executable explicitly so an automatic rebuild cannot
+# quietly keep serving a stale firmware build.
 ARDUINO_CLI="${ARDUINO_CLI:-$(command -v arduino-cli 2>/dev/null || true)}"
 if [[ -z "$ARDUINO_CLI" ]]; then
   for candidate in /usr/local/bin/arduino-cli /usr/bin/arduino-cli "$HOME/.local/bin/arduino-cli"; do
@@ -88,11 +86,10 @@ echo "== compiling for $FQBN =="
   --json \
   "$SKETCH" >"$DIST/build-report.json"
 
-# arduino-cli emits <sketch>.ino.bootloader.bin, .partitions.bin and .ino.bin.
-# The manifest generator reads the version straight out of config.h (instead
-# of it being restated here) and the flash offsets out of its own documented
-# constants plus the build report above — see firmware-manifest.mjs, the one
-# place both live.
+# arduino-cli emits bootloader, partition-table, application and (for the
+# current ESP32 core) merged binaries. firmware-manifest.mjs exposes the merged
+# image for new installs/recovery and the three region images for NVS-safe
+# routine updates. The firmware version is read directly from config.h.
 node "$ROOT/scripts/firmware-manifest.mjs" "$DIST" "$SKETCH"
 
 echo "== wrote $DIST/manifest.json =="

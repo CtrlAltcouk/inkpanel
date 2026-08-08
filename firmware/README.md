@@ -47,16 +47,72 @@ networks even beside the router.
 Reversing the ribbon or using the wrong jumper can prevent operation and may
 damage the display.
 
-## First run
+## First run — recommended WebFlash flow
 
-The panel starts a WiFi access point called `inkpanel-setup`. Join it from a
-phone, pick your network, and enter your inkpanel server address — for example
-`http://192.168.1.20:8080`. It restarts and shows an enrolment screen naming its
-own device ID. Claim that device in the web UI.
+A normal new-board setup no longer requires Arduino IDE or connecting to
+`192.168.4.1`.
 
-For bench work you can skip the portal: copy `secrets.example.h` to `secrets.h`
-and fill it in. The sketch picks it up via `__has_include`, so the repo still
-compiles for everyone else without it. `secrets.h` is gitignored.
+1. Open the InkPanel **Flash** tab in Chrome/Edge over HTTPS.
+2. Choose **Set up a new board**.
+3. Enter the Wi-Fi SSID and password. The InkPanel server address is filled in
+   automatically from the server's `PUBLIC_BASE_URL`.
+4. Choose the XIAO in the browser's USB picker.
+5. InkPanel erases and flashes the board, waits for the fresh firmware to
+   reappear over USB CDC, then sends the Wi-Fi and server settings directly
+   from the browser to the board.
+6. The firmware stores those values in NVS and joins the normal Wi-Fi network.
+
+The Wi-Fi password is not sent to the InkPanel server. It exists in the browser
+form and then travels over the local USB connection to the ESP32.
+
+The XIAO ESP32-S3 normally enters flashing mode automatically. There is no
+normal BOOT-button step. BOOT + RESET is only a recovery fallback when automatic
+reset repeatedly fails.
+
+### USB provisioning protocol
+
+Fresh firmware with no stored credentials waits for up to 30 seconds for the
+browser. It emits:
+
+```text
+INKPANEL_READY_V1
+```
+
+and accepts one newline-terminated record:
+
+```text
+INKPANEL_PROVISION_V1|<ssid-base64>|<password-base64>|<server-url-base64>
+```
+
+On a successful NVS write it replies:
+
+```text
+INKPANEL_SAVED_V1
+```
+
+The fields are base64-encoded so Unicode SSIDs and delimiter characters cannot
+corrupt the line protocol. The server URL must use the panel-facing plain HTTP
+listener, for example `http://192.168.1.20:8080`.
+
+## Captive-portal fallback
+
+The old setup route is deliberately retained for recovery and non-browser
+setups. If no USB provisioning command arrives during the 30-second window, a
+fresh board starts the Wi-Fi access point `inkpanel-setup` and serves its local
+setup page at:
+
+```text
+http://192.168.4.1
+```
+
+`192.168.4.1` belongs only to the temporary Wi-Fi network created by the ESP32;
+it is not the InkPanel/LXC address and disappears once the panel joins normal
+Wi-Fi.
+
+For bench work you can also skip provisioning entirely: copy
+`secrets.example.h` to `secrets.h` and fill it in. The sketch picks it up via
+`__has_include`, so the repo still compiles for everyone else without it.
+`secrets.h` is gitignored.
 
 ## Buttons
 
@@ -64,7 +120,7 @@ compiles for everyone else without it. `secrets.h` is gitignored.
 |---|---|
 | KEY1 | Wake and refresh now |
 | KEY2 | Reserved |
-| KEY3 held at boot | Clear credentials, return to the setup portal |
+| KEY3 held at boot | Clear credentials and enter captive-portal recovery |
 
 ## How a wake cycle works
 
@@ -95,6 +151,16 @@ changing anything else.
 works.
 
 ## Troubleshooting
+
+**The new-board browser setup cannot reconnect after flashing.** Close Arduino
+Serial Monitor or any other program holding the port, leave the board plugged
+directly into the computer, and retry **Set up a new board**. Native USB briefly
+disappears while the S3 resets, so the browser intentionally waits for it to
+re-enumerate.
+
+**The board reaches `inkpanel-setup` / `192.168.4.1`.** USB provisioning was not
+received during the startup window. You can use the captive portal as a
+fallback, or reconnect USB and run **Set up a new board** again.
 
 **Panel never flashes.** Almost never the code. In order of likelihood: the EE04
 jumper is not on 24 Pin, the ribbon is reversed or not fully seated, or
