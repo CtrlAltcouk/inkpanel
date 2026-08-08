@@ -1,5 +1,5 @@
 import type { SourceHealth } from '../model/dashboard.ts';
-import type { SourceCache } from './cache.ts';
+import { sourceCacheKey, type SourceCache } from './cache.ts';
 import type { Source } from './types.ts';
 
 export interface RunOutcome<T> {
@@ -7,24 +7,32 @@ export interface RunOutcome<T> {
   health: SourceHealth;
 }
 
+export interface RunSourceOptions {
+  deviceId: string;
+  timeoutMs: number;
+}
+
 /**
- * Run a source with a timeout, falling back to cached data on failure.
+ * Run a source with a timeout, falling back only to cached data produced for
+ * the same device and the same source configuration.
+ *
  * This function never rejects: a render must always be possible.
  */
 export async function runSource<TConfig, TData>(
   source: Source<TConfig, TData>,
   config: TConfig,
   cache: SourceCache,
-  timeoutMs: number,
+  options: RunSourceOptions,
 ): Promise<RunOutcome<TData>> {
+  const key = sourceCacheKey(options.deviceId, source.id, config);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
 
   let error: string;
   try {
     const result = await source.fetch(config, controller.signal);
     if (result.status === 'ok') {
-      await cache.write(source.id, result.data);
+      await cache.write(key, result.data);
       return {
         data: result.data,
         health: { id: source.id, status: 'ok', fetchedAt: result.fetchedAt, error: null },
@@ -37,7 +45,7 @@ export async function runSource<TConfig, TData>(
     clearTimeout(timer);
   }
 
-  const cached = await cache.read<TData>(source.id);
+  const cached = await cache.read<TData>(key);
   if (cached) {
     return {
       data: cached.data,
