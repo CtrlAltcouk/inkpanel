@@ -11,7 +11,7 @@
  *
  * Usage: node scripts/firmware-manifest.mjs <distDir> <sketchDir>
  */
-import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -77,6 +77,22 @@ export async function buildManifest(dist, sketchDir) {
 
   for (const part of parts) {
     if (!part.path) throw new Error(`missing a required binary in ${dist}: ${JSON.stringify(parts)}`);
+  }
+
+  // An empty binary is worse than a missing one. esptool-js's writeFlash
+  // silently `continue`s past any image of zero length -- the warning it logs
+  // goes to debug(), which the web flasher does not wire up -- so a 0-byte
+  // bootloader is skipped with no error anywhere, the flash reports complete
+  // success, and the board boot-loops on "invalid header: 0x00000000" because
+  // nothing was ever written to 0x0. Catch it here, where the cause is
+  // obvious, rather than on the bench where it is not.
+  for (const part of parts) {
+    const { size } = await stat(join(dist, part.path));
+    if (size === 0) {
+      throw new Error(
+        `${part.path} is empty (0 bytes). A flash would silently skip it and produce an unbootable board.`,
+      );
+    }
   }
 
   const manifest = {

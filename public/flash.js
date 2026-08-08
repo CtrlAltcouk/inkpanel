@@ -83,6 +83,17 @@ export async function fetchBinary(name) {
   if (!res.ok) throw new Error(`could not download ${name} (${res.status})`);
   const bytes = new Uint8Array(await res.arrayBuffer());
 
+  // esptool-js's writeFlash silently `continue`s past any zero-length image
+  // (its only complaint goes to debug(), which this module does not wire up).
+  // So an empty binary is not a harmless no-op: the write is skipped, the
+  // flash still reports success, and the board is left unbootable with
+  // nothing anywhere explaining why. Refuse it here instead.
+  if (bytes.length === 0) {
+    throw new Error(
+      `${name} is empty. Rebuild the firmware — flashing this would silently skip it and leave the board unbootable.`,
+    );
+  }
+
   let out = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));

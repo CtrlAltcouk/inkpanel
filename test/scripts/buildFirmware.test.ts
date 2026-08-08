@@ -181,6 +181,30 @@ test('the manifest generator fails when build.bootloader_addr is missing from bu
   }
 });
 
+// esptool-js's writeFlash silently `continue`s past any zero-length image --
+// its only complaint goes to debug(), which the web flasher does not wire up.
+// So a 0-byte bootloader is skipped with no error at all: the flash reports
+// complete success and the board boot-loops on "invalid header: 0x00000000"
+// because nothing was written to 0x0. A missing file was already caught; an
+// empty one was not, and it is the more dangerous of the two precisely
+// because everything downstream reports success.
+test('the manifest generator fails when a required binary is empty, not just missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-empty-bin-'));
+  try {
+    await makeFakeDist(dir);
+    await writeFile(join(dir, 'inkpanel.ino.bootloader.bin'), '', 'utf8');
+
+    const result = spawnSync(process.execPath, [MANIFEST_SCRIPT, dir, REAL_SKETCH_DIR], {
+      encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0, 'an empty binary must fail the build');
+    assert.match(result.stderr, /empty/i);
+    assert.match(result.stderr, /bootloader/i, 'the message must name which binary is empty');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('the manifest generator fails when a required binary file is missing', async () => {
   const dist = await mkdtemp(join(tmpdir(), 'inkpanel-fw-dist-'));
   const sketch = await mkdtemp(join(tmpdir(), 'inkpanel-fw-sketch-'));

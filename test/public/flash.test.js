@@ -520,6 +520,22 @@ test('fetchBinary throws a message naming the file and status when the download 
   );
 });
 
+// esptool-js's writeFlash silently `continue`s past a zero-length image, and
+// its only complaint goes to debug(), which this module does not wire up. So
+// an empty binary is not a harmless no-op: the write is skipped, the flash
+// still reports success, and the board is left unbootable with nothing
+// anywhere saying why. A 200 response carrying no bytes must be refused
+// before it can reach the board.
+test('fetchBinary refuses an empty image rather than letting the flash silently skip it', async () => {
+  await assert.rejects(
+    withFetch(
+      async () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) }),
+      () => fetchBinary('inkpanel.ino.bootloader.bin'),
+    ),
+    /inkpanel\.ino\.bootloader\.bin is empty/,
+  );
+});
+
 test('explainFailure reports a cancelled port picker as non-failure, by name', () => {
   const err = Object.assign(new Error('some message'), { name: 'NotFoundError' });
   assert.equal(explainFailure(err), 'Cancelled — no board selected.');
