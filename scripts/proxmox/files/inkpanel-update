@@ -65,28 +65,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Keep the privileged updater itself in step with the checkout. The original
-# installer copied these files into root-owned locations once, but subsequent
-# `git pull`s only updated /opt/inkpanel/app. That meant an old LXC could run an
-# old updater forever even while the website was current.
-#
-# The currently-running script must not be truncated in place. Install to a
-# sibling temporary path and rename it atomically; this process keeps reading
-# its already-open old inode while the next invocation gets the new one.
-sync_update_helpers() {
-  local source="$REPO_DIR/scripts/proxmox/files"
-
-  install -o root -g root -m 755 "$source/inkpanel-update" /usr/local/bin/inkpanel-update.next
-  mv -f /usr/local/bin/inkpanel-update.next /usr/local/bin/inkpanel-update
-
-  install -o root -g root -m 644 "$source/write-status.mjs" /usr/local/bin/write-status.mjs.next
-  mv -f /usr/local/bin/write-status.mjs.next /usr/local/bin/write-status.mjs
-
-  install -o root -g root -m 644 "$source/inkpanel-update.path" /etc/systemd/system/inkpanel-update.path
-  install -o root -g root -m 644 "$source/inkpanel-update.service" /etc/systemd/system/inkpanel-update.service
-  systemctl daemon-reload
-}
-
 write_status running
 
 cd "$REPO_DIR"
@@ -99,11 +77,11 @@ echo "== git pull ==" >>"$LOG_FILE"
 runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
 write_status running
 
-# The pull may itself have changed the root-side updater or units. Synchronise
-# them now so the next web-requested update uses the version that just landed.
-echo "== sync privileged update helpers ==" >>"$LOG_FILE"
-sync_update_helpers >>"$LOG_FILE" 2>&1 || fail "could not update privileged helper files"
-write_status running
+# Do NOT copy this root-owned updater from REPO_DIR here. The checkout belongs
+# to the unprivileged inkpanel account; promoting a file it can modify into a
+# root executable would turn an application compromise into root code
+# execution. Fresh installs receive the current privileged helper from the
+# installer. Upgrading an older helper is an explicit administrator action.
 
 LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
 
