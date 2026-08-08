@@ -6,13 +6,17 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      # WebSerial is available only from a secure browser context. InkPanel's
+      # self-signed HTTPS listener exists specifically for the Flash tab.
+      - "8443:8443"
     volumes:
       - inkpanel-data:/data
     environment:
-      # The address panels can reach this host on. Printed on the enrolment
-      # screen, so getting it right saves guesswork at the panel itself.
-      # Leave empty to auto-detect the container's address, which is usually
-      # NOT reachable from your LAN — set it explicitly.
+      # The address panels can reach this host on. The Flash tab also uses this
+      # to pre-fill a new board's server address. Leave empty only if the
+      # container's own auto-detected address is actually reachable by panels;
+      # with normal Docker bridge networking it usually is not, so set the
+      # Docker host's LAN address explicitly, e.g. http://192.168.1.50:8080.
       PUBLIC_BASE_URL: ""
       # Uncomment to require a password for the web UI. The panel's own
       # endpoint (/api/devices/:id/frame) and /health stay open regardless,
