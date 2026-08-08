@@ -375,8 +375,9 @@ export function explainFailure(err) {
            '(or any other serial tool) and try again — only one program can hold a port.';
   }
   if (/Failed to connect|Timed out waiting for packet|invalid head of packet/i.test(message)) {
-    return 'Could not put the board into flashing mode automatically. Unplug and reconnect the board and try again. ' +
-           'BOOT/RESET is only a recovery fallback if automatic flashing repeatedly fails.';
+    return 'Could not put the board into flashing mode automatically. XIAO ESP32-S3 normally needs no buttons. ' +
+           'Unplug and reconnect the board and try again. If repeated attempts still fail, hold the BOOT button, ' +
+           'tap RESET, release BOOT, then retry. That button sequence is recovery-only, not the normal flash process.';
   }
   if (/Failed to write.*data to flash after seq \d+ failed with status/i.test(message)) {
     return `${message}\n\nThe board is not damaged — this is the connection dropping ` +
