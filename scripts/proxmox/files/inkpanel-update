@@ -47,16 +47,6 @@ fail() {
 }
 trap 'fail "unexpected error on line $LINENO"' ERR
 
-# Runs on every exit path — normal completion, `fail`'s `exit 1`, or this
-# process being killed (reboot, `systemctl stop`, a start timeout). Without
-# this, an interrupted run leaves the status file stuck at "running" forever,
-# and POST /api/system/update then returns 409 with no way to recover short
-# of editing the file by hand. This also covers the temp log file, which
-# previously was only ever cleaned up on the success path.
-#
-# Note this cannot help against SIGKILL (e.g. some OOM-kill policies) — no
-# trap can run then. That is a real, unavoidable gap; it is not the case this
-# trap is written for.
 cleanup() {
   if [[ "$FINALIZED" -eq 0 ]]; then
     write_status failed "update was interrupted before it finished"
@@ -70,10 +60,14 @@ write_status running
 cd "$REPO_DIR"
 
 LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+# Keep the old diff signal as a compatibility/fallback path. The freshness
+# fingerprint below is authoritative on current installs, but older checkouts
+# and deployment fixtures may not have the helper yet. More importantly, this
+# gives the log a useful explanation when the current pull itself changed a
+# firmware input.
+COMMIT_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
 
 echo "== git pull ==" >>"$LOG_FILE"
-# Pinned to origin/main so a repointed remote.origin.url or a checked-out
-# side branch cannot change what gets deployed.
 runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
 write_status running
 
@@ -86,9 +80,6 @@ write_status running
 LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
 
 if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
-  # npm ci removes node_modules before reinstalling, so a failure here leaves
-  # the service unable to start. Only pay that risk when dependencies actually
-  # changed — most updates are code-only.
   echo "== npm ci (lockfile changed) ==" >>"$LOG_FILE"
   runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
 else
@@ -96,21 +87,47 @@ else
 fi
 write_status running
 
-# Firmware freshness is based on what the served build actually represents,
-# not merely on files changed by this particular pull. The latter failed in a
-# real deployment: a provisioning firmware change was present in the checkout,
-# but an earlier updater had left an old firmware/dist behind. The next update
-# saw no *new* firmware diff and therefore kept serving that old image forever.
-#
-# build-firmware.sh writes input.sha256 only after a successful compile and
-# manifest generation. Missing/mismatched stamps force another build. A build
-# failure remains non-fatal to the dashboard server and, because builds are now
-# staged before publication, the previous successful Flash package survives.
-CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh 2>>"$LOG_FILE" || true)"
-BUILT_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- \
+  firmware/ \
+  scripts/build-firmware.sh \
+  scripts/firmware-manifest.mjs \
+  scripts/firmware-input-hash.sh \
+  2>/dev/null || true)"
 
-if [[ -z "$CURRENT_FIRMWARE_HASH" || "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWARE_HASH" ]]; then
-  if [[ -z "$BUILT_FIRMWARE_HASH" ]]; then
+# Firmware freshness is based on what the served package actually represents,
+# not merely on files changed by this particular pull. A real LXC reached the
+# state where the web UI was current but firmware/dist still contained the old
+# captive-portal-only image. A later pull had no new firmware diff, so the old
+# updater skipped rebuilding forever.
+#
+# Current builds carry input.sha256. When the helper exists, a missing or
+# mismatched stamp forces a rebuild even if FIRMWARE_DIFF is empty. If the
+# helper does not exist (legacy checkout/test fixture), fall back to the old
+# diff behaviour rather than turning every unrelated update into a build.
+HAVE_FIRMWARE_HASH=0
+CURRENT_FIRMWARE_HASH=""
+BUILT_FIRMWARE_HASH=""
+if [[ -f ./scripts/firmware-input-hash.sh ]]; then
+  CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh 2>>"$LOG_FILE" || true)"
+  if [[ -n "$CURRENT_FIRMWARE_HASH" ]]; then
+    HAVE_FIRMWARE_HASH=1
+    BUILT_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+fi
+
+NEEDS_FIRMWARE_BUILD=0
+if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+  if [[ "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWARE_HASH" ]]; then
+    NEEDS_FIRMWARE_BUILD=1
+  fi
+elif [[ -n "$FIRMWARE_DIFF" ]]; then
+  NEEDS_FIRMWARE_BUILD=1
+fi
+
+if [[ "$NEEDS_FIRMWARE_BUILD" -eq 1 ]]; then
+  if [[ -n "$FIRMWARE_DIFF" ]]; then
+    echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
+  elif [[ "$HAVE_FIRMWARE_HASH" -eq 1 && -z "$BUILT_FIRMWARE_HASH" ]]; then
     echo "== firmware rebuild (no freshness stamp / legacy build) ==" >>"$LOG_FILE"
   else
     echo "== firmware rebuild (served build is stale) ==" >>"$LOG_FILE"
@@ -118,18 +135,29 @@ if [[ -z "$CURRENT_FIRMWARE_HASH" || "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWAR
     echo "served build:   $BUILT_FIRMWARE_HASH" >>"$LOG_FILE"
   fi
 
+  # Deliberately NOT `|| fail`: a firmware compile failure must not take the
+  # already-running dashboard server down. build-firmware.sh now stages output
+  # and publishes only after success, so the previous Flash package survives.
   if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
-    NEW_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
-    if [[ -n "$CURRENT_FIRMWARE_HASH" && "$NEW_FIRMWARE_HASH" == "$CURRENT_FIRMWARE_HASH" ]]; then
-      echo "firmware rebuild: ok ($NEW_FIRMWARE_HASH)" >>"$LOG_FILE"
+    if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+      NEW_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ "$NEW_FIRMWARE_HASH" == "$CURRENT_FIRMWARE_HASH" ]]; then
+        echo "firmware rebuild: ok ($NEW_FIRMWARE_HASH)" >>"$LOG_FILE"
+      else
+        echo "firmware rebuild: completed but freshness stamp did not match; Flash tab may still be stale" >>"$LOG_FILE"
+      fi
     else
-      echo "firmware rebuild: completed but freshness stamp did not match; Flash tab may still be stale" >>"$LOG_FILE"
+      echo "firmware rebuild: ok (legacy freshness mode)" >>"$LOG_FILE"
     fi
   else
     echo "firmware rebuild: FAILED — Flash tab keeps the previous successful build. This does not fail the server update." >>"$LOG_FILE"
   fi
 else
-  echo "== firmware rebuild skipped (served build matches current inputs) ==" >>"$LOG_FILE"
+  if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
+    echo "== firmware rebuild skipped (served build matches current inputs) ==" >>"$LOG_FILE"
+  else
+    echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
+  fi
 fi
 write_status running
 
