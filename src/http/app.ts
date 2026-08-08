@@ -1,8 +1,8 @@
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DeviceStore } from '../devices/store.ts';
+import { DeviceStoreError, type DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
@@ -16,6 +16,18 @@ const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'pub
 /** Directory holding a @fontsource package's font files. */
 function fontDir(pkg: string): string {
   return join(dirname(require.resolve(`${pkg}/package.json`)), 'files');
+}
+
+function deviceStoreErrorBody(err: DeviceStoreError) {
+  return {
+    status: 'error' as const,
+    component: 'device-store' as const,
+    code: err.code,
+    error: err.message,
+    // Never expose the host data-directory path through an HTTP endpoint. The
+    // basename is enough for an administrator to identify the preserved copy.
+    backup: err.backupPath ? basename(err.backupPath) : null,
+  };
 }
 
 export interface AppDeps {
@@ -49,11 +61,20 @@ export function createApp(deps: AppDeps): express.Express {
   app.use(express.json());
 
   app.get('/health', async (_req, res) => {
-    res.json({
-      status: 'ok',
-      devices: (await deps.store.list()).length,
-      uptimeSeconds: Math.round(process.uptime()),
-    });
+    const uptimeSeconds = Math.round(process.uptime());
+    try {
+      res.json({
+        status: 'ok',
+        devices: (await deps.store.list()).length,
+        uptimeSeconds,
+      });
+    } catch (err) {
+      if (err instanceof DeviceStoreError) {
+        res.status(503).json({ ...deviceStoreErrorBody(err), devices: null, uptimeSeconds });
+        return;
+      }
+      throw err;
+    }
   });
 
   const auth = createAuth(deps.auth);
@@ -71,6 +92,19 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
+
+  // A corrupt/unreadable device store is a deliberate fail-closed condition,
+  // not an internal-server mystery. Any API route that touches DeviceStore gets
+  // the same machine-readable 503 response; device firmware will treat it as a
+  // fetch failure and retain its existing e-paper image rather than enrolling
+  // into a freshly invented empty configuration.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof DeviceStoreError) {
+      res.status(503).json(deviceStoreErrorBody(err));
+      return;
+    }
+    next(err);
+  });
 
   // Serve the latin-subset woff2 straight from @fontsource rather than
   // committing a 2.7 MB TTF for one heading in the admin UI.
