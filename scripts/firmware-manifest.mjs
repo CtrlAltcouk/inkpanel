@@ -15,7 +15,7 @@ import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// The three images a full flash writes, and where each one is written.
+// The three region images used for a settings-preserving firmware update.
 //
 // Only the bootloader offset is read from arduino-cli's build properties
 // below: it is the one offset that varies by chip family within the ESP32
@@ -23,9 +23,9 @@ import { pathToFileURL } from 'node:url';
 //
 // PARTITION_TABLE_OFFSET and APP_OFFSET are NOT read from arduino-cli — it
 // does not publish them. They are the Arduino ESP32 core's standard offsets
-// for the default partition scheme this board (XIAO_ESP32S3) builds against.
-// If the partition scheme ever changes (a custom partitions.csv), these two
-// constants need to be revisited by hand; nothing here will warn you.
+// for the default partition scheme this board builds against. If the
+// partition scheme ever changes, these two constants need to be revisited by
+// hand; nothing here will warn you.
 const PARTITION_TABLE_OFFSET = '0x8000';
 const APP_OFFSET = '0x10000';
 
@@ -69,54 +69,53 @@ export async function buildManifest(dist, sketchDir) {
   const files = await readdir(dist);
   const find = (suffix) => files.find((f) => f.endsWith(suffix));
 
-  // Flash the single merged image, not the three separate ones.
-  //
-  // arduino-cli emits <sketch>.ino.merged.bin: one complete flash image, with
-  // the bootloader, partition table and application already positioned inside
-  // it at their correct offsets by the toolchain itself. Writing it at 0 is
-  // what esp-web-tools and the other mainstream browser flashers do.
-  //
-  // The three-image write it replaces was correct on paper — the offsets were
-  // verified right, every image was non-empty and valid, and the flash
-  // reported success — and still produced a board that sat in a boot loop
-  // reading zeros at 0x0. Rather than keep bisecting a write path with three
-  // offsets, three erases and an ordering between them, this hands the
-  // toolchain's own known-good image to the chip as one write. There is no
-  // offset arithmetic left in this project to get wrong.
+  // A routine update must not write through NVS. These three binaries cover
+  // only the bootloader, partition table and application regions, so the
+  // board's stored Wi-Fi/server settings remain untouched.
+  const updateParts = [
+    { path: find('.bootloader.bin'), offset: bootloaderAddr },
+    { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
+    { path: find('.ino.bin'), offset: APP_OFFSET },
+  ];
+
+  for (const part of updateParts) {
+    if (!part.path) {
+      throw new Error(`missing a required update binary in ${dist}: ${JSON.stringify(updateParts)}`);
+    }
+  }
+
+  // Fresh installs and factory recovery prefer arduino-cli's complete merged
+  // image. It contains the same regions already placed at their toolchain-
+  // chosen addresses and can safely overwrite the whole chip because these
+  // modes deliberately erase configuration first. If a toolchain does not
+  // emit a merged image, the three region images remain a valid full-install
+  // fallback after an explicit chip erase.
   const merged = find('.merged.bin');
   const parts = merged
     ? [{ path: merged, offset: '0x0' }]
-    : [
-        // Fallback for a toolchain that does not emit a merged image.
-        { path: find('.bootloader.bin'), offset: bootloaderAddr },
-        { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
-        { path: find('.ino.bin'), offset: APP_OFFSET },
-      ];
-
-  for (const part of parts) {
-    if (!part.path) throw new Error(`missing a required binary in ${dist}: ${JSON.stringify(parts)}`);
-  }
+    : updateParts;
 
   // An empty binary is worse than a missing one. esptool-js's writeFlash
-  // silently `continue`s past any image of zero length -- the warning it logs
-  // goes to debug(), which the web flasher does not wire up -- so a 0-byte
-  // bootloader is skipped with no error anywhere, the flash reports complete
-  // success, and the board boot-loops on "invalid header: 0x00000000" because
-  // nothing was ever written to 0x0. Catch it here, where the cause is
-  // obvious, rather than on the bench where it is not.
-  for (const part of parts) {
-    const { size } = await stat(join(dist, part.path));
+  // silently skips zero-length images, leaving a flash operation that appears
+  // successful but cannot boot. Validate every binary exposed by either mode.
+  const pathsToValidate = [...new Set([...parts, ...updateParts].map((part) => part.path))];
+  for (const path of pathsToValidate) {
+    const { size } = await stat(join(dist, path));
     if (size === 0) {
       throw new Error(
-        `${part.path} is empty (0 bytes). A flash would silently skip it and produce an unbootable board.`,
+        `${path} is empty (0 bytes). A flash would silently skip it and produce an unbootable board.`,
       );
     }
   }
 
+  const normalise = (list) => list.map((p) => ({ path: p.path, offset: Number(p.offset) }));
   const manifest = {
     version,
     builtAt: new Date().toISOString(),
-    parts: parts.map((p) => ({ path: p.path, offset: Number(p.offset) })),
+    // `parts` is the install/recovery set for backwards compatibility with
+    // older web UIs. New UIs use updateParts for the NVS-safe update mode.
+    parts: normalise(parts),
+    updateParts: normalise(updateParts),
   };
 
   await writeFile(join(dist, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
