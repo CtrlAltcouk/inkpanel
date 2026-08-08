@@ -8,7 +8,9 @@ const PARTITIONS = join(ROOT, 'firmware', 'inkpanel', 'partitions.csv');
 const IMPORTER = join(ROOT, 'firmware', 'inkpanel', 'FlashProvisioning.cpp');
 const SKETCH = join(ROOT, 'firmware', 'inkpanel', 'inkpanel.ino');
 
-function partitionRow(text: string, name: string): string[] {
+type PartitionRow = [string, string, string, string, string, ...string[]];
+
+function partitionRow(text: string, name: string): PartitionRow {
   const row = text
     .split(/\r?\n/)
     .map((line) => line.replace(/#.*/, '').trim())
@@ -16,7 +18,8 @@ function partitionRow(text: string, name: string): string[] {
     .map((line) => line.split(',').map((field) => field.trim()))
     .find((fields) => fields[0] === name);
   assert.ok(row, `missing ${name} partition`);
-  return row;
+  assert.ok(row.length >= 5, `${name} partition row is incomplete`);
+  return row as PartitionRow;
 }
 
 test('custom partition table preserves NVS/app offsets and reserves exactly the final 4 KiB sector', async () => {
