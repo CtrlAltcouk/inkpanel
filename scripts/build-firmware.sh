@@ -31,20 +31,41 @@ DIST="$ROOT/firmware/dist"
 # Overridable so a different XIAO variant does not need a code change.
 FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_PLUS}"
 
-command -v arduino-cli >/dev/null || {
-  echo "arduino-cli not found. See https://arduino.github.io/arduino-cli/" >&2
+# Resolve arduino-cli by path, not by trusting PATH to contain it.
+#
+# This script is invoked three different ways, and only one of them has a
+# normal login PATH: by hand from a shell, by the LXC installer, and by
+# inkpanel-update via `runuser -u inkpanel`. runuser resets the environment
+# for the target user, and the inkpanel service user has /usr/sbin/nologin as
+# its shell — so /usr/local/bin, where arduino-cli installs, is not on PATH
+# there. The failure that produced was quiet and expensive: the updater's
+# rebuild step is deliberately non-fatal, so every automatic rebuild would
+# have logged "arduino-cli not found" and carried on reporting the update a
+# success, while the Flash tab kept serving whatever stale build was on disk.
+ARDUINO_CLI="${ARDUINO_CLI:-$(command -v arduino-cli 2>/dev/null || true)}"
+if [[ -z "$ARDUINO_CLI" ]]; then
+  for candidate in /usr/local/bin/arduino-cli /usr/bin/arduino-cli "$HOME/.local/bin/arduino-cli"; do
+    if [[ -x "$candidate" ]]; then
+      ARDUINO_CLI="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$ARDUINO_CLI" ]]; then
+  echo "arduino-cli not found on PATH or in /usr/local/bin, /usr/bin, ~/.local/bin." >&2
+  echo "Install it (https://arduino.github.io/arduino-cli/) or set ARDUINO_CLI=/path/to/arduino-cli." >&2
   exit 1
-}
+fi
 
 # Fail here, not three steps later on the bench. A wrong FQBN otherwise either
 # stops the build with a bare "board not found", or — far worse, and what
 # actually happened — builds cleanly for the wrong hardware and produces an
 # image that only fails once it is on a board.
-if ! arduino-cli board details --fqbn "$FQBN" >/dev/null 2>&1; then
+if ! "$ARDUINO_CLI" board details --fqbn "$FQBN" >/dev/null 2>&1; then
   echo "unknown FQBN: $FQBN" >&2
   echo "" >&2
   echo "Installed XIAO boards:" >&2
-  arduino-cli board listall 2>/dev/null | grep -i xiao >&2 || echo "  (none found — is the esp32 core installed?)" >&2
+  "$ARDUINO_CLI" board listall 2>/dev/null | grep -i xiao >&2 || echo "  (none found — is the esp32 core installed?)" >&2
   echo "" >&2
   echo "Set FQBN=... to override, e.g. FQBN=esp32:esp32:XIAO_ESP32S3 $0" >&2
   exit 1
@@ -57,7 +78,7 @@ echo "== compiling for $FQBN =="
 # --output-dir puts the binaries somewhere predictable; --json makes the
 # build report machine-readable so the bootloader offset can be read from it
 # directly (see firmware-manifest.mjs for why only that one offset).
-arduino-cli compile \
+"$ARDUINO_CLI" compile \
   --fqbn "$FQBN" \
   --output-dir "$DIST" \
   --json \

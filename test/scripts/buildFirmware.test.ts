@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFile, stat, mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -41,6 +41,67 @@ test('the build script targets the Plus variant, which is the board that actuall
   );
 });
 
+// The script runs three ways and only one has a normal login PATH: by hand,
+// from the LXC installer, and from inkpanel-update via `runuser -u inkpanel`.
+// runuser resets the environment for the target user, and that service user
+// has /usr/sbin/nologin as its shell, so /usr/local/bin — where arduino-cli
+// installs — is absent. The resulting failure was quiet and expensive: the
+// updater's rebuild is deliberately non-fatal, so every automatic rebuild
+// would log "arduino-cli not found", the update would still report success,
+// and the Flash tab would keep serving whatever stale build was on disk.
+//
+// Runs the real script with an empty PATH and a fake arduino-cli pointed at
+// by ARDUINO_CLI, asserting it gets far enough to invoke it — proving the
+// resolution does not depend on PATH.
+test('the build script finds arduino-cli without relying on PATH', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-cli-path-'));
+  try {
+    const fakeCli = join(dir, 'fake-arduino-cli');
+    // Exits non-zero for `board details`, so the script stops at the FQBN
+    // check. That is enough: reaching that check at all proves it resolved
+    // and executed the binary.
+    await writeFile(fakeCli, '#!/usr/bin/env bash\necho "FAKE CLI CALLED: $*" >&2\nexit 1\n', 'utf8');
+    await chmod(fakeCli, 0o755);
+
+    // PATH must stay usable — bash and coreutils are resolved through it, and
+    // emptying it means the script never runs at all rather than running
+    // without arduino-cli. ARDUINO_CLI takes precedence over PATH by design,
+    // so this holds whether or not a real arduino-cli happens to be installed
+    // on the machine running the tests.
+    const result = spawnSync('bash', [SCRIPT], {
+      encoding: 'utf8',
+      env: { ...process.env, ARDUINO_CLI: fakeCli, HOME: dir },
+    });
+
+    assert.doesNotMatch(
+      result.stderr,
+      /arduino-cli not found/,
+      'must not report arduino-cli missing when ARDUINO_CLI points at a real executable',
+    );
+    // Reaching the FQBN check is the proof: it runs only after resolution
+    // succeeded, and it reports failure only by observing the resolved
+    // binary's exit status. The fake's own stderr is not visible here because
+    // the script redirects that call to /dev/null.
+    assert.match(
+      result.stderr,
+      /unknown FQBN/,
+      'the resolved binary must actually be invoked — reaching the FQBN check proves it was',
+    );
+
+    // The override alone is not the fix that matters in production — nothing
+    // sets ARDUINO_CLI there. The fallback search is what makes the script
+    // work under `runuser`, where /usr/local/bin is off PATH.
+    const source = await readFile(SCRIPT, 'utf8');
+    assert.match(
+      source,
+      /for candidate in[^\n]*\/usr\/local\/bin\/arduino-cli/,
+      'must fall back to searching /usr/local/bin, which is where arduino-cli installs and where runuser cannot see it',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('the build script rejects an unknown FQBN instead of building for the wrong board', async () => {
   const text = await readFile(SCRIPT, 'utf8');
   // Comment lines are stripped first: the explanatory comment above the FQBN
@@ -54,7 +115,10 @@ test('the build script rejects an unknown FQBN instead of building for the wrong
 
   // The check must come before the compile, or it cannot prevent anything.
   const validation = code.indexOf('board details --fqbn');
-  const compile = code.indexOf('arduino-cli compile');
+  // Matches the invocation however arduino-cli is referenced — it is called
+  // through "$ARDUINO_CLI" rather than by bare name, so that the binary can
+  // be resolved without depending on PATH.
+  const compile = code.search(/\bcompile\s+\\/);
   assert.ok(validation > -1, 'no FQBN validation found');
   assert.ok(compile > -1, 'no compile step found');
   assert.ok(validation < compile, 'the FQBN check must run before the compile, not after');
