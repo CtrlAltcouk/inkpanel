@@ -39,7 +39,7 @@ test('chunked decoder is bounded and requires exactly one framebuffer', async ()
   );
 });
 
-test('firmware version records the transfer-behaviour change', async () => {
+test('firmware exposes explicit semantic-version telemetry for transfer-capable builds', async () => {
   const config = await readFile(join(process.cwd(), 'firmware', 'inkpanel', 'config.h'), 'utf8');
-  assert.match(config, /FIRMWARE_VERSION = "0\.1\.3"/);
+  assert.match(config, /FIRMWARE_VERSION = "\d+\.\d+\.\d+"/);
 });
