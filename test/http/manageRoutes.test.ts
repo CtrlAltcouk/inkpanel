@@ -99,6 +99,45 @@ test('rejects a non-URL calendar entry', async () => {
   });
 });
 
+test('accepts only credential-free HTTP(S) calendar URLs on new writes', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const accepted = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        calendarUrls: ['http://calendar.example/a.ics', 'https://calendar.example/b.ics'],
+      }),
+    });
+    assert.equal(accepted.status, 200);
+
+    for (const url of [
+      'ftp://calendar.example/feed.ics',
+      'file:///etc/passwd',
+      'data:text/calendar,BEGIN:VCALENDAR',
+      'http://user:password@calendar.example/private.ics',
+    ]) {
+      const rejected = await fetch(`${base}/api/devices/esp32-1`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ calendarUrls: [url] }),
+      });
+      assert.equal(rejected.status, 400, url);
+    }
+
+    const secret = 'private-calendar-token';
+    const privateError = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        calendarUrls: [`http://user:password@calendar.example/${secret}.ics?key=${secret}`],
+      }),
+    });
+    assert.equal(privateError.status, 400);
+    assert.doesNotMatch(await privateError.text(), new RegExp(secret));
+  });
+});
+
 test('rejects an invalid IANA timezone', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');

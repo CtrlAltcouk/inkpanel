@@ -76,6 +76,15 @@ address**, so there is no OAuth and no Google Cloud project. Be aware that
 Google refreshes that feed lazily — a newly created event can take a few hours
 to appear.
 
+Calendar URLs are fetched by the server, never by the ESP32. Only HTTP and
+HTTPS feeds without embedded credentials are accepted for new configuration.
+Each feed is fetched and cached independently, so one unavailable calendar does
+not force healthy calendars onto stale data. Redirect destinations are checked
+again, response bodies are limited to 2 MiB, and non-public network destinations
+are blocked by default. Set `CALENDAR_ALLOW_PRIVATE_NETWORKS=1` only to allow a
+deliberately LAN-hosted calendar; loopback and link-local addresses remain
+blocked even with that opt-in.
+
 Weather comes from Open-Meteo, which needs no account and no API key.
 
 ## Hardware

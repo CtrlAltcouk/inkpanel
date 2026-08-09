@@ -22,6 +22,9 @@ services:
       # Browser-only HTTPS/WebSerial port. The same value configures both the
       # container listener and the host publication above.
       HTTPS_PORT: "${HTTPS_PORT:-8443}"
+      # Explicit opt-in for calendars hosted on a private LAN address.
+      # Loopback and link-local destinations remain blocked.
+      CALENDAR_ALLOW_PRIVATE_NETWORKS: "${CALENDAR_ALLOW_PRIVATE_NETWORKS:-0}"
       # Uncomment to require a password for the web UI. The panel's own
       # endpoint (/api/devices/:id/frame) and /health stay open regardless,
       # since firmware cannot log in. NOTE: this is plain HTTP — the password

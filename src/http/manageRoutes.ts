@@ -8,6 +8,7 @@ import { geocode } from '../sources/geocode.ts';
 import { findStation, searchStations } from '../sources/stations.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { timezoneSchema } from '../devices/schema.ts';
+import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 
 const patchSchema = z
   .object({
@@ -19,7 +20,7 @@ const patchSchema = z
     locationLabel: z.string().max(120).optional(),
     // Empty is valid and means "bins off". A UPRN is up to 12 digits.
     binsUprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits').optional(),
-    calendarUrls: z.array(z.string().url()).max(10).optional(),
+    calendarUrls: z.array(calendarUrlInputSchema).max(10).optional(),
     panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),
     quietHoursEnd: z.number().int().min(0).max(23).optional(),
