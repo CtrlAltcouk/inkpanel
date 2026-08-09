@@ -201,6 +201,7 @@ export function createIcalFeedSource(fetchText: CalendarTextFetcher): Source<Ica
         const knownSafeReason = reason.includes('Google Calendar settings') ||
           reason === 'calendar fetch aborted' ||
           reason === 'calendar redirect limit exceeded' ||
+          reason.startsWith('calendar redirect ') ||
           reason.startsWith(`calendar host ${host} `) ||
           reason.startsWith(`calendar feed from ${host} `);
         const safeReason = knownSafeReason ? reason : `calendar feed from ${host} is invalid`;

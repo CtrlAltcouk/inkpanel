@@ -17,6 +17,9 @@ export interface CalendarNetworkPolicy {
   allowPrivateNetworks: boolean;
 }
 
+export type CalendarNetworkScope = 'public' | 'private' | 'blocked';
+type AllowedCalendarNetworkScope = Exclude<CalendarNetworkScope, 'blocked'>;
+
 export interface CalendarResolverOptions {
   all: true;
   order: 'verbatim';
@@ -99,13 +102,19 @@ for (const [address, prefix] of [
 
 privateBlocked.addSubnet('fc00::', 7, 'ipv6');
 
-export function isCalendarAddressAllowed(address: string, policy: CalendarNetworkPolicy): boolean {
+export function classifyCalendarAddress(address: string): CalendarNetworkScope {
   const normalized = address.replace(/^\[|\]$/g, '');
   const family = isIP(normalized);
-  if (family === 0) return false;
+  if (family === 0) return 'blocked';
   const type = family === 4 ? 'ipv4' : 'ipv6';
-  if (alwaysBlocked.check(normalized, type)) return false;
-  return policy.allowPrivateNetworks || !privateBlocked.check(normalized, type);
+  if (alwaysBlocked.check(normalized, type)) return 'blocked';
+  if (privateBlocked.check(normalized, type)) return 'private';
+  return 'public';
+}
+
+export function isCalendarAddressAllowed(address: string, policy: CalendarNetworkPolicy): boolean {
+  const scope = classifyCalendarAddress(address);
+  return scope === 'public' || (scope === 'private' && policy.allowPrivateNetworks);
 }
 
 export function parseCalendarAllowPrivateNetworks(value: string | undefined): boolean {
@@ -198,7 +207,7 @@ async function validatedAddresses(
   policy: CalendarNetworkPolicy,
   resolver: CalendarResolver,
   signal: AbortSignal,
-): Promise<readonly LookupAddress[]> {
+): Promise<{ addresses: readonly LookupAddress[]; scope: AllowedCalendarNetworkScope }> {
   const hostname = calendarHostDescription(url);
   const literalFamily = isIP(hostname);
   const addresses = literalFamily === 0
@@ -206,13 +215,25 @@ async function validatedAddresses(
     : [{ address: hostname, family: literalFamily as 4 | 6 }];
 
   if (addresses.length === 0) throw new Error(`calendar host ${hostname} has no addresses`);
+  const scopes = new Set<AllowedCalendarNetworkScope>();
   for (const candidate of addresses) {
-    if (candidate.family !== isIP(candidate.address) ||
-        !isCalendarAddressAllowed(candidate.address, policy)) {
+    if (candidate.family !== isIP(candidate.address)) {
       throw new Error(`calendar host ${hostname} resolves to a blocked address`);
     }
+    const scope = classifyCalendarAddress(candidate.address);
+    if (scope === 'blocked') {
+      throw new Error(`calendar host ${hostname} resolves to a blocked address`);
+    }
+    scopes.add(scope);
   }
-  return addresses;
+  if (scopes.size !== 1) {
+    throw new Error(`calendar host ${hostname} resolves across public and private network scopes`);
+  }
+  const scope = scopes.values().next().value;
+  if (!scope || (scope === 'private' && !policy.allowPrivateNetworks)) {
+    throw new Error(`calendar host ${hostname} resolves to a blocked address`);
+  }
+  return { addresses, scope };
 }
 
 function redirectLocation(headers: IncomingHttpHeaders): string | null {
@@ -268,17 +289,27 @@ export function createCalendarTextFetcher(options: CalendarHttpOptions): Calenda
 
   return async (rawUrl, signal) => {
     let current = parseCalendarUrl(rawUrl);
+    let feedScope: AllowedCalendarNetworkScope | null = null;
     for (let redirects = 0; ; redirects += 1) {
       const hostname = calendarHostDescription(current);
       let response: CalendarHttpResponse;
       try {
-        const addresses = await validatedAddresses(current, policy, resolver, signal);
-        response = await transport(current, addresses, signal);
+        const destination = await validatedAddresses(current, policy, resolver, signal);
+        if (feedScope !== null && destination.scope !== feedScope) {
+          throw new Error(
+            `calendar redirect from ${feedScope} to ${destination.scope} network scope is blocked`,
+          );
+        }
+        feedScope ??= destination.scope;
+        response = await transport(current, destination.addresses, signal);
       } catch (err) {
         if (signal.aborted || (err instanceof Error && err.message === 'calendar fetch aborted')) {
           throw abortedError();
         }
-        if (err instanceof Error && err.message.startsWith('calendar host ')) throw err;
+        if (err instanceof Error &&
+            (err.message.startsWith('calendar host ') || err.message.startsWith('calendar redirect '))) {
+          throw err;
+        }
         throw new Error(`calendar feed from ${hostname} could not be fetched`);
       }
 

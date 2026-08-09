@@ -4,6 +4,7 @@ import type { LookupAddress } from 'node:dns';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
+  classifyCalendarAddress,
   createCalendarTextFetcher,
   createPinnedLookup,
   isCalendarAddressAllowed,
@@ -76,6 +77,8 @@ test('private LAN opt-in permits only deliberate private ranges', () => {
   for (const address of ['127.0.0.1', '169.254.1.1', '::1', 'fe80::1', 'ff02::1']) {
     assert.equal(isCalendarAddressAllowed(address, enabled), false, address);
   }
+  assert.equal(classifyCalendarAddress('::ffff:192.168.1.10'), 'private');
+  assert.equal(classifyCalendarAddress('::ffff:127.0.0.1'), 'blocked');
   assert.equal(parseCalendarAllowPrivateNetworks('1'), true);
   for (const value of [undefined, '', '0', 'true', 'yes', ' 1 ']) {
     assert.equal(parseCalendarAllowPrivateNetworks(value), false);
@@ -112,21 +115,79 @@ test('literal blocked destinations never reach the transport', async () => {
   assert.deepEqual(privateCalls, ['192.168.1.20']);
 });
 
-test('DNS hostnames with private or mixed results are rejected before transport', async () => {
-  for (const answers of [
-    [{ address: '192.168.1.10', family: 4 }],
-    [publicAddress, { address: '10.0.0.4', family: 4 }],
-  ] satisfies LookupAddress[][]) {
+test('mixed public and private DNS answers fail closed regardless of private opt-in', async () => {
+  const answers = [publicAddress, { address: '10.0.0.4', family: 4 }] satisfies LookupAddress[];
+  for (const allowPrivateNetworks of [false, true]) {
     let transported = false;
     const fetchText = createCalendarTextFetcher({
-      allowPrivateNetworks: false,
+      allowPrivateNetworks,
       resolver: async () => answers,
       transport: async () => { transported = true; return response(200, SINGLE_TIMED); },
     });
     await assert.rejects(fetchText('https://calendar.example/secret/token.ics', new AbortController().signal),
-      /calendar host calendar\.example resolves to a blocked address/);
+      /calendar host calendar\.example resolves across public and private network scopes/);
     assert.equal(transported, false);
   }
+});
+
+test('only homogeneous allowed DNS answers are pinned into the request', async () => {
+  const publicAnswers = [
+    publicAddress,
+    { address: '1.1.1.1', family: 4 },
+  ] satisfies LookupAddress[];
+  const privateAnswers = [
+    { address: '192.168.1.10', family: 4 },
+    { address: '10.0.0.4', family: 4 },
+  ] satisfies LookupAddress[];
+
+  for (const [answers, allowPrivateNetworks] of [
+    [publicAnswers, false],
+    [privateAnswers, true],
+  ] as const) {
+    let pinned: readonly LookupAddress[] = [];
+    const fetchText = createCalendarTextFetcher({
+      allowPrivateNetworks,
+      resolver: async () => answers,
+      transport: async (_url, addresses) => {
+        pinned = addresses;
+        return response(200, SINGLE_TIMED);
+      },
+    });
+    assert.equal(
+      await fetchText('https://calendar.example/feed.ics', new AbortController().signal),
+      SINGLE_TIMED,
+    );
+    assert.deepEqual(pinned, answers);
+  }
+
+  let transported = false;
+  const strictPrivate = createCalendarTextFetcher({
+    allowPrivateNetworks: false,
+    resolver: async () => privateAnswers,
+    transport: async () => { transported = true; return response(200, SINGLE_TIMED); },
+  });
+  await assert.rejects(
+    strictPrivate('https://calendar.example/feed.ics', new AbortController().signal),
+    /blocked address/,
+  );
+  assert.equal(transported, false);
+});
+
+test('IPv4-mapped private answers cannot bypass homogeneous scope validation', async () => {
+  let transported = false;
+  const fetchText = createCalendarTextFetcher({
+    allowPrivateNetworks: true,
+    resolver: async () => [
+      { address: '::ffff:192.168.1.10', family: 6 },
+      { address: '2606:4700:4700::1111', family: 6 },
+    ],
+    transport: async () => { transported = true; return response(200, SINGLE_TIMED); },
+  });
+  await assert.rejects(
+    fetchText('https://calendar.example/feed.ics', new AbortController().signal),
+    /public and private network scopes/,
+  );
+  assert.equal(transported, false);
 });
 
 test('validated DNS answers are pinned into the request without a second lookup', async () => {
@@ -224,6 +285,60 @@ test('redirect targets are resolved and independently revalidated', async () => 
     });
     await assert.rejects(blocked('http://first.example/start', new AbortController().signal), /blocked address/);
     assert.equal(calls, 1, 'blocked redirect target is never connected');
+  }
+});
+
+test('redirects cannot cross the initial validated network scope', async () => {
+  const answers = new Map<string, LookupAddress[]>([
+    ['public-one.example', [publicAddress]],
+    ['public-two.example', [{ address: '1.1.1.1', family: 4 }]],
+    ['private-one.example', [{ address: '192.168.1.10', family: 4 }]],
+    ['private-two.example', [{ address: '10.0.0.4', family: 4 }]],
+  ]);
+  const resolver: CalendarResolver = async (hostname) => answers.get(hostname) ?? [];
+
+  async function follow(from: string, to: string, allowPrivateNetworks: boolean): Promise<{
+    result?: string;
+    error?: Error;
+    connected: string[];
+  }> {
+    const connected: string[] = [];
+    const fetchText = createCalendarTextFetcher({
+      allowPrivateNetworks,
+      resolver,
+      transport: async (url) => {
+        connected.push(url.hostname);
+        return url.pathname === '/start'
+          ? response(302, '', { location: `https://${to}/final` })
+          : response(200, SINGLE_TIMED);
+      },
+    });
+    try {
+      return {
+        result: await fetchText(`https://${from}/start`, new AbortController().signal),
+        connected,
+      };
+    } catch (err) {
+      return { error: err as Error, connected };
+    }
+  }
+
+  for (const [from, to] of [
+    ['public-one.example', 'private-one.example'],
+    ['private-one.example', 'public-one.example'],
+  ] as const) {
+    const crossed = await follow(from, to, true);
+    assert.match(crossed.error?.message ?? '', /calendar redirect from (public|private) to (private|public)/);
+    assert.deepEqual(crossed.connected, [from], 'cross-scope target is validated but never connected');
+  }
+
+  for (const [from, to, allowPrivateNetworks] of [
+    ['public-one.example', 'public-two.example', false],
+    ['private-one.example', 'private-two.example', true],
+  ] as const) {
+    const sameScope = await follow(from, to, allowPrivateNetworks);
+    assert.equal(sameScope.result, SINGLE_TIMED);
+    assert.deepEqual(sameScope.connected, [from, to]);
   }
 });
 
