@@ -8,8 +8,11 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  lstat,
   readFile,
+  readlink,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -422,6 +425,36 @@ test('health failure after dependency activation restores old node_modules witho
   });
 });
 
+test('dependency rollback preserves a symlink baseline without mutating its target', async () => {
+  await withFixture(async (fixture) => {
+    const liveDependencies = join(fixture.repoDir, 'node_modules');
+    const target = join(fixture.dir, 'dependency-target');
+    await rm(liveDependencies, { recursive: true });
+    await mkdir(target);
+    await writeFile(join(target, 'package.txt'), 'symlink target dependencies\n');
+    await chmod(target, 0o751);
+    const targetBefore = await stat(target);
+    await symlink(target, liveDependencies, 'dir');
+
+    await commitUpstream(fixture, 'dependency candidate', async () => {
+      await writeFile(join(fixture.upstream, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
+    });
+    await runUpdater(
+      fixture,
+      ['200', '503', '503', '503', '503', '503', '200', '200', '200'],
+    );
+
+    assert.equal((await lstat(liveDependencies)).isSymbolicLink(), true);
+    assert.equal(await readlink(liveDependencies), target);
+    assert.equal(await readFile(join(target, 'package.txt'), 'utf8'), 'symlink target dependencies\n');
+    const targetAfter = await stat(target);
+    assert.equal(targetAfter.mode & 0o777, targetBefore.mode & 0o777);
+    assert.equal(targetAfter.uid, targetBefore.uid);
+    assert.equal(targetAfter.gid, targetBefore.gid);
+    assert.equal((await readFile(fixture.npmLog, 'utf8')).trim().split('\n').length, 1);
+  });
+});
+
 test('an app-controlled status symlink cannot redirect the update writer', async () => {
   await withFixture(async (fixture) => {
     const sentinel = join(fixture.dir, 'protected-sentinel.txt');
@@ -540,6 +573,28 @@ test('root never follows app-controlled firmware paths during snapshot or restor
     /runuser -u "\$APP" -- mv -- "\$restore_stage\/firmware-dist" "\$FIRMWARE_DIST"/,
   );
   assert.match(script, /\[\[ ! -d "\$REPO_DIR" \|\| -L "\$REPO_DIR" \]\]/);
+});
+
+test('dependency snapshots are opaque renames with no root ownership or mode changes', async () => {
+  const script = await readFile(UPDATER, 'utf8');
+  assert.doesNotMatch(script, /DEPS_OLD_MODE/);
+  assert.match(
+    script,
+    /mv -T -- "\$REPO_DIR\/node_modules" "\$DEPS_OLD"/,
+  );
+  assert.match(
+    script,
+    /mv -T -- "\$DEPS_OLD" "\$REPO_DIR\/node_modules"/,
+  );
+  assert.match(
+    script,
+    /runuser -u "\$APP" -- rm -rf -- "\$REPO_DIR\/node_modules"/,
+  );
+  assert.match(
+    script,
+    /runuser -u "\$APP" -- mv -T -- "\$DEPS_STAGE\/node_modules" "\$REPO_DIR\/node_modules"/,
+  );
+  assert.doesNotMatch(script, /(?:chown|chmod)[^\n]*(?:\$DEPS_OLD|\$REPO_DIR\/node_modules)/);
 });
 
 test('status publication and mode changes run as the unprivileged app user', async () => {
