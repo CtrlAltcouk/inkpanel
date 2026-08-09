@@ -127,6 +127,13 @@ Set `INKPANEL_PASSWORD` to require a login. Two endpoints stay open regardless:
 `/api/devices/:id/frame`, because firmware cannot log in, and `/health`, so
 monitoring does not need credentials. Sign in at `/login.html`.
 
+Frame check-ins remain unauthenticated by design. An unknown ID can create a
+device record only when it exactly matches the current firmware form
+`esp32-` followed by six lowercase hexadecimal digits; creation is limited per
+client address and across the whole server. Already-known manual or legacy IDs
+continue to work. These MAC-derived device IDs are identifiers, not secrets or
+proof of device identity.
+
 **The password travels in clear text.** This is plain HTTP, so the password and
 the session cookie are readable by anyone able to capture packets on your
 network. It is protection against casual access — a guest on your WiFi, someone

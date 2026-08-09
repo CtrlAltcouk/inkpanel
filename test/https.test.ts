@@ -487,7 +487,7 @@ test('the frame endpoint and health stay open over HTTPS even with a password se
     const health = await getOverTls(port, '/health');
     assert.equal(health.status, 200, 'health must stay reachable over HTTPS without a session');
 
-    const frame = await getOverTls(port, '/api/devices/esp32-1/frame');
+    const frame = await getOverTls(port, '/api/devices/esp32-a1b2c3/frame');
     assert.equal(frame.status, 200, 'the panel frame endpoint must stay reachable over HTTPS without a session');
     assert.equal(frame.body.length, 48000);
 

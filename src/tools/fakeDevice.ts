@@ -6,7 +6,9 @@ import { WFT0583 } from '../panel/profile.ts';
 const { values } = parseArgs({
   options: {
     server: { type: 'string', default: 'http://localhost:8080' },
-    id: { type: 'string', default: 'esp32-fake01' },
+    // Match real firmware so the development client can exercise first-time
+    // enrolment without relying on a pre-existing manual record.
+    id: { type: 'string', default: 'esp32-fae001' },
     battery: { type: 'string', default: '4.02' },
     out: { type: 'string', default: 'frame.png' },
     once: { type: 'boolean', default: false },

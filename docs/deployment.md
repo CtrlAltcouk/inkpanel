@@ -167,6 +167,16 @@ instead. Idle memory is roughly 150 MB.
 Everything that matters is `/data/config.json`: device records, locations and
 calendar URLs. `/data/cache` is disposable.
 
+### Device enrolment boundary
+
+The firmware frame endpoint is intentionally unauthenticated. Existing records,
+including manual and legacy device IDs, remain serviceable. Only an unknown ID
+matching the current firmware's lowercase `esp32-xxxxxx` shape may create a new
+record, and successful creation is rate-limited per `req.ip` and globally for
+one-hour windows. Configure `TRUST_PROXY` correctly when a reverse proxy is in
+front of InkPanel so Express supplies the intended client address. Device IDs
+are MAC-derived identifiers, not authentication credentials.
+
 ### Calendar network safety
 
 Calendar feeds are fetched by the InkPanel server, not the ESP32. New

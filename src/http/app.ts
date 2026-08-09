@@ -7,6 +7,7 @@ import type { FrameService } from '../render/frameService.ts';
 import type { RuntimeState } from '../runtimeConfig.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
+import type { DeviceEnrolmentLimiter } from './deviceEnrolment.ts';
 import { firmwareRoutes } from './firmwareRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
 import { systemRoutes } from './systemRoutes.ts';
@@ -55,6 +56,8 @@ export interface AppDeps {
    * attempts from anyone locks out everyone.
    */
   trustProxy?: boolean | number | string;
+  /** Process-local anti-abuse state for unauthenticated device creation. */
+  enrolmentLimiter?: DeviceEnrolmentLimiter;
 }
 
 export function createApp(deps: AppDeps): express.Express {
@@ -110,7 +113,12 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', auth.middleware);
 
   // Device routes first: both mount under /api and :id/frame must win.
-  app.use('/api', deviceRoutes(deps.store, deps.frames, deps.publicBaseUrl));
+  app.use('/api', deviceRoutes(
+    deps.store,
+    deps.frames,
+    deps.publicBaseUrl,
+    deps.enrolmentLimiter,
+  ));
   app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
