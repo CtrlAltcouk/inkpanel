@@ -5,8 +5,8 @@ import { basename, dirname } from 'node:path';
 import { defaultDevice, type DeviceRecord } from './types.ts';
 import {
   CURRENT_DEVICE_STORE_SCHEMA_VERSION,
+  currentDeviceRecordSchema,
   currentDeviceStoreSchema,
-  deviceRecordSchema,
   parseDeviceStoreFile,
   UnsupportedDeviceStoreVersionError,
   type CurrentDeviceStoreFile,
@@ -184,7 +184,7 @@ export class DeviceStore {
     return this.mutate((file) => {
       const existing = file.devices.find((d) => d.id === id);
       if (existing) return existing;
-      const validation = deviceRecordSchema.safeParse(defaultDevice(id));
+      const validation = currentDeviceRecordSchema.safeParse(defaultDevice(id));
       if (!validation.success) {
         throw new DeviceStoreError(
           'config_invalid',
@@ -202,7 +202,11 @@ export class DeviceStore {
       const index = file.devices.findIndex((d) => d.id === id);
       if (index === -1) throw new Error(`unknown device: ${id}`);
       // id last, so a patch can never rename a device out from under itself.
-      const validation = deviceRecordSchema.safeParse({ ...file.devices[index]!, ...patch, id });
+      const validation = currentDeviceRecordSchema.safeParse({
+        ...file.devices[index]!,
+        ...patch,
+        id,
+      });
       if (!validation.success) {
         throw new DeviceStoreError(
           'config_invalid',

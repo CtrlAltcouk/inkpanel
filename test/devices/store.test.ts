@@ -9,7 +9,7 @@ import {
   DeviceStoreError,
   type DeviceStoreErrorCode,
 } from '../../src/devices/store.ts';
-import { deviceRecordSchema } from '../../src/devices/schema.ts';
+import { currentDeviceRecordSchema } from '../../src/devices/schema.ts';
 
 async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dev-'));
@@ -209,7 +209,7 @@ test('a minimal legacy config migrates in memory to a complete current record', 
       Object.keys(defaultDevice('esp32-old')).sort(),
       'every current DeviceRecord field is populated',
     );
-    assert.equal(deviceRecordSchema.safeParse(device).success, true);
+    assert.equal(currentDeviceRecordSchema.safeParse(device).success, true);
   });
 });
 
@@ -276,7 +276,7 @@ test('legacy migration preserves explicit user configuration and defaults only m
       devices: unknown[];
     };
     assert.equal(persisted.schemaVersion, 1);
-    assert.equal(deviceRecordSchema.safeParse(persisted.devices[0]).success, true);
+    assert.equal(currentDeviceRecordSchema.safeParse(persisted.devices[0]).success, true);
   });
 });
 
