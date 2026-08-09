@@ -7,12 +7,13 @@ import { PROFILES, WFT0583 } from '../panel/profile.ts';
 import { geocode } from '../sources/geocode.ts';
 import { findStation, searchStations } from '../sources/stations.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
+import { timezoneSchema } from '../devices/schema.ts';
 
 const patchSchema = z
   .object({
     name: z.string().min(1).max(64).optional(),
     claimed: z.boolean().optional(),
-    timezone: z.string().min(1).optional(),
+    timezone: timezoneSchema.optional(),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     locationLabel: z.string().max(120).optional(),

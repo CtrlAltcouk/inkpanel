@@ -2,9 +2,7 @@ import { Router } from 'express';
 import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { nextWakeSeconds } from '../schedule/nextWake.ts';
-
-/** Device IDs come from firmware; keep them to a safe alphabet. */
-const DEVICE_ID = /^[a-z0-9][a-z0-9_-]{1,63}$/i;
+import { deviceIdSchema } from '../devices/schema.ts';
 
 const ERROR_RETRY_SECONDS = 300;
 
@@ -23,7 +21,7 @@ export function deviceRoutes(
 
   router.get('/devices/:id/frame', async (req, res) => {
     const id = req.params.id;
-    if (!DEVICE_ID.test(id)) {
+    if (!deviceIdSchema.safeParse(id).success) {
       res.status(400).json({ error: 'invalid device id' });
       return;
     }

@@ -83,3 +83,23 @@ test('/health reports a corrupt device store as unhealthy without modifying it',
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('/health reports a future device-store version as unsupported without modifying it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-health-future-'));
+  const configPath = join(dir, 'config.json');
+  const future = '{"schemaVersion":99,"devices":[],"futureFeature":true}\n';
+  try {
+    await writeFile(configPath, future, 'utf8');
+    const app = makeApp(undefined, new DeviceStore(configPath));
+
+    const response = await requestJson(app, '/health');
+    assert.equal(response.status, 503);
+    assert.equal(response.body.status, 'error');
+    assert.equal(response.body.code, 'config_unsupported_version');
+    assert.match(String(response.body.error), /newer InkPanel version/i);
+    assert.equal(response.body.backup, null);
+    assert.equal(await readFile(configPath, 'utf8'), future);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -97,6 +97,19 @@ test('rejects a non-URL calendar entry', async () => {
   });
 });
 
+test('rejects an invalid IANA timezone', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const res = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ timezone: 'Not/A_Timezone' }),
+    });
+    assert.equal(res.status, 400);
+    assert.equal((await store.get('esp32-1'))?.timezone, 'Europe/London');
+  });
+});
+
 test('serves preview HTML and a PNG of the real output', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');
