@@ -142,7 +142,7 @@ current_head() {
 dependency_inputs() {
   local commit="$1" path blob
   for path in package.json package-lock.json; do
-    blob="$(runuser -u "$APP" -- git rev-parse "${commit}:${path}" 2>/dev/null || true)"
+    blob="$(runuser -u "$APP" -- git rev-parse --verify "${commit}:${path}" 2>/dev/null || true)"
     printf '%s=%s\n' "$path" "${blob:-missing}"
   done
 }
