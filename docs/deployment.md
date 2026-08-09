@@ -26,7 +26,7 @@ firmware toolchain the installer sets up alongside Node and Chromium, so the
 Override any of them:
 
 ```bash
-CTID=910 CT_HOSTNAME=inkpanel RAM=2048 STORAGE=local-lvm BRIDGE=vmbr1 \
+CTID=910 CT_HOSTNAME=inkpanel RAM=2048 STORAGE=local-lvm BRIDGE=vmbr1 HTTPS_PORT=9443 \
   bash -c "$(curl -fsSL .../inkpanel-lxc.sh)"
 ```
 
@@ -48,7 +48,7 @@ so that reading it is practical.
 ```bash
 pct exec <CTID> -- journalctl -u inkpanel -f                # logs
 pct exec <CTID> -- systemctl restart inkpanel               # restart
-nano /opt/inkpanel/inkpanel.env                             # PUBLIC_BASE_URL
+nano /opt/inkpanel/inkpanel.env                             # PUBLIC_BASE_URL / HTTPS_PORT
 ```
 
 To update:
@@ -109,6 +109,9 @@ not recursive, so the app checkout and data directory remain `inkpanel`-owned.
 Fresh installs enforce the same boundary: `/opt/inkpanel` is `root:root` mode
 `0755`, while `app`, `data`, `.cache`, `.npm`, and `.arduino15` beneath it are
 owned by `inkpanel`.
+The installer validates `HTTPS_PORT` (default `8443`) and writes it to the
+root-owned `inkpanel.env` consumed by the service. Panels continue to use the
+plain-HTTP `PUBLIC_BASE_URL`; HTTPS is browser-only for WebSerial.
 The live `/opt/inkpanel/app` HEAD and worktree remain unchanged until the new
 transactional updater captures the true `COMMIT_BEFORE` and performs the pull.
 This promotion is deliberately manual: the unprivileged application can ask
@@ -121,6 +124,9 @@ for an update, but cannot choose new root-executed code.
 3. Clone this repo and `docker compose up -d`.
 4. Set `PUBLIC_BASE_URL` in `docker-compose.yml` to the address panels reach the
    host on, for example `http://192.168.1.20:8080`.
+5. To use a non-default browser HTTPS port, set `HTTPS_PORT=9443` in the Compose
+   environment before `docker compose up -d`. Compose publishes and passes the
+   same value to InkPanel; HTTP port 8080 is unchanged.
 
 An unprivileged LXC is fine. Chromium runs with `--no-sandbox`, which is
 acceptable here because it only ever loads HTML this service generated itself —
@@ -130,6 +136,19 @@ it never visits the open web.
 address, which inside a container is the bridge network address and usually not
 reachable from your LAN. That address gets printed on the enrolment screen, so a
 wrong value means a panel telling you to visit somewhere that does not exist.
+
+InkPanel generates a self-signed browser certificate containing `localhost`,
+`127.0.0.1`, the detected LAN address, the valid host/IP from
+`PUBLIC_BASE_URL`, and the machine/container hostname. The certificate is
+reused while it covers all currently required identities. If an address or
+hostname changes, it is regenerated once. Existing installations upgrading
+from the old localhost-only certificate will therefore see one new browser
+warning when the corrected certificate is first generated. It remains
+self-signed, so the initial trust warning is expected even when its SANs match.
+
+An invalid `HTTPS_PORT` disables only optional browser HTTPS and is reported in
+the service log and `/api/runtime-config`; the plain HTTP panel/device service
+continues running. Use an integer from 1 through 65535 and restart the service.
 
 ## TrueNAS
 

@@ -34,6 +34,8 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
+  /** Resolved once by the server; null means optional HTTPS is disabled. */
+  httpsPort: number | null;
   /** Where device config and caches live; used to report free disk space. */
   dataDir: string;
   /** Where build-firmware.sh wrote its output. */
@@ -87,6 +89,13 @@ export function createApp(deps: AppDeps): express.Express {
     }
 
     res.json({ status: 'ok', devices, uptimeSeconds });
+  });
+
+  // The plain-HTTP Flash page needs this before WebSerial is available, so it
+  // is intentionally public and mounted before the authenticated API gate.
+  app.get('/api/runtime-config', (_req, res) => {
+    res.set('cache-control', 'no-store');
+    res.json({ httpsPort: deps.httpsPort });
   });
 
   const auth = createAuth(deps.auth);

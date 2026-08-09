@@ -9,7 +9,6 @@ import { getJson } from './api.js';
 import { esc } from './components.js';
 import { addFlashProvisioning } from './flashProvisioningImage.js';
 
-const HTTPS_PORT = 8443;
 const USB_BAUD = 115200;
 const PROVISION_READY = 'INKPANEL_READY_V1';
 const PROVISION_SAVED = 'INKPANEL_SAVED_V1';
@@ -21,10 +20,13 @@ export function serialSupported() {
   return 'serial' in navigator;
 }
 
-export function httpsUrl() {
-  const url = new URL(window.location.href);
+export function httpsUrl(httpsPort, href = window.location.href) {
+  if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
+    throw new Error('The server did not provide a valid HTTPS port.');
+  }
+  const url = new URL(href);
   url.protocol = 'https:';
-  url.port = String(HTTPS_PORT);
+  url.port = String(httpsPort);
   return url.toString();
 }
 
@@ -42,14 +44,17 @@ function looksLikeChromiumFamily() {
   return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
 }
 
-export function unsupportedNotice() {
+export function unsupportedNotice(httpsPort) {
   if (window.isSecureContext === false && looksLikeChromiumFamily()) {
-    const target = httpsUrl();
+    const hasPort = Number.isInteger(httpsPort) && httpsPort >= 1 && httpsPort <= 65535;
+    const link = hasPort
+      ? `<p><a href="${esc(httpsUrl(httpsPort))}">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
+      : `<p class="notice">InkPanel could not load its secure-connection settings. Reload this page or check the server logs; no HTTPS address has been guessed.</p>`;
     return `<div class="card">
       <h3>Flashing needs a secure connection</h3>
       <p>Browsers only allow USB access over HTTPS. This page is on plain HTTP,
          so the flashing tools are unavailable here.</p>
-      <p><a href="${esc(target)}">Open inkpanel over HTTPS</a> and come back to this tab.</p>
+      ${link}
       <p class="meta">The certificate is self-signed, so your browser will warn you once.
          That is expected on a local network.</p>
     </div>`;
@@ -428,7 +433,19 @@ function newBoardConfigFromUi(root) {
 
 export async function renderFlash(root) {
   if (!serialSupported()) {
-    root.innerHTML = unsupportedNotice();
+    let httpsPort;
+    if (window.isSecureContext === false && looksLikeChromiumFamily()) {
+      try {
+        const runtime = await getJson('/api/runtime-config');
+        if (Number.isInteger(runtime?.httpsPort) &&
+            runtime.httpsPort >= 1 && runtime.httpsPort <= 65535) {
+          httpsPort = runtime.httpsPort;
+        }
+      } catch {
+        // The notice below explains that no secure URL could be determined.
+      }
+    }
+    root.innerHTML = unsupportedNotice(httpsPort);
     return;
   }
 

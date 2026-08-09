@@ -107,16 +107,27 @@ test('serialSupported reads navigator.serial, not just truthiness of navigator',
   });
 });
 
-test('httpsUrl swaps to https and port 8443 but keeps host, path and hash', async () => {
-  await withWindow({ location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
-    assert.equal(httpsUrl(), 'https://192.168.1.50:8443/#flash');
+test('httpsUrl uses the server port and preserves pathname, query and hash', async () => {
+  await withWindow({ location: { href: 'http://192.168.1.50:8080/manage?mode=new#flash' } }, () => {
+    assert.equal(httpsUrl(9443), 'https://192.168.1.50:9443/manage?mode=new#flash');
   });
 });
 
 test('httpsUrl works from localhost too, for the case the link is copy-pasted', async () => {
   await withWindow({ location: { href: 'http://localhost:8080/#flash' } }, () => {
-    assert.equal(httpsUrl(), 'https://localhost:8443/#flash');
+    assert.equal(httpsUrl(9443), 'https://localhost:9443/#flash');
   });
+});
+
+test('httpsUrl rejects missing or invalid server ports instead of producing null/NaN URLs', () => {
+  for (const port of [undefined, null, NaN, 0, 65536, 9443.5]) {
+    assert.throws(() => httpsUrl(port, 'http://192.168.1.50:8080/#flash'), /valid HTTPS port/);
+  }
+});
+
+test('flash.js contains no independent production HTTPS default', async () => {
+  const source = await readFile(FLASH_JS_PATH, 'utf8');
+  assert.doesNotMatch(source, /const\s+HTTPS_PORT\s*=\s*8443/);
 });
 
 // This is the distinction the whole task exists to get right: an insecure
@@ -127,9 +138,9 @@ test('httpsUrl works from localhost too, for the case the link is copy-pasted', 
 test('an insecure HTTP context on a Chromium browser gets the HTTPS-redirect notice, never the unsupported-browser notice', async () => {
   await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
-      const html = unsupportedNotice();
+      const html = unsupportedNotice(9443);
       assert.equal(occurrences(html, '<h3>Flashing needs a secure connection</h3>'), 1);
-      assert.equal(occurrences(html, '<a href="https://192.168.1.50:8443/#flash">Open inkpanel over HTTPS</a>'), 1);
+      assert.equal(occurrences(html, '<a href="https://192.168.1.50:9443/#flash">Open inkpanel over HTTPS</a>'), 1);
       assert.equal(occurrences(html, 'This browser cannot flash boards'), 0);
     }),
   );
@@ -170,9 +181,9 @@ test('the HTTPS notice link target is escaped rather than interpolated raw', asy
     withWindow(
       { isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash&reload=1' } },
       () => {
-        const html = unsupportedNotice();
-        assert.equal(occurrences(html, 'href="https://192.168.1.50:8443/#flash&amp;reload=1"'), 1);
-        assert.equal(html.includes('href="https://192.168.1.50:8443/#flash&reload=1"'), false);
+        const html = unsupportedNotice(9443);
+        assert.equal(occurrences(html, 'href="https://192.168.1.50:9443/#flash&amp;reload=1"'), 1);
+        assert.equal(html.includes('href="https://192.168.1.50:9443/#flash&reload=1"'), false);
       },
     ),
   );
@@ -230,13 +241,38 @@ test('renderFlash shows the unsupported-browser notice and never calls the manif
 // origin is not a secure context, so the fix is the HTTPS link.
 test('renderFlash shows the HTTPS-redirect notice when a Chromium browser lacks serial because the page is on plain HTTP', async () => {
   await withNavigator({ userAgent: CHROME_UA }, () =>
-    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, async () => {
-      const root = { innerHTML: '' };
-      await renderFlash(root);
-      assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 1);
-      assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:8443/#flash'), 1);
-      assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 0);
-    }),
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/path?q=1#flash' } }, () =>
+      withFetch(
+        async (path) => {
+          assert.equal(path, '/api/runtime-config');
+          return { status: 200, ok: true, json: async () => ({ httpsPort: 9443 }) };
+        },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 1);
+          assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:9443/path?q=1#flash'), 1);
+          assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 0);
+        },
+      ),
+    ),
+  );
+});
+
+test('runtime-config failure shows no guessed HTTPS port', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () =>
+      withFetch(
+        async () => { throw new Error('runtime config unavailable'); },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.equal(occurrences(root.innerHTML, 'no HTTPS address has been guessed'), 1);
+          assert.equal(occurrences(root.innerHTML, '8443'), 0);
+          assert.equal(occurrences(root.innerHTML, '<a href'), 0);
+        },
+      ),
+    ),
   );
 });
 

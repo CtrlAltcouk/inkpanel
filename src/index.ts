@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { networkInterfaces } from 'node:os';
+import { hostname, networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './http/app.ts';
@@ -9,6 +9,7 @@ import { DeviceStore } from './devices/store.ts';
 import { FrameService } from './render/frameService.ts';
 import { Renderer } from './render/browser.ts';
 import { SourceCache } from './sources/cache.ts';
+import { resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
 
@@ -42,7 +43,9 @@ export async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8080);
   const dataDir = resolve(process.env.DATA_DIR ?? './data');
   const firmwareDir = resolve(process.env.FIRMWARE_DIR ?? './firmware/dist');
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${lanAddress()}:${port}`;
+  const detectedLanAddress = lanAddress();
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${detectedLanAddress}:${port}`;
+  const resolvedHttps = resolveHttpsPort(process.env.HTTPS_PORT);
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
   const renderer = new Renderer();
@@ -53,7 +56,8 @@ export async function main(): Promise<void> {
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
   const app = createApp({
-    store, frames, publicBaseUrl, dataDir, firmwareDir, auth: { password, secret }, trustProxy,
+    store, frames, publicBaseUrl, httpsPort: resolvedHttps.httpsPort,
+    dataDir, firmwareDir, auth: { password, secret }, trustProxy,
   });
   const server = app.listen(port, () => {
     console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
@@ -65,13 +69,22 @@ export async function main(): Promise<void> {
   // an ESP32 cannot do over a self-signed cert anyway. This second listener
   // exists so the browser will expose WebSerial, which requires a secure
   // context — see docs/superpowers/specs/2026-08-06-inkpanel-web-flash-design.md.
-  const httpsPort = Number(process.env.HTTPS_PORT ?? 8443);
-  const httpsServer = await startHttpsListener(app, { dataDir, port: httpsPort });
-  console.log(
+  const httpsServer = resolvedHttps.httpsPort === null
+    ? null
+    : await startHttpsListener(app, {
+      dataDir,
+      port: resolvedHttps.httpsPort,
+      identities: { lanAddress: detectedLanAddress, publicBaseUrl, hostname: hostname() },
+    });
+  if (resolvedHttps.error) {
+    console.error(`https disabled: ${resolvedHttps.error}; plain HTTP remains available`);
+  } else {
+    console.log(
     httpsServer
-      ? `https listening on https://${lanAddress()}:${httpsPort} (self-signed; needed for the Flash tab)`
+      ? `https listening on https://${detectedLanAddress}:${resolvedHttps.httpsPort} (self-signed; needed for the Flash tab)`
       : 'https disabled: could not generate a certificate (openssl missing?) — flashing will be unavailable',
-  );
+    );
+  }
 
   // Launch Chromium now rather than making the first device wait for it. A cold
   // launch on a modest container can exceed a panel's HTTP read timeout.

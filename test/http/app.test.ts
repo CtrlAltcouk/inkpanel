@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
+import { resolveHttpsPort } from '../../src/runtimeConfig.ts';
 
 const frames = {
   warmUp: async () => {}, sourceIssues: () => [], renderedDeviceCount: () => 0,
@@ -18,17 +19,30 @@ function makeApp(
   trustProxy?: boolean | number | string,
   store: DeviceStore = new DeviceStore(join('unused', 'config.json')),
   frameService: FrameService = frames,
+  httpsPort: number | null = 8443,
+  password: string | null = null,
 ) {
   return createApp({
     store,
     frames: frameService,
     publicBaseUrl: 'http://test:8080',
+    httpsPort,
     dataDir: 'unused',
     firmwareDir: 'unused',
-    auth: { password: null, secret: randomBytes(32) },
+    auth: { password, secret: randomBytes(32) },
     trustProxy,
   });
 }
+
+test('/api/runtime-config reports the resolved HTTPS port before the auth gate', async () => {
+  const configuredPort = resolveHttpsPort('9443').httpsPort;
+  const app = makeApp(undefined, undefined, frames, configuredPort, 'hunter2');
+  const response = await requestJson(app, '/api/runtime-config');
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, { httpsPort: 9443 });
+  assert.equal((await requestJson(app, '/api/devices')).status, 401,
+    'the password must genuinely be enabled while runtime config remains public');
+});
 
 async function requestJson(app: ReturnType<typeof createApp>, path: string) {
   const server = app.listen(0, '127.0.0.1');

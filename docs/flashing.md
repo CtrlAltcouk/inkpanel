@@ -81,12 +81,19 @@ its panel-facing listener on HTTP port 8080 and provides an HTTPS listener for
 the management/Flash UI, normally:
 
 ```text
-https://<your-server-ip>:8443/#flash
+https://<your-server-ip>:<HTTPS_PORT>/#flash
 ```
 
-The locally generated certificate is self-signed, so the browser may show a
-one-time warning. Panels continue using plain HTTP on port 8080 and never need
-to trust this browser certificate.
+`HTTPS_PORT` defaults to `8443` and can be changed in `inkpanel.env` or the
+Docker Compose environment. The HTTP Flash page obtains the effective port
+from the server, so its secure-connection link stays correct after a change.
+
+The locally generated certificate includes the detected LAN IP and the valid
+host/IP from `PUBLIC_BASE_URL`, but it is still self-signed, so the browser may
+show a trust warning. Panels continue using plain HTTP on port 8080 and never
+need to trust this browser certificate. An existing installation upgrading
+from the older localhost-only certificate may show one new warning when the
+corrected certificate is generated.
 
 Use a Chromium-family browser with WebSerial such as Chrome or Edge.
 
@@ -279,5 +286,5 @@ failed write does not permanently brick the board. Retry through WebFlash.
 Run `./scripts/build-firmware.sh`.
 
 **There is no Flash control.**  
-Use `https://…:8443`, not the plain HTTP panel endpoint, and use a Chromium
+Use `https://…:<HTTPS_PORT>`, not the plain HTTP panel endpoint, and use a Chromium
 browser with WebSerial support.

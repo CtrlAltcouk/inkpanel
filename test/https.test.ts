@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { X509Certificate } from 'node:crypto';
 import {
-  mkdtemp, stat, rm, mkdir, writeFile,
+  chmod, mkdtemp, stat, rm, mkdir, readFile, writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,9 @@ import { get, type Server } from 'node:https';
 import { get as httpGet, type Server as HttpServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import express from 'express';
-import { ensureCertificate, startHttpsListener } from '../src/https.ts';
+import {
+  deriveCertificateIdentities, ensureCertificate, startHttpsListener,
+} from '../src/https.ts';
 import { createApp } from '../src/http/app.ts';
 import { DeviceStore } from '../src/devices/store.ts';
 import type { FrameService } from '../src/render/frameService.ts';
@@ -60,6 +63,27 @@ test('generates a certificate and key on first call', async () => {
     if (result === null) return; // openssl unavailable — covered by its own test
     assert.ok(result.cert.includes('BEGIN CERTIFICATE'));
     assert.ok(result.key.length > 0);
+    const certificate = new X509Certificate(result.cert);
+    assert.equal(certificate.checkHost('localhost'), 'localhost');
+    assert.equal(certificate.checkIP('127.0.0.1'), '127.0.0.1');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('generated certificate covers supplied LAN IP and configured DNS hostname', async () => {
+  const dir = await tempDir();
+  try {
+    const result = await ensureCertificate(dir, {
+      lanAddress: '192.168.1.50',
+      publicBaseUrl: 'http://inkpanel.local:8080',
+      hostname: 'inkpanel',
+    });
+    if (result === null) return;
+    const certificate = new X509Certificate(result.cert);
+    assert.equal(certificate.checkIP('192.168.1.50'), '192.168.1.50');
+    assert.equal(certificate.checkHost('inkpanel.local'), 'inkpanel.local');
+    assert.equal(certificate.checkHost('inkpanel'), 'inkpanel');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -70,13 +94,92 @@ test('reuses an existing certificate rather than regenerating it', async () => {
   // every restart, training the user to click through it without reading.
   const dir = await tempDir();
   try {
-    const first = await ensureCertificate(dir);
+    const sources = { lanAddress: '192.168.1.50', publicBaseUrl: 'http://inkpanel.local:8080' };
+    const first = await ensureCertificate(dir, sources);
     if (first === null) return;
-    const second = await ensureCertificate(dir);
+    const second = await ensureCertificate(dir, sources);
     assert.ok(second !== null);
     assert.deepEqual(first.cert, second?.cert, 'the certificate must be stable across restarts');
     assert.deepEqual(first.key, second?.key, 'the key must be stable across restarts');
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('adding a newly required LAN IP regenerates the certificate once', async () => {
+  const dir = await tempDir();
+  try {
+    const first = await ensureCertificate(dir);
+    if (first === null) return;
+    const second = await ensureCertificate(dir, { lanAddress: '192.168.1.77' });
+    assert.ok(second !== null);
+    assert.notDeepEqual(second?.cert, first.cert);
+    assert.equal(new X509Certificate(second!.cert).checkIP('192.168.1.77'), '192.168.1.77');
+    const third = await ensureCertificate(dir, { lanAddress: '192.168.1.77' });
+    assert.deepEqual(third?.cert, second?.cert, 'the corrected certificate must then stay stable');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('PUBLIC_BASE_URL IP identities are validated and deduplicated', () => {
+  const identities = deriveCertificateIdentities({
+    lanAddress: '192.168.1.50',
+    publicBaseUrl: 'https://192.168.1.50:9443/flash?device=kitchen',
+  });
+  assert.deepEqual(identities, [
+    { type: 'DNS', value: 'localhost' },
+    { type: 'IP', value: '127.0.0.1' },
+    { type: 'IP', value: '192.168.1.50' },
+  ]);
+});
+
+test('malformed identity inputs cannot inject OpenSSL SAN entries', () => {
+  const identities = deriveCertificateIdentities({
+    lanAddress: '192.168.1.50,IP:10.0.0.1',
+    publicBaseUrl: 'http://good.example:8080',
+    hostname: 'inkpanel\nsubjectAltName=IP:10.0.0.1',
+  });
+  assert.deepEqual(identities, [
+    { type: 'DNS', value: 'localhost' },
+    { type: 'IP', value: '127.0.0.1' },
+    { type: 'DNS', value: 'good.example' },
+  ]);
+});
+
+test('OpenSSL generation uses execFile arguments and never a shell', async () => {
+  const source = await readFile(new URL('../src/https.ts', import.meta.url), 'utf8');
+  assert.match(source, /import \{ execFile \} from 'node:child_process'/);
+  assert.match(source, /await run\('openssl', \[/);
+  assert.doesNotMatch(source, /shell\s*:\s*true|\bexec\(/);
+});
+
+test('malformed existing PEM is replaced when generation succeeds', async () => {
+  const dir = await tempDir();
+  try {
+    await writeFile(join(dir, 'tls-cert.pem'), 'not a real certificate');
+    await writeFile(join(dir, 'tls-key.pem'), 'not a real key');
+    const result = await ensureCertificate(dir, { lanAddress: '192.168.1.50' });
+    if (result === null) return;
+    assert.equal(new X509Certificate(result.cert).checkIP('192.168.1.50'), '192.168.1.50');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed regeneration preserves an otherwise usable certificate and key', async () => {
+  const dir = await tempDir();
+  const originalPath = process.env.PATH;
+  try {
+    const first = await ensureCertificate(dir);
+    if (first === null) return;
+    process.env.PATH = join(dir, 'no-tools');
+    const fallback = await ensureCertificate(dir, { lanAddress: '192.168.1.99' });
+    assert.deepEqual(fallback, first);
+    assert.deepEqual(await readFile(join(dir, 'tls-cert.pem')), first.cert);
+    assert.deepEqual(await readFile(join(dir, 'tls-key.pem')), first.key);
+  } finally {
+    process.env.PATH = originalPath;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -87,6 +190,20 @@ test('the private key is not world-readable', { skip: process.platform === 'win3
     if ((await ensureCertificate(dir)) === null) return;
     const mode = (await stat(join(dir, 'tls-key.pem'))).mode & 0o777;
     assert.equal(mode, 0o600, `key mode was ${mode.toString(8)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('reusing a certificate tightens a loose private-key mode', { skip: process.platform === 'win32' }, async () => {
+  const dir = await tempDir();
+  try {
+    const first = await ensureCertificate(dir);
+    if (first === null) return;
+    await chmod(join(dir, 'tls-key.pem'), 0o644);
+    const reused = await ensureCertificate(dir);
+    assert.deepEqual(reused?.cert, first.cert);
+    assert.equal((await stat(join(dir, 'tls-key.pem'))).mode & 0o777, 0o600);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -198,37 +315,23 @@ test('startHttpsListener returns null and leaves the HTTP listener running when 
   }
 });
 
-test('startHttpsListener returns null rather than throwing when the cert/key on disk are malformed', async () => {
-  // Simulates an interrupted first boot, tampering, or disk corruption:
-  // ensureCertificate only checks the files exist and are readable, so
-  // garbage bytes come back as "material" and createServer() throws
-  // synchronously on invalid PEM content.
+test('startHttpsListener replaces malformed cert/key material when possible', async () => {
   const dir = await tempDir();
+  let server: Server | null = null;
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'tls-cert.pem'), 'not a real certificate');
     await writeFile(join(dir, 'tls-key.pem'), 'not a real key');
 
     const app = express();
-    const server = await startHttpsListener(app, { dataDir: dir, port: 0 });
-    assert.equal(server, null, 'malformed PEM must degrade to null, not crash the process');
-
-    // Prove the process is still alive: a normal HTTP server can still be
-    // started and answers, which would be impossible after an uncaught
-    // synchronous throw from createServer() took the runtime down.
-    const httpApp = express();
-    httpApp.get('/health', (_req, res) => res.json({ status: 'ok' }));
-    const httpServer = httpApp.listen(0);
-    await new Promise<void>((resolve) => httpServer.once('listening', resolve));
-    const port = (httpServer.address() as AddressInfo).port;
-    try {
-      const { status, body } = await getPlainJson(port, '/health');
-      assert.equal(status, 200);
-      assert.deepEqual(body, { status: 'ok' });
-    } finally {
-      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-    }
+    server = await startHttpsListener(app, {
+      dataDir: dir, port: 0, identities: { lanAddress: '192.168.1.50' },
+    });
+    if (server === null) return;
+    const certificate = new X509Certificate(await readFile(join(dir, 'tls-cert.pem')));
+    assert.equal(certificate.checkIP('192.168.1.50'), '192.168.1.50');
   } finally {
+    await closeServer(server);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -272,6 +375,7 @@ test('the frame endpoint and health stay open over HTTPS even with a password se
       store,
       frames,
       publicBaseUrl: 'https://test:8443',
+      httpsPort: 8443,
       dataDir: dir,
       firmwareDir: dir,
       auth: { password: 'hunter2', secret: Buffer.from('a'.repeat(64), 'hex') },
