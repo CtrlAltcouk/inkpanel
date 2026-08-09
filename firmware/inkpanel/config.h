@@ -33,11 +33,13 @@ constexpr uint8_t  WIFI_ATTEMPTS = 2;
 // container can take longer than a panel expects a web request to.
 constexpr uint32_t HTTP_TIMEOUT_MS = 45'000;
 
-// Used only when the server is unreachable and cannot dictate a schedule.
+// Used when a wake cycle cannot complete successfully. Wi-Fi, frame-fetch and
+// display-refresh failures share the same RTC-persisted exponential streak so
+// repeated hardware faults back off instead of following the normal schedule.
 constexpr uint32_t FALLBACK_WAKE_SECONDS = 900;
 constexpr uint32_t MAX_BACKOFF_SECONDS = 3600;
 
 // Bumped whenever behaviour visible on the physical panel changes. Keeping
 // this distinct makes serial output a quick proof that WebFlash served the
 // build we intended rather than a stale firmware/dist package.
-constexpr const char* FIRMWARE_VERSION = "0.1.3";
+constexpr const char* FIRMWARE_VERSION = "0.1.4";
