@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, symlink, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,5 +104,26 @@ test('a missing log file yields an empty log rather than throwing', async () => 
     ]);
     const status = await readStatus(statusFile);
     assert.deepEqual(status.log, []);
+  });
+});
+
+test('publishing status replaces a symlink instead of following it', {
+  skip: process.platform === 'win32' ? 'InkPanel deploys this POSIX boundary on Linux' : false,
+}, async () => {
+  await withTempDir(async (dir) => {
+    const logFile = join(dir, 'log.txt');
+    const statusFile = join(dir, 'status.json');
+    const sentinel = join(dir, 'protected-sentinel.txt');
+    const original = Buffer.from('protected bytes\n');
+    await writeFile(logFile, 'safe log\n');
+    await writeFile(sentinel, original);
+    await symlink(sentinel, statusFile);
+
+    await run('node', [
+      SCRIPT, 'running', '', logFile, statusFile, '2026-08-04T09:00:00.000Z',
+    ]);
+
+    assert.deepEqual(await readFile(sentinel), original);
+    assert.equal((await readStatus(statusFile)).state, 'running');
   });
 });

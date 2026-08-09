@@ -10,15 +10,18 @@ import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
 
-const frames = { sourceIssues: () => [], renderedDeviceCount: () => 0 } as unknown as FrameService;
+const frames = {
+  warmUp: async () => {}, sourceIssues: () => [], renderedDeviceCount: () => 0,
+} as unknown as FrameService;
 
 function makeApp(
   trustProxy?: boolean | number | string,
   store: DeviceStore = new DeviceStore(join('unused', 'config.json')),
+  frameService: FrameService = frames,
 ) {
   return createApp({
     store,
-    frames,
+    frames: frameService,
     publicBaseUrl: 'http://test:8080',
     dataDir: 'unused',
     firmwareDir: 'unused',
@@ -67,9 +70,14 @@ test('/health reports a corrupt device store as unhealthy without modifying it',
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-health-'));
   const configPath = join(dir, 'config.json');
   const corrupt = '{ definitely not json';
+  let rendererCalls = 0;
   try {
     await writeFile(configPath, corrupt, 'utf8');
-    const app = makeApp(undefined, new DeviceStore(configPath));
+    const app = makeApp(undefined, new DeviceStore(configPath), {
+      warmUp: async () => { rendererCalls += 1; throw new Error('must not mask store failure'); },
+      sourceIssues: () => [],
+      renderedDeviceCount: () => 0,
+    } as unknown as FrameService);
 
     const response = await requestJson(app, '/health');
     assert.equal(response.status, 503);
@@ -78,6 +86,7 @@ test('/health reports a corrupt device store as unhealthy without modifying it',
     assert.equal(response.body.code, 'config_corrupt');
     assert.equal(response.body.devices, null);
     assert.equal(typeof response.body.backup, 'string');
+    assert.equal(rendererCalls, 0, 'DeviceStore failure keeps precedence over renderer readiness');
     assert.equal(await readFile(configPath, 'utf8'), corrupt, 'health checks must be non-destructive');
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -102,4 +111,28 @@ test('/health reports a future device-store version as unsupported without modif
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('/health reports renderer launch failure and a later retry can recover', async () => {
+  let attempts = 0;
+  const recoveringFrames = {
+    warmUp: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('chromium launch failed');
+    },
+    sourceIssues: () => [],
+    renderedDeviceCount: () => 0,
+  } as unknown as FrameService;
+  const app = makeApp(undefined, new DeviceStore(join('unused', 'config.json')), recoveringFrames);
+
+  const failed = await requestJson(app, '/health');
+  assert.equal(failed.status, 503);
+  assert.equal(failed.body.status, 'error');
+  assert.equal(failed.body.component, 'renderer');
+  assert.match(String(failed.body.error), /chromium launch failed/);
+
+  const recovered = await requestJson(app, '/health');
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.body.status, 'ok');
+  assert.equal(attempts, 2);
 });

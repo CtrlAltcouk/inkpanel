@@ -188,9 +188,27 @@ step "creating service user"
 run "id -u ${APP} >/dev/null 2>&1 || useradd --system --create-home --home-dir ${APP_DIR} --shell /usr/sbin/nologin ${APP}"
 
 step "cloning ${REPO_URL} (${BRANCH})"
-run "rm -rf ${APP_DIR}/app
-     git clone --depth 1 --branch ${BRANCH} ${REPO_URL} ${APP_DIR}/app >/dev/null 2>&1
-     chown -R ${APP}:${APP} ${APP_DIR}"
+run "chown root:root ${APP_DIR}
+     chmod 755 ${APP_DIR}
+     rm -rf ${APP_DIR}/app
+     git clone --depth 1 --branch ${BRANCH} ${REPO_URL} ${APP_DIR}/app >/dev/null 2>&1"
+
+# Install the privileged update boundary while the fresh clone is still owned
+# exclusively by root. Once ownership passes to inkpanel below, nothing in the
+# app checkout is ever promoted into /usr/local/bin or /etc/systemd/system.
+# Existing LXCs receive helper upgrades only through an explicit administrator
+# command, never as a side effect of the unprivileged self-update.
+step "installing root-owned update helper"
+run "install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update /usr/local/bin/inkpanel-update
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/write-status.mjs /usr/local/bin/write-status.mjs
+     chown root:root /usr/local/bin/inkpanel-update /usr/local/bin/write-status.mjs
+     chmod 755 /usr/local/bin/inkpanel-update
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.path /etc/systemd/system/inkpanel-update.path
+     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.service /etc/systemd/system/inkpanel-update.service
+     mkdir -p ${APP_DIR}/data ${APP_DIR}/.cache ${APP_DIR}/.npm ${APP_DIR}/.arduino15
+     chown -R ${APP}:${APP} ${APP_DIR}/app ${APP_DIR}/data ${APP_DIR}/.cache ${APP_DIR}/.npm ${APP_DIR}/.arduino15
+     chown root:root ${APP_DIR}
+     chmod 755 ${APP_DIR}"
 
 step "npm dependencies"
 run "cd ${APP_DIR}/app && runuser -u ${APP} -- npm ci --omit=dev --silent >/dev/null 2>&1"
@@ -306,25 +324,16 @@ PUBLIC_BASE_URL=http://${CT_IP}:${APP_PORT}
 # guards against casual access, not against anyone capturing packets.
 #INKPANEL_PASSWORD=change-me
 ENVFILE
-chown ${APP}:${APP} ${APP_DIR}/${APP}.env"
+chown root:${APP} ${APP_DIR}/${APP}.env
+chmod 640 ${APP_DIR}/${APP}.env
+chown root:root ${APP_DIR}
+chmod 755 ${APP_DIR}"
 
 run "systemctl daemon-reload && systemctl enable --now ${APP}.service >/dev/null 2>&1"
 
-# The update script and units are copied from the repo the container just
-# cloned, so they stay in step with the application rather than being
-# duplicated inside this installer.
-#
-# write-status.mjs must land beside the updater: the script resolves it via
-# ${BASH_SOURCE[0]}, so a missing or misplaced copy breaks every update at
-# runtime with nothing but an ENOENT in the journal.
-step "installing update units"
-run "install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update /usr/local/bin/inkpanel-update
-     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/write-status.mjs /usr/local/bin/write-status.mjs
-     chown root:root /usr/local/bin/inkpanel-update /usr/local/bin/write-status.mjs
-     chmod 755 /usr/local/bin/inkpanel-update
-     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.path /etc/systemd/system/inkpanel-update.path
-     install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.service /etc/systemd/system/inkpanel-update.service
-     systemctl daemon-reload
+# The trusted helper and units were installed before the ownership handoff.
+step "enabling update path unit"
+run "systemctl daemon-reload
      systemctl enable --now inkpanel-update.path >/dev/null 2>&1"
 
 step "waiting for service"

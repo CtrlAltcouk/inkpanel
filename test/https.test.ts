@@ -244,6 +244,7 @@ const frames = {
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-04T00:00:00.000Z' }),
   sourceIssues: () => [],
   renderedDeviceCount: () => 0,
+  warmUp: async () => {},
 } as unknown as FrameService;
 
 /** Request over real TLS, accepting the self-signed cert for this call only. */

@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 const run = promisify(execFile);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UPDATER = join(root, 'scripts', 'proxmox', 'files', 'inkpanel-update');
+const BASH = process.env.TEST_BASH ?? 'bash';
+const bashPath = (path: string) => path
+  .replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`)
+  .replace(/\\/g, '/');
 const WRITE_STATUS = join(root, 'scripts', 'proxmox', 'files', 'write-status.mjs');
 
 /**
@@ -31,8 +35,14 @@ async function makeStubBin(dir: string): Promise<string> {
     join(bin, 'systemctl'),
     '#!/usr/bin/env bash\necho "systemctl $*" >> "$SYSTEMCTL_LOG"\nexit 0\n',
   );
+  await writeFile(join(bin, 'curl'), '#!/usr/bin/env bash\nprintf 200\n');
+  await writeFile(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n');
+  await writeFile(join(bin, 'chown'), '#!/usr/bin/env bash\nexit 0\n');
   await chmod(join(bin, 'runuser'), 0o755);
   await chmod(join(bin, 'systemctl'), 0o755);
+  await chmod(join(bin, 'curl'), 0o755);
+  await chmod(join(bin, 'sleep'), 0o755);
+  await chmod(join(bin, 'chown'), 0o755);
   return bin;
 }
 
@@ -83,7 +93,12 @@ async function setupFixture(dir: string): Promise<Fixture> {
 
   const updaterScript = join(dir, 'inkpanel-update');
   let script = await readFile(UPDATER, 'utf8');
-  script = script.replace('APP_DIR=/opt/inkpanel', `APP_DIR=${appDir.replace(/\\/g, '/')}`);
+  script = script.replace('APP_DIR=/opt/inkpanel', `APP_DIR=${bashPath(appDir)}`);
+  script = script.replace(
+    'TRANSACTION_ROOT=/var/lib/inkpanel-update',
+    `TRANSACTION_ROOT=${bashPath(join(dir, 'transaction-state'))}`,
+  );
+  script = script.replace('HEALTH_MAX_ATTEMPTS=45', 'HEALTH_MAX_ATTEMPTS=4');
   await writeFile(updaterScript, script);
   await chmod(updaterScript, 0o755);
   // write-status.mjs is resolved by the updater relative to its own
@@ -100,11 +115,15 @@ async function runUpdater(
   const stubbin = await makeStubBin(fixture.dir);
   let code = 0;
   try {
-    await run('bash', [fixture.updaterScript], {
+    await run(BASH, [fixture.updaterScript], {
       env: {
         ...process.env,
-        PATH: `${stubbin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
-        SYSTEMCTL_LOG: fixture.systemctlLog,
+        PATH: process.platform === 'win32'
+          ? `${bashPath(stubbin)}:/usr/bin:/bin`
+          : `${stubbin}:${process.env.PATH}`,
+        SYSTEMCTL_LOG: process.platform === 'win32'
+          ? bashPath(fixture.systemctlLog)
+          : fixture.systemctlLog,
         ...env,
       },
     });
@@ -139,7 +158,7 @@ test('a pull that touches firmware/ triggers a rebuild, and the update still suc
 
     const { code, status } = await runUpdater(fixture);
 
-    assert.equal(code, 0);
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success');
     assert.ok(
       status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
@@ -148,8 +167,8 @@ test('a pull that touches firmware/ triggers a rebuild, and the update still suc
     assert.ok(status.log.some((l) => /firmware rebuild: ok/.test(l)));
     await assert.doesNotReject(readFile(fixture.buildMarker, 'utf8'), 'build-firmware.sh must actually have run');
     assert.ok(
-      status.log.some((l) => l.includes('restart')),
-      'the service must still restart after a successful rebuild',
+      status.log.some((l) => l.includes('deploy candidate')),
+      'the service must still deploy after a successful rebuild',
     );
   });
 });
@@ -178,7 +197,7 @@ for (const changedFile of ['scripts/build-firmware.sh', 'scripts/firmware-manife
 
       const { code, status } = await runUpdater(fixture);
 
-      assert.equal(code, 0);
+      assert.equal(code, 0, status.log.join('\n'));
       assert.equal(status.state, 'success');
       assert.ok(
         status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
@@ -206,15 +225,15 @@ test('a failing firmware rebuild does NOT fail the update', async () => {
 
     const { code, status } = await runUpdater(fixture, { BUILD_EXIT_CODE: '1' });
 
-    assert.equal(code, 0, 'the updater process itself must exit 0');
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success', 'the update must still be recorded as successful');
     assert.ok(
       status.log.some((l) => /firmware rebuild: FAILED/.test(l)),
       'the failure must be visible in the log, not swallowed silently',
     );
     assert.ok(
-      status.log.some((l) => l.includes('restart')),
-      'the service must still restart even though the rebuild failed',
+      status.log.some((l) => l.includes('deploy candidate')),
+      'the service must still deploy even though the rebuild failed',
     );
   });
 });
@@ -227,7 +246,7 @@ test('a pull that does not touch firmware/ skips the rebuild entirely', async ()
 
     const { code, status } = await runUpdater(fixture);
 
-    assert.equal(code, 0);
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success');
     assert.ok(status.log.some((l) => /firmware rebuild skipped/.test(l)));
     await assert.rejects(
@@ -240,7 +259,7 @@ test('a pull that does not touch firmware/ skips the rebuild entirely', async ()
 test('the rebuild step in the updater is not wired to the fatal path', async () => {
   const script = await readFile(UPDATER, 'utf8');
   const start = script.indexOf('firmware rebuild (firmware inputs changed)');
-  const end = script.indexOf('echo "== restart =="');
+  const end = script.indexOf('log "== deploy candidate =="');
   assert.ok(start > -1 && end > start, 'could not locate the firmware rebuild block');
   const block = script.slice(script.lastIndexOf('\n', start), end);
 

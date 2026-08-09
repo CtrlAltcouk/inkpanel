@@ -16,6 +16,7 @@ const frames = {
   renderNow: async () => ({ buffer: Buffer.alloc(48000, 0), etag: 'e'.repeat(32), renderedAt: '2026-08-03T07:42:00.000Z' }),
   sourceIssues: () => [],
   renderedDeviceCount: () => 0,
+  warmUp: async () => {},
 } as unknown as FrameService;
 
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {

@@ -14,7 +14,16 @@
 // `node -e '...'` had no script-path slot in argv at all, so destructuring
 // as if index 1 were the script path silently shifted every field by one.)
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fchmodSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 
 const [state, error, logFile, statusFile, startedAt] = process.argv.slice(2);
 
@@ -25,10 +34,32 @@ try {
   // No log file yet (e.g. nothing has been written to it) — an empty log.
 }
 
-writeFileSync(statusFile, JSON.stringify({
+const body = JSON.stringify({
   state,
   startedAt,
   finishedAt: state === 'running' ? null : new Date().toISOString(),
   log,
   error: error || null,
-}, null, 2));
+}, null, 2);
+
+// The status directory and destination pathname are app-controlled. Publish a
+// new regular file from the same directory and atomically rename it over the
+// destination. POSIX rename replaces a symlink itself rather than following
+// its target; fchmod operates on the already-open descriptor, not a pathname.
+const tempFile = `${statusFile}.${process.pid}.${randomUUID()}.tmp`;
+let fd;
+try {
+  fd = openSync(tempFile, 'wx', 0o644);
+  writeFileSync(fd, body);
+  fchmodSync(fd, 0o644);
+  closeSync(fd);
+  fd = undefined;
+  renameSync(tempFile, statusFile);
+} finally {
+  if (fd !== undefined) closeSync(fd);
+  try {
+    unlinkSync(tempFile);
+  } catch {
+    // Already published, or creation itself failed.
+  }
+}

@@ -1,11 +1,52 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
+import type { Browser } from 'playwright';
 import { Renderer } from '../../src/render/browser.ts';
 import { WFT0583 } from '../../src/panel/profile.ts';
 
 const renderer = new Renderer();
 after(() => renderer.close());
+
+function fakeBrowser(): Browser {
+  return {
+    isConnected: () => true,
+    close: async () => {},
+  } as unknown as Browser;
+}
+
+test('concurrent cold warm-ups share one Chromium launch', async () => {
+  let launches = 0;
+  let release!: (browser: Browser) => void;
+  const launched = new Promise<Browser>((resolve) => { release = resolve; });
+  const concurrent = new Renderer(async () => {
+    launches += 1;
+    return launched;
+  });
+
+  const first = concurrent.warmUp();
+  const second = concurrent.warmUp();
+  await Promise.resolve();
+  assert.equal(launches, 1);
+  release(fakeBrowser());
+  await Promise.all([first, second]);
+  assert.equal(launches, 1);
+  await concurrent.close();
+});
+
+test('a failed cold launch clears the shared promise so a later call can retry', async () => {
+  let launches = 0;
+  const retrying = new Renderer(async () => {
+    launches += 1;
+    if (launches === 1) throw new Error('first launch failed');
+    return fakeBrowser();
+  });
+
+  await assert.rejects(retrying.warmUp(), /first launch failed/);
+  await assert.doesNotReject(retrying.warmUp());
+  assert.equal(launches, 2);
+  await retrying.close();
+});
 
 test('screenshots at exactly the profile size', async () => {
   const png = await renderer.screenshot('<html><body></body></html>', WFT0583);

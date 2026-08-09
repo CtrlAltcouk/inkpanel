@@ -61,6 +61,28 @@ test('the installer ships the update units and the password variable', async () 
   assert.match(installer, /chown root:root [^\n]*\/usr\/local\/bin\/inkpanel-update/);
   assert.match(installer, /chmod 755 [^\n]*\/usr\/local\/bin\/inkpanel-update/);
 
+  // A fresh install may copy privileged files only from the pristine,
+  // root-owned clone. The checkout becomes app-owned after every root-owned
+  // helper and unit has already been installed.
+  const rootOwnership = installer.indexOf('chown root:root ${APP_DIR}');
+  const clone = installer.indexOf('git clone --depth 1');
+  const helperInstall = installer.indexOf('install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update');
+  const appOwnership = installer.indexOf('chown -R ${APP}:${APP} ${APP_DIR}/app');
+  assert.ok(rootOwnership > -1 && rootOwnership < clone, 'the fresh checkout parent must be root-owned');
+  assert.ok(clone < helperInstall && helperInstall < appOwnership,
+    'privileged files must be installed before the checkout is handed to the app');
+  assert.doesNotMatch(installer, /chown\s+-R\s+\$\{APP\}:\$\{APP\}\s+\$\{APP_DIR\}(?:\s|$)/,
+    '/opt/inkpanel itself must never be recursively handed to the service user');
+  assert.match(installer, /chown root:root \$\{APP_DIR\}[\s\S]*chmod 755 \$\{APP_DIR\}/,
+    '/opt/inkpanel must finish root-owned and non-writable by inkpanel');
+  const appOwnedChildren = installer.match(
+    /chown -R \$\{APP\}:\$\{APP\} ([^\n]+)/,
+  )?.[1] ?? '';
+  for (const child of ['app', 'data', '.cache', '.npm', '.arduino15']) {
+    assert.match(appOwnedChildren, new RegExp(`\\$\\{APP_DIR\\}/${child.replace('.', '\\.')}`),
+      `${child} must be explicitly owned by the service user`);
+  }
+
   // The old inline heredoc updater does not clear the flag file. Leaving it in
   // place while the path unit is enabled means every update retriggers itself
   // and restarts the service in a loop.

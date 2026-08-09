@@ -64,20 +64,55 @@ even when the script is genuinely installed and working. This only affects
 running it by hand: the systemd path unit that triggers updates automatically
 already invokes it by full path and is unaffected.
 
-The installer places that script in the container. Do not run `git pull` as root
-in `/opt/inkpanel/app` — the repo belongs to the `inkpanel` service user, so git
-refuses with *"detected dubious ownership"*, and a root `npm ci` would leave
-root-owned `node_modules` behind. The script runs both as the right user.
+The installer places that script in the container. On a fresh install it copies
+the privileged helper and systemd units from the pristine, root-owned clone,
+then hands the checkout to the `inkpanel` account. A later self-update never
+copies executable code from that app-owned checkout into a root-owned path.
 
-Containers created before this script existed will not have it. Either re-run
-the installer for a fresh container, or update by hand once:
+Do not run `git pull` as root in `/opt/inkpanel/app` — the repo belongs to the
+`inkpanel` service user, so git refuses with *"detected dubious ownership"*, and
+a root `npm ci` would leave root-owned `node_modules` behind. The updater runs
+Git, npm, and firmware builds as the service user; root is retained only for
+systemd control and transaction snapshots.
+
+Containers created before the transactional helper existed need a one-time,
+explicit administrator refresh after this release is merged. Do this without
+touching the live checkout: resolve one exact official `main` SHA, download both
+helper files at that SHA into a root-only directory, inspect those exact local
+files, and install the same bytes you inspected:
 
 ```bash
-pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app \
-  && runuser -u inkpanel -- git pull --ff-only \
-  && runuser -u inkpanel -- npm ci --omit=dev \
-  && systemctl restart inkpanel'
+pct enter <CTID>
+chown root:root /opt/inkpanel
+chmod 755 /opt/inkpanel
+HELPER_DIR="$(mktemp -d /root/inkpanel-helper.XXXXXX)"
+chmod 700 "$HELPER_DIR"
+HELPER_REF="$(git ls-remote https://github.com/CtrlAltcouk/inkpanel.git refs/heads/main | awk '{print $1}')"
+[[ "$HELPER_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "Could not resolve official main" >&2; exit 1; }
+curl -fL "https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/$HELPER_REF/scripts/proxmox/files/inkpanel-update" -o "$HELPER_DIR/inkpanel-update"
+curl -fL "https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/$HELPER_REF/scripts/proxmox/files/write-status.mjs" -o "$HELPER_DIR/write-status.mjs"
+sha256sum "$HELPER_DIR/inkpanel-update" "$HELPER_DIR/write-status.mjs"
+less "$HELPER_DIR/inkpanel-update"
+less "$HELPER_DIR/write-status.mjs"
+install -o root -g root -m 755 "$HELPER_DIR/inkpanel-update" /usr/local/bin/inkpanel-update
+install -o root -g root -m 644 "$HELPER_DIR/write-status.mjs" /usr/local/bin/write-status.mjs
+rm -f "$HELPER_DIR/inkpanel-update" "$HELPER_DIR/write-status.mjs"
+rmdir "$HELPER_DIR"
+/usr/local/bin/inkpanel-update
+exit
 ```
+
+The download is pinned before either file is fetched, and installation uses the
+same root-owned files that were inspected, avoiding an inspection/install race.
+The ownership repair changes only `/opt/inkpanel` itself; it is intentionally
+not recursive, so the app checkout and data directory remain `inkpanel`-owned.
+Fresh installs enforce the same boundary: `/opt/inkpanel` is `root:root` mode
+`0755`, while `app`, `data`, `.cache`, `.npm`, and `.arduino15` beneath it are
+owned by `inkpanel`.
+The live `/opt/inkpanel/app` HEAD and worktree remain unchanged until the new
+transactional updater captures the true `COMMIT_BEFORE` and performs the pull.
+This promotion is deliberately manual: the unprivileged application can ask
+for an update, but cannot choose new root-executed code.
 
 ## Proxmox LXC — manual, with Docker
 
@@ -159,19 +194,42 @@ It works by creating a flag file that a systemd path unit watches; the update
 itself runs as root in a separate unit the web application cannot modify. The
 app is granted no privilege beyond writing a file in its own data directory.
 
-`npm ci` runs only when `package-lock.json` changed, and **a failed update does
-not restart the service** — the running process keeps serving and the UI reports
-the failure.
+Before pulling, the updater records the exact current commit and refuses to
+continue if tracked files are modified or the current local `/health` endpoint
+is not HTTP 200. `PORT` is read as validated numeric data from
+`/opt/inkpanel/inkpanel.env` (default 8080); the environment file is never
+sourced or executed.
 
-**The risk worth knowing:** self-update can break the service, and the UI that
-would fix it *is* the service. If an update leaves it unable to start, recover
-from the command line:
+Changed production dependencies are built with `npm ci --omit=dev` in a
+same-filesystem staging directory while the current service is still running.
+Only after that succeeds does the updater stop the service, snapshot the exact
+bytes (or absence) of `config.json`, atomically exchange `node_modules`, and
+start the candidate. A firmware build similarly preserves the previously
+served `firmware/dist` package before publishing a successful replacement.
+
+An update is successful only after systemd reports the candidate active and
+`/health` returns HTTP 200 three consecutive times during the probation window.
+If start-up or health validation fails, the updater automatically restores the
+exact pre-update commit, dependencies, config bytes/absence, and firmware
+package without running npm again. It restarts the old service and applies the
+same health probation. The update remains terminally `failed` even when this
+rollback succeeds, so the UI reports both the candidate failure and successful
+recovery rather than claiming the update was installed.
+
+Manual recovery should therefore be exceptional. If automatic rollback itself
+cannot restore health, preserve the status and transaction artifacts and
+inspect them from the command line:
 
 ```bash
 pct exec <CTID> -- journalctl -u inkpanel -n 50 --no-pager
 pct exec <CTID> -- cat /opt/inkpanel/data/update-status.json
-pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && runuser -u inkpanel -- git reset --hard HEAD~1 && systemctl restart inkpanel'
+pct exec <CTID> -- systemctl status inkpanel --no-pager
+pct exec <CTID> -- ls -la /var/lib/inkpanel-update
 ```
+
+The journal records the exact rollback baseline SHA. If intervention is
+required, reset only to that recorded SHA after inspecting the retained
+snapshots; do not guess with `HEAD~1`, because one pull may contain many commits.
 
 If the updater itself was interrupted mid-run (a reboot, `systemctl stop`, an OOM
 kill) rather than failing normally, its own exit trap should have already

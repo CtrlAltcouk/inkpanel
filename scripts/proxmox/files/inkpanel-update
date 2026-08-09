@@ -1,114 +1,376 @@
 #!/usr/bin/env bash
 #
-# Triggered by inkpanel-update.path when the application creates
-# /opt/inkpanel/data/.update-requested
+# Root-owned transactional updater, triggered by inkpanel-update.path when the
+# unprivileged application creates /opt/inkpanel/data/.update-requested.
 #
-# Runs as root. Must be root-owned and NOT writable by the inkpanel user — the
-# whole point of this arrangement is that the web application can request an
-# update but cannot influence what an update does.
-#
+# Never replace this file from the app-owned checkout. Git, npm and firmware
+# commands run as inkpanel; root only controls systemd and moves/snapshots data.
+
 set -Eeuo pipefail
 
 APP=inkpanel
 APP_DIR=/opt/inkpanel
 REPO_DIR="$APP_DIR/app"
 DATA_DIR="$APP_DIR/data"
+CONFIG_FILE="$DATA_DIR/config.json"
+FIRMWARE_DIST="$REPO_DIR/firmware/dist"
+ENV_FILE="$APP_DIR/inkpanel.env"
 FLAG="$DATA_DIR/.update-requested"
 STATUS="$DATA_DIR/update-status.json"
+TRANSACTION_ROOT=/var/lib/inkpanel-update
+HEALTH_MAX_ATTEMPTS=45
+HEALTH_TIMEOUT_SECONDS=45
+HEALTH_REQUIRED_CONSECUTIVE=3
+
 LOG_FILE="$(mktemp)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
-
-# write-status.mjs is expected to live alongside this script wherever it is
-# deployed, so this works regardless of install location.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Set once a terminal status (success/failed) has actually been written, so
-# the EXIT trap below can tell "we finished" from "we got cut off mid-run".
-FINALIZED=0
+# The status writer runs unprivileged, so give its group deliberate read-only
+# access to this root-owned log. Keeping root ownership matters: the app cannot
+# replace the log pathname and redirect later root appends through a symlink.
+chown "root:$APP" "$LOG_FILE"
+chmod 640 "$LOG_FILE"
 
-# Clear the flag first: the path unit re-arms on its absence, and leaving it
-# would retrigger this script immediately on exit.
+FINALIZED=0
+ROLLBACK_IN_PROGRESS=0
+COMMIT_BEFORE=""
+COMMIT_AFTER=""
+TRANSACTION_DIR=""
+DEPS_STAGE=""
+DEPS_OLD=""
+DEPS_CHANGED=0
+DEPS_SWAPPED=0
+LIVE_DEPS_EXISTED=0
+CONFIG_SNAPSHOTTED=0
+CONFIG_EXISTED=0
+CONFIG_MODE=600
+FIRMWARE_SNAPSHOTTED=0
+FIRMWARE_EXISTED=0
+FIRMWARE_REPLACED=0
+FIRMWARE_STAGE=""
+SERVICE_STOPPED=0
+CANDIDATE_STARTED=0
+HEALTH_PORT=8080
+HEALTH_URL=""
+
+# Clear the request first so the path unit re-arms after this invocation.
 rm -f "$FLAG"
 
 write_status() {
-  node "$SCRIPT_DIR/write-status.mjs" "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
-  chmod 644 "$STATUS"
-  if [[ "$1" == "success" || "$1" == "failed" ]]; then
-    FINALIZED=1
+  runuser -u "$APP" -- node "$SCRIPT_DIR/write-status.mjs" \
+    "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
+  if [[ "$1" == "success" || "$1" == "failed" ]]; then FINALIZED=1; fi
+}
+
+log() { printf '%s\n' "$*" >>"$LOG_FILE"; }
+
+remove_path() {
+  local path="$1"
+  [[ -n "$path" && "$path" != "/" ]] || return 1
+  rm -rf -- "$path"
+}
+
+cleanup_artifacts() {
+  if [[ -n "$FIRMWARE_STAGE" && -e "$FIRMWARE_STAGE" ]]; then
+    runuser -u "$APP" -- rm -rf -- "$FIRMWARE_STAGE" || true
+  fi
+  if [[ -n "$DEPS_STAGE" && -e "$DEPS_STAGE" ]]; then remove_path "$DEPS_STAGE" || true; fi
+  if [[ -n "$DEPS_OLD" && ( -L "$DEPS_OLD" || -e "$DEPS_OLD" ) ]]; then
+    remove_path "$DEPS_OLD" || true
+  fi
+  if [[ -n "$TRANSACTION_DIR" && -e "$TRANSACTION_DIR" ]]; then
+    remove_path "$TRANSACTION_DIR" || true
   fi
 }
 
-fail() {
-  write_status failed "$1"
-  echo "inkpanel-update: FAILED — $1" >&2
-  # Deliberately no restart. A broken update must be a no-op, not an outage:
-  # the currently running process is still serving.
-  exit 1
-}
-trap 'fail "unexpected error on line $LINENO"' ERR
-
-cleanup() {
+on_exit() {
   if [[ "$FINALIZED" -eq 0 ]]; then
-    write_status failed "update was interrupted before it finished"
+    log "update interrupted before a terminal state; rollback artifacts were retained"
+    write_status failed "update was interrupted before it finished; manual inspection may be required" || true
   fi
   rm -f "$LOG_FILE"
 }
-trap cleanup EXIT
+trap on_exit EXIT
+
+resolve_health_port() {
+  local line value port_number
+  HEALTH_PORT=8080
+  if [[ -f "$ENV_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      if [[ "$line" =~ ^[[:space:]]*PORT[[:space:]]*= ]]; then
+        value="${line#*=}"
+        value="${value%%#*}"
+        value="${value//[[:space:]]/}"
+        if [[ ! "$value" =~ ^[0-9]+$ || ${#value} -gt 5 ]]; then
+          log "invalid PORT entry in $ENV_FILE"
+          return 1
+        fi
+        port_number=$((10#$value))
+        if (( port_number < 1 || port_number > 65535 )); then
+          log "PORT is outside the TCP range: $value"
+          return 1
+        fi
+        HEALTH_PORT="$port_number"
+      fi
+    done <"$ENV_FILE"
+  fi
+  HEALTH_URL="http://127.0.0.1:${HEALTH_PORT}/health"
+}
+
+probe_health_once() {
+  local http_code
+  systemctl is-active --quiet "${APP}.service" || return 1
+  http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 2 --max-time 3 "$HEALTH_URL" 2>>"$LOG_FILE" || true)"
+  [[ "$http_code" == "200" ]]
+}
+
+health_probation() {
+  local label="$1" attempt consecutive=0 deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  for ((attempt = 1; attempt <= HEALTH_MAX_ATTEMPTS; attempt += 1)); do
+    if probe_health_once; then
+      consecutive=$((consecutive + 1))
+      log "$label health probe $attempt: healthy ($consecutive/$HEALTH_REQUIRED_CONSECUTIVE consecutive)"
+      if (( consecutive >= HEALTH_REQUIRED_CONSECUTIVE )); then return 0; fi
+    else
+      consecutive=0
+      log "$label health probe $attempt: unhealthy"
+    fi
+    if (( SECONDS >= deadline )); then
+      log "$label health probation reached its ${HEALTH_TIMEOUT_SECONDS}s deadline"
+      break
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+current_head() {
+  runuser -u "$APP" -- git rev-parse --verify HEAD 2>/dev/null || true
+}
+
+dependency_inputs() {
+  local commit="$1" path blob
+  for path in package.json package-lock.json; do
+    blob="$(runuser -u "$APP" -- git rev-parse --verify "${commit}:${path}" 2>/dev/null || true)"
+    printf '%s=%s\n' "$path" "${blob:-missing}"
+  done
+}
+
+restore_dependencies() {
+  [[ "$DEPS_SWAPPED" -eq 1 ]] || return 0
+  log "rollback: restoring previous node_modules"
+  if ! runuser -u "$APP" -- rm -rf -- "$REPO_DIR/node_modules"; then
+    log "rollback: could not remove candidate node_modules as $APP"
+    return 1
+  fi
+  if [[ "$LIVE_DEPS_EXISTED" -eq 1 ]]; then
+    if [[ -n "$DEPS_OLD" && ( -L "$DEPS_OLD" || -e "$DEPS_OLD" ) ]]; then
+      # Preserve the original object exactly. The root-only transaction
+      # directory protects it; root must not chown/chmod through this path.
+      mv -T -- "$DEPS_OLD" "$REPO_DIR/node_modules" || return 1
+      DEPS_OLD=""
+    else
+      log "rollback: previous node_modules snapshot is missing"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+restore_config() {
+  local ok=0
+  [[ "$CONFIG_SNAPSHOTTED" -eq 1 ]] || return 0
+  log "rollback: restoring config.json baseline"
+  rm -f -- "$CONFIG_FILE" || ok=1
+  if [[ "$CONFIG_EXISTED" -eq 1 ]]; then
+    if [[ -f "$TRANSACTION_DIR/config.json" ]]; then
+      install -o "$APP" -g "$APP" -m "$CONFIG_MODE" \
+        "$TRANSACTION_DIR/config.json" "$CONFIG_FILE" || ok=1
+    else
+      log "rollback: config.json snapshot is missing"
+      ok=1
+    fi
+  fi
+  return "$ok"
+}
+
+restore_firmware() {
+  local ok=0 restore_stage=""
+  [[ "$FIRMWARE_REPLACED" -eq 1 ]] || return 0
+  log "rollback: restoring previous firmware/dist package"
+  if [[ ! -d "$REPO_DIR" || -L "$REPO_DIR" ]]; then
+    log "rollback: refusing firmware restore because checkout root is not a real directory"
+    return 1
+  fi
+  if [[ "$FIRMWARE_EXISTED" -eq 1 ]]; then
+    if [[ -L "$TRANSACTION_DIR/firmware-snapshot" || \
+          -e "$TRANSACTION_DIR/firmware-snapshot" ]]; then
+      restore_stage="$REPO_DIR/.firmware-restore.$(basename "$TRANSACTION_DIR")"
+      # Root only renames the protected snapshot object into the validated
+      # checkout root. It never traverses app-controlled snapshot contents.
+      mv -T -- "$TRANSACTION_DIR/firmware-snapshot" "$restore_stage" || return 1
+      runuser -u "$APP" -- rm -rf -- "$FIRMWARE_DIST" || ok=1
+      runuser -u "$APP" -- mkdir -p -- "$REPO_DIR/firmware" || ok=1
+      runuser -u "$APP" -- mv -- "$restore_stage/firmware-dist" "$FIRMWARE_DIST" \
+        || ok=1
+      runuser -u "$APP" -- rmdir -- "$restore_stage" || ok=1
+    else
+      log "rollback: firmware/dist snapshot is missing"
+      ok=1
+    fi
+  else
+    runuser -u "$APP" -- rm -rf -- "$FIRMWARE_DIST" || ok=1
+  fi
+  return "$ok"
+}
+
+abort_update() {
+  local reason="$1" rollback_needed=0 rollback_ok=1 head_now message
+  if [[ "$ROLLBACK_IN_PROGRESS" -eq 1 ]]; then return 1; fi
+  ROLLBACK_IN_PROGRESS=1
+  trap - ERR INT TERM
+  set +e
+  log "candidate update failed: $reason"
+
+  head_now="$(current_head)"
+  if [[ -n "$COMMIT_BEFORE" && "$head_now" != "$COMMIT_BEFORE" ]]; then rollback_needed=1; fi
+  if [[ "$DEPS_SWAPPED" -eq 1 || "$CONFIG_SNAPSHOTTED" -eq 1 || \
+        "$FIRMWARE_REPLACED" -eq 1 || "$SERVICE_STOPPED" -eq 1 || \
+        "$CANDIDATE_STARTED" -eq 1 ]]; then rollback_needed=1; fi
+
+  if [[ "$rollback_needed" -eq 0 ]]; then
+    message="update failed before deployment changes: $reason"
+    cleanup_artifacts
+    write_status failed "$message"
+    echo "inkpanel-update: FAILED — $message" >&2
+    exit 1
+  fi
+
+  write_status running "candidate failed; automatic rollback in progress"
+  log "== automatic rollback =="
+
+  if [[ "$SERVICE_STOPPED" -eq 1 || "$CANDIDATE_STARTED" -eq 1 ]]; then
+    systemctl stop "${APP}.service" >>"$LOG_FILE" 2>&1 || rollback_ok=0
+  fi
+
+  if [[ -n "$COMMIT_BEFORE" ]]; then
+    log "rollback: resetting checkout to $COMMIT_BEFORE"
+    runuser -u "$APP" -- git reset --hard "$COMMIT_BEFORE" >>"$LOG_FILE" 2>&1 || rollback_ok=0
+  fi
+
+  restore_dependencies || rollback_ok=0
+  restore_config || rollback_ok=0
+  restore_firmware || rollback_ok=0
+
+  if [[ "$SERVICE_STOPPED" -eq 1 || "$CANDIDATE_STARTED" -eq 1 ]]; then
+    systemctl start "${APP}.service" >>"$LOG_FILE" 2>&1 || rollback_ok=0
+  fi
+
+  if ! health_probation "rollback"; then rollback_ok=0; fi
+
+  if [[ "$rollback_ok" -eq 1 ]]; then
+    message="candidate update failed: $reason; automatic rollback succeeded; rolled back to $COMMIT_BEFORE"
+    cleanup_artifacts
+  else
+    message="update failed and automatic rollback did not recover InkPanel; manual intervention required"
+    log "rollback artifacts retained at: ${TRANSACTION_DIR:-not created}"
+  fi
+  write_status failed "$message"
+  echo "inkpanel-update: FAILED — $message" >&2
+  exit 1
+}
+
+on_error() {
+  local line="$1" status="$2"
+  abort_update "unexpected error on line $line (exit $status)"
+}
+trap 'on_error "$LINENO" "$?"' ERR
+trap 'abort_update "update was interrupted by a signal"' INT TERM
 
 write_status running
+mkdir -p "$TRANSACTION_ROOT"
+chown root:root "$TRANSACTION_ROOT"
+chmod 700 "$TRANSACTION_ROOT"
+TRANSACTION_DIR="$(mktemp -d "$TRANSACTION_ROOT/transaction.XXXXXX")"
+chmod 700 "$TRANSACTION_DIR"
 
 cd "$REPO_DIR"
 
-LOCK_BEFORE="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
-# Keep the old diff signal as a compatibility/fallback path. The freshness
-# fingerprint below is authoritative on current installs, but older checkouts
-# and deployment fixtures may not have the helper yet. More importantly, this
-# gives the log a useful explanation when the current pull itself changed a
-# firmware input.
-COMMIT_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
+TRACKED_CHANGES="$(runuser -u "$APP" -- git status --porcelain --untracked-files=no)"
+if [[ -n "$TRACKED_CHANGES" ]]; then
+  log "tracked working tree/index changes detected:"
+  log "$TRACKED_CHANGES"
+  abort_update "tracked local modifications exist; refusing to update"
+fi
 
-echo "== git pull ==" >>"$LOG_FILE"
-runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1 || fail "git pull failed"
+COMMIT_BEFORE="$(current_head)"
+if [[ ! "$COMMIT_BEFORE" =~ ^[0-9a-f]{40}$ ]]; then
+  abort_update "could not capture the current Git commit"
+fi
+DEPENDENCY_INPUTS_BEFORE="$(dependency_inputs "$COMMIT_BEFORE")"
+log "rollback baseline commit: $COMMIT_BEFORE"
+log "dependency inputs before: $DEPENDENCY_INPUTS_BEFORE"
+
+if ! resolve_health_port; then
+  abort_update "invalid PORT in $ENV_FILE"
+fi
+log "== preflight health ($HEALTH_URL) =="
+if ! probe_health_once; then
+  abort_update "current InkPanel service is not healthy; no update was attempted"
+fi
+log "preflight health: ok"
 write_status running
 
-# Do NOT copy this root-owned updater from REPO_DIR here. The checkout belongs
-# to the unprivileged inkpanel account; promoting a file it can modify into a
-# root executable would turn an application compromise into root code
-# execution. Fresh installs receive the current privileged helper from the
-# installer. Upgrading an older helper is an explicit administrator action.
+log "== git pull =="
+if ! runuser -u "$APP" -- git pull --ff-only origin main >>"$LOG_FILE" 2>&1; then
+  COMMIT_AFTER="$(current_head)"
+  abort_update "git pull failed"
+fi
+COMMIT_AFTER="$(current_head)"
+if [[ ! "$COMMIT_AFTER" =~ ^[0-9a-f]{40}$ ]]; then
+  abort_update "could not capture the candidate Git commit"
+fi
+log "candidate commit: $COMMIT_AFTER"
+write_status running
 
-LOCK_AFTER="$(sha256sum package-lock.json 2>/dev/null | cut -d" " -f1 || echo none)"
+# Never install a new privileged helper from this app-owned checkout. Existing
+# LXCs require an explicit administrator refresh of /usr/local/bin/inkpanel-update.
 
-if [[ "$LOCK_BEFORE" != "$LOCK_AFTER" ]]; then
-  echo "== npm ci (lockfile changed) ==" >>"$LOG_FILE"
-  runuser -u "$APP" -- npm ci --omit=dev >>"$LOG_FILE" 2>&1 || fail "npm ci failed"
+DEPENDENCY_INPUTS_AFTER="$(dependency_inputs "$COMMIT_AFTER")"
+log "dependency inputs after: $DEPENDENCY_INPUTS_AFTER"
+if [[ "$DEPENDENCY_INPUTS_BEFORE" != "$DEPENDENCY_INPUTS_AFTER" ]]; then
+  DEPS_CHANGED=1
+  log "== stage production dependencies =="
+  DEPS_STAGE="$(runuser -u "$APP" -- mktemp -d "$REPO_DIR/.dependency-stage.XXXXXX")"
+  runuser -u "$APP" -- cp package.json package-lock.json "$DEPS_STAGE/" \
+    >>"$LOG_FILE" 2>&1 || abort_update "could not prepare dependency staging inputs"
+  if [[ -f .npmrc ]]; then
+    runuser -u "$APP" -- cp .npmrc "$DEPS_STAGE/" >>"$LOG_FILE" 2>&1 \
+      || abort_update "could not copy candidate npm configuration"
+  fi
+  runuser -u "$APP" -- npm ci --omit=dev --prefix "$DEPS_STAGE" \
+    >>"$LOG_FILE" 2>&1 || abort_update "candidate dependency staging failed"
+  if [[ ! -d "$DEPS_STAGE/node_modules" ]]; then
+    abort_update "candidate dependency staging produced no node_modules"
+  fi
+  log "dependency staging: ok"
 else
-  echo "== npm ci skipped (lockfile unchanged) ==" >>"$LOG_FILE"
+  log "== dependency staging skipped (inputs unchanged) =="
 fi
 write_status running
 
-FIRMWARE_DIFF="$(git diff --name-only "$COMMIT_BEFORE" HEAD -- \
-  firmware/ \
-  scripts/build-firmware.sh \
-  scripts/firmware-manifest.mjs \
-  scripts/firmware-input-hash.sh \
-  2>/dev/null || true)"
-
-# Firmware freshness is based on what the served package actually represents,
-# not merely on files changed by this particular pull. A real LXC reached the
-# state where the web UI was current but firmware/dist still contained the old
-# captive-portal-only image. A later pull had no new firmware diff, so the old
-# updater skipped rebuilding forever.
-#
-# Current builds carry input.sha256. When the helper exists, a missing or
-# mismatched stamp forces a rebuild even if FIRMWARE_DIFF is empty. If the
-# helper does not exist (legacy checkout/test fixture), fall back to the old
-# diff behaviour rather than turning every unrelated update into a build.
+FIRMWARE_DIFF="$(runuser -u "$APP" -- git diff --name-only "$COMMIT_BEFORE" "$COMMIT_AFTER" -- \
+  firmware/ scripts/build-firmware.sh scripts/firmware-manifest.mjs \
+  scripts/firmware-input-hash.sh 2>/dev/null || true)"
 HAVE_FIRMWARE_HASH=0
 CURRENT_FIRMWARE_HASH=""
 BUILT_FIRMWARE_HASH=""
 if [[ -f ./scripts/firmware-input-hash.sh ]]; then
-  CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh 2>>"$LOG_FILE" || true)"
+  CURRENT_FIRMWARE_HASH="$(runuser -u "$APP" -- bash ./scripts/firmware-input-hash.sh \
+    2>>"$LOG_FILE" || true)"
   if [[ -n "$CURRENT_FIRMWARE_HASH" ]]; then
     HAVE_FIRMWARE_HASH=1
     BUILT_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
@@ -117,50 +379,94 @@ fi
 
 NEEDS_FIRMWARE_BUILD=0
 if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
-  if [[ "$CURRENT_FIRMWARE_HASH" != "$BUILT_FIRMWARE_HASH" ]]; then
-    NEEDS_FIRMWARE_BUILD=1
-  fi
+  [[ "$CURRENT_FIRMWARE_HASH" == "$BUILT_FIRMWARE_HASH" ]] || NEEDS_FIRMWARE_BUILD=1
 elif [[ -n "$FIRMWARE_DIFF" ]]; then
   NEEDS_FIRMWARE_BUILD=1
 fi
 
 if [[ "$NEEDS_FIRMWARE_BUILD" -eq 1 ]]; then
   if [[ -n "$FIRMWARE_DIFF" ]]; then
-    echo "== firmware rebuild (firmware inputs changed) ==" >>"$LOG_FILE"
+    log "== firmware rebuild (firmware inputs changed) =="
   elif [[ "$HAVE_FIRMWARE_HASH" -eq 1 && -z "$BUILT_FIRMWARE_HASH" ]]; then
-    echo "== firmware rebuild (no freshness stamp / legacy build) ==" >>"$LOG_FILE"
+    log "== firmware rebuild (no freshness stamp / legacy build) =="
   else
-    echo "== firmware rebuild (served build is stale) ==" >>"$LOG_FILE"
-    echo "current inputs: $CURRENT_FIRMWARE_HASH" >>"$LOG_FILE"
-    echo "served build:   $BUILT_FIRMWARE_HASH" >>"$LOG_FILE"
+    log "== firmware rebuild (served build is stale) =="
+    log "current inputs: $CURRENT_FIRMWARE_HASH"
+    log "served build:   $BUILT_FIRMWARE_HASH"
   fi
-
-  # Deliberately NOT `|| fail`: a firmware compile failure must not take the
-  # already-running dashboard server down. build-firmware.sh now stages output
-  # and publishes only after success, so the previous Flash package survives.
+  FIRMWARE_SNAPSHOTTED=1
+  if [[ -e "$FIRMWARE_DIST" ]]; then
+    FIRMWARE_EXISTED=1
+    FIRMWARE_STAGE="$(runuser -u "$APP" -- mktemp -d "$REPO_DIR/.firmware-snapshot.XXXXXX")"
+    runuser -u "$APP" -- cp -a -- "$FIRMWARE_DIST" "$FIRMWARE_STAGE/firmware-dist" \
+      || abort_update "could not snapshot previous firmware package as inkpanel"
+    # Move the staging object itself. Root must not resolve a child through an
+    # app-controlled intermediate directory, even if that directory is raced.
+    mv -- "$FIRMWARE_STAGE" "$TRANSACTION_DIR/firmware-snapshot" \
+      || abort_update "could not protect previous firmware package"
+    FIRMWARE_STAGE=""
+  fi
   if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
-    if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
-      NEW_FIRMWARE_HASH="$(cat firmware/dist/input.sha256 2>/dev/null | tr -d '[:space:]' || true)"
-      if [[ "$NEW_FIRMWARE_HASH" == "$CURRENT_FIRMWARE_HASH" ]]; then
-        echo "firmware rebuild: ok ($NEW_FIRMWARE_HASH)" >>"$LOG_FILE"
-      else
-        echo "firmware rebuild: completed but freshness stamp did not match; Flash tab may still be stale" >>"$LOG_FILE"
-      fi
-    else
-      echo "firmware rebuild: ok (legacy freshness mode)" >>"$LOG_FILE"
-    fi
+    FIRMWARE_REPLACED=1
+    log "firmware rebuild: ok"
   else
-    echo "firmware rebuild: FAILED — Flash tab keeps the previous successful build. This does not fail the server update." >>"$LOG_FILE"
+    log "firmware rebuild: FAILED — previous successful package remains served; server update continues"
   fi
 else
-  if [[ "$HAVE_FIRMWARE_HASH" -eq 1 ]]; then
-    echo "== firmware rebuild skipped (served build matches current inputs) ==" >>"$LOG_FILE"
-  else
-    echo "== firmware rebuild skipped (no firmware inputs changed) ==" >>"$LOG_FILE"
-  fi
+  log "== firmware rebuild skipped (served package is fresh) =="
 fi
 write_status running
 
-echo "== restart ==" >>"$LOG_FILE"
+log "== deploy candidate =="
+if ! systemctl stop "${APP}.service" >>"$LOG_FILE" 2>&1; then
+  abort_update "could not stop InkPanel cleanly"
+fi
+SERVICE_STOPPED=1
+
+if [[ -e "$CONFIG_FILE" ]]; then
+  CONFIG_EXISTED=1
+  CONFIG_MODE="$(runuser -u "$APP" -- stat -c '%a' "$CONFIG_FILE" 2>/dev/null || printf '600')"
+  [[ "$CONFIG_MODE" =~ ^[0-7]{3,4}$ ]] || CONFIG_MODE=600
+  if ! runuser -u "$APP" -- cat "$CONFIG_FILE" >"$TRANSACTION_DIR/config.json"; then
+    abort_update "could not snapshot config.json after stopping the service"
+  fi
+else
+  log "config.json baseline: absent"
+fi
+CONFIG_SNAPSHOTTED=1
+
+if [[ "$DEPS_CHANGED" -eq 1 ]]; then
+  DEPS_OLD="$TRANSACTION_DIR/node_modules.before"
+  if [[ -L "$REPO_DIR/node_modules" || -e "$REPO_DIR/node_modules" ]]; then
+    LIVE_DEPS_EXISTED=1
+    # Rename the baseline as an opaque object. TRANSACTION_DIR is root:root
+    # 0700, so mutating the moved pathname would add risk without protection.
+    mv -T -- "$REPO_DIR/node_modules" "$DEPS_OLD" \
+      || abort_update "could not preserve live node_modules"
+    DEPS_SWAPPED=1
+    log "previous dependencies protected at $DEPS_OLD"
+  fi
+  DEPS_SWAPPED=1
+  runuser -u "$APP" -- mv -T -- "$DEPS_STAGE/node_modules" "$REPO_DIR/node_modules" \
+    || abort_update "could not activate staged node_modules"
+  remove_path "$DEPS_STAGE"
+  DEPS_STAGE=""
+  log "staged dependencies activated"
+fi
+
+if ! systemctl start "${APP}.service" >>"$LOG_FILE" 2>&1; then
+  abort_update "candidate service did not start"
+fi
+CANDIDATE_STARTED=1
+SERVICE_STOPPED=0
+write_status running
+
+log "== candidate health probation ($HEALTH_URL) =="
+if ! health_probation "candidate"; then
+  abort_update "candidate failed health probation"
+fi
+
+log "candidate health probation: passed"
+cleanup_artifacts
 write_status success
-systemctl restart "$APP"
+echo "inkpanel-update: candidate $COMMIT_AFTER is healthy"
