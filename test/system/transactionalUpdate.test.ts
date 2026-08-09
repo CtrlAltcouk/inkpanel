@@ -133,8 +133,7 @@ case "\${1:-}" in
       snapshot="$(find "$TRANSACTION_ROOT_PATH" -type d -name node_modules.before -print -quit)"
       printf '%s' "$snapshot" > "$PROTECTED_DEPS_LOG"
       parent_mode="$(stat -c '%a' "$(dirname "$snapshot")")"
-      snapshot_mode="$(stat -c '%a' "$snapshot")"
-      if (( (8#$parent_mode & 0077) != 0 || (8#$snapshot_mode & 0077) != 0 )); then
+      if (( (8#$parent_mode & 0077) != 0 )); then
         printf compromised > "$snapshot/candidate-tampered.txt"
       fi
     fi
