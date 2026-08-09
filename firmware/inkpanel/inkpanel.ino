@@ -31,7 +31,9 @@
 OldV2EPD display;
 static Credentials credentials;
 
-// RTC memory survives deep sleep, so the ETag persists without wearing flash.
+// RTC memory survives deep sleep, so the ETag and failure streak persist
+// without wearing flash. A failure is not cleared until the whole wake cycle
+// has succeeded: network success alone is not enough if the panel cannot draw.
 RTC_DATA_ATTR char storedEtag[48] = {0};
 RTC_DATA_ATTR uint32_t consecutiveFailures = 0;
 
@@ -101,6 +103,8 @@ static void sleepFor(uint32_t seconds) {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
+  // This is also the fail-safe cleanup path after an EPD init/draw timeout: cut
+  // the rail before entering deep sleep even if the controller never became idle.
   pinMode(Hardware::EPD_ENABLE, OUTPUT);
   digitalWrite(Hardware::EPD_ENABLE, LOW);
 
@@ -184,19 +188,33 @@ void setup() {
     sleepFor(backoffSeconds());
   }
 
-  consecutiveFailures = 0;
-
-  if (outcome.result == FetchResult::Updated) {
-    if (display.begin() && display.display(display.framebuffer())) {
-      display.sleep();
-      snprintf(storedEtag, sizeof(storedEtag), "%s", outcome.etag);
-      Serial.println("[epd] drawn");
-    } else {
-      Serial.printf("[epd] failed: %s\n", display.lastError());
-    }
-  } else {
+  if (outcome.result == FetchResult::NotModified) {
+    // The server and our stored ETag agree with what was previously drawn, so
+    // this is a fully healthy wake cycle and the display remains powered off.
+    consecutiveFailures = 0;
     Serial.println("[epd] unchanged, no refresh");
+    sleepFor(outcome.nextWakeSeconds);
   }
+
+  // A 200 response is not a successful wake cycle until the new framebuffer has
+  // actually reached the panel. Keep the old ETag on failure so the same frame
+  // is offered again after the progressively longer retry delay.
+  if (!display.begin() || !display.display(display.framebuffer())) {
+    consecutiveFailures++;
+    Serial.printf("[epd] failed (%u consecutive): %s; backing off\n",
+                  consecutiveFailures, display.lastError());
+    sleepFor(backoffSeconds());
+  }
+
+  // The physical refresh completed. Record its ETag before asking the controller
+  // to enter deep sleep; if that final controller-sleep command fails, sleepFor()
+  // still cuts the EPD power rail and a later 304 will not redraw the same frame.
+  snprintf(storedEtag, sizeof(storedEtag), "%s", outcome.etag);
+  consecutiveFailures = 0;
+  if (!display.sleep()) {
+    Serial.printf("[epd] sleep warning: %s; power rail will be cut\n", display.lastError());
+  }
+  Serial.println("[epd] drawn");
 
   sleepFor(outcome.nextWakeSeconds);
 }
