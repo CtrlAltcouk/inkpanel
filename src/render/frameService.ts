@@ -5,12 +5,14 @@ import { PROFILES, WFT0583, type PanelProfile } from '../panel/profile.ts';
 import { quantisePng } from '../panel/quantise.ts';
 import { batteryPercent } from '../devices/battery.ts';
 import type { DeviceRecord } from '../devices/types.ts';
-import { icalSource } from '../sources/ical.ts';
+import type { IcalFeedConfig } from '../sources/ical.ts';
+import { runCalendars } from '../sources/calendarRunner.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
 import type { BinsData } from '../sources/bins.ts';
 import { runSource } from '../sources/runner.ts';
 import type { SourceCache } from '../sources/cache.ts';
+import type { Source } from '../sources/types.ts';
 import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderHtml } from './template.ts';
@@ -30,6 +32,8 @@ export interface FrameDeps {
   cache: SourceCache;
   /** Overridable so tests never touch the network. */
   fetchData?: (device: DeviceRecord) => Promise<SourceBundle>;
+  /** Injected once at startup so calendar network policy is explicit/testable. */
+  calendarSource?: Source<IcalFeedConfig, string>;
 }
 
 export interface Frame {
@@ -79,11 +83,11 @@ export class FrameService {
 
     const runOptions = { deviceId: device.id, timeoutMs: SOURCE_TIMEOUT_MS };
     const [calendar, weather, bins] = await Promise.all([
-      runSource(
-        icalSource,
-        { urls: device.calendarUrls, timezone: device.timezone },
+      runCalendars(
+        device.calendarUrls,
+        device.timezone,
         this.deps.cache,
-        runOptions,
+        { ...runOptions, source: this.deps.calendarSource },
       ),
       runSource(
         openMeteoSource,

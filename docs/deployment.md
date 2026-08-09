@@ -167,6 +167,29 @@ instead. Idle memory is roughly 150 MB.
 Everything that matters is `/data/config.json`: device records, locations and
 calendar URLs. `/data/cache` is disposable.
 
+### Calendar network safety
+
+Calendar feeds are fetched by the InkPanel server, not the ESP32. New
+configuration accepts only credential-free HTTP/HTTPS URLs. Before every
+connection, including every redirect, the server resolves all DNS answers,
+rejects the entire result if any address is disallowed by the active policy,
+and pins the request to the validated answers. HTTPS redirects may not downgrade to HTTP. Calendar
+bodies are streamed with a 2 MiB limit.
+
+Private LAN calendar hosts are blocked by default. Set
+`CALENDAR_ALLOW_PRIVATE_NETWORKS=1` in `inkpanel.env` or the Docker Compose
+environment only when a feed is deliberately hosted on RFC1918/IPv6 ULA space.
+This opt-in never permits loopback, link-local, unspecified, or multicast
+destinations. Restart InkPanel after changing it.
+
+Each configured feed has its own last-good raw iCalendar cache. Feeds are
+fetched concurrently; a failed feed can use only its own cache and cannot make
+healthy feeds stale. Raw ICS is expanded for the current date/timezone after
+fetching, so a cached recurring feed remains useful on later days. Cache
+filenames contain hashes rather than secret calendar URL paths or query values.
+The older aggregate, already-expanded calendar cache is intentionally not reused:
+the first successful fetch after upgrade seeds the new per-feed raw caches.
+
 ## Regenerating golden images
 
 Font rasterisation differs between platforms, so the committed golden was

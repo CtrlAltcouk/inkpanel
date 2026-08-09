@@ -54,6 +54,9 @@ test('the installer ships the update units and the password variable', async () 
   assert.match(installer, /HTTPS_PORT="\$\{HTTPS_PORT:-8443\}"/);
   assert.match(installer, /HTTPS_PORT=\$\{HTTPS_PORT\}/,
     'the validated installer value must be written to inkpanel.env');
+  assert.match(installer, /CALENDAR_ALLOW_PRIVATE_NETWORKS="\$\{CALENDAR_ALLOW_PRIVATE_NETWORKS:-0\}"/);
+  assert.match(installer, /CALENDAR_ALLOW_PRIVATE_NETWORKS=\$\{CALENDAR_ALLOW_PRIVATE_NETWORKS\}/,
+    'the validated calendar network opt-in must be written to inkpanel.env');
 
   // The updater resolves write-status.mjs relative to its own path, so a
   // missing copy breaks every update with only an ENOENT in the journal.
@@ -97,5 +100,6 @@ test('Docker publishes and configures one coherent HTTPS port', async () => {
   const compose = await readFile(join(root, 'docker-compose.yml'), 'utf8');
   assert.match(compose, /"\$\{HTTPS_PORT:-8443\}:\$\{HTTPS_PORT:-8443\}"/);
   assert.match(compose, /HTTPS_PORT:\s*"\$\{HTTPS_PORT:-8443\}"/);
+  assert.match(compose, /CALENDAR_ALLOW_PRIVATE_NETWORKS:\s*"\$\{CALENDAR_ALLOW_PRIVATE_NETWORKS:-0\}"/);
   assert.match(compose, /"8080:8080"/, 'panel-facing HTTP must remain unchanged');
 });

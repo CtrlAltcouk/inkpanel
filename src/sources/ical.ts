@@ -2,6 +2,8 @@ import ical from 'node-ical';
 import type { CalendarResponse, VEvent } from 'node-ical';
 import type { CalendarData, CalendarEvent } from '../model/dashboard.ts';
 import type { Source, SourceResult } from './types.ts';
+import { createCalendarTextFetcher, type CalendarTextFetcher } from './calendarHttp.ts';
+import { calendarHostDescription, parseCalendarUrl } from './calendarUrl.ts';
 
 /** The calendar day an instant falls on, in the given zone: "YYYY-MM-DD". */
 export function localDateKey(instant: Date, timezone: string): string {
@@ -147,44 +149,67 @@ export function expandCalendar(icsTexts: string[], now: Date, timezone: string):
   };
 }
 
-export interface IcalConfig {
-  urls: string[];
-  timezone: string;
+export function validateIcalendar(text: string): void {
+  if (!text.includes('BEGIN:VCALENDAR')) {
+    throw new Error(
+      'not an iCalendar feed — use the "Secret address in iCal format" ' +
+        'from Google Calendar settings, not the embed or public web URL',
+    );
+  }
+  if (!text.includes('END:VCALENDAR')) throw new Error('malformed iCalendar document');
+  const unfolded = text.replace(/^\uFEFF/, '').replace(/\r?\n[ \t]/g, '');
+  const stack: string[] = [];
+  for (const line of unfolded.split(/\r?\n/).filter((value) => value !== '')) {
+    const separator = line.indexOf(':');
+    if (separator <= 0) throw new Error('malformed iCalendar document');
+    const name = line.slice(0, separator).split(';', 1)[0]!.toUpperCase();
+    const value = line.slice(separator + 1).trim().toUpperCase();
+    if (name === 'BEGIN') stack.push(value);
+    if (name === 'END' && stack.pop() !== value) throw new Error('malformed iCalendar document');
+  }
+  if (stack.length !== 0) throw new Error('malformed iCalendar document');
+  try {
+    ical.sync.parseICS(text);
+  } catch {
+    throw new Error('malformed iCalendar document');
+  }
 }
 
-export const icalSource: Source<IcalConfig, CalendarData> = {
-  id: 'ical',
-  async fetch(config, signal): Promise<SourceResult<CalendarData>> {
-    if (config.urls.length === 0) {
-      return { status: 'error', error: 'no calendar URLs configured' };
-    }
-    try {
-      const texts = await Promise.all(
-        config.urls.map(async (url) => {
-          const res = await globalThis.fetch(url, { signal });
-          if (!res.ok) throw new Error(`calendar responded ${res.status}`);
-          const text = await res.text();
+export interface IcalFeedConfig {
+  url: string;
+}
 
-          // Google's settings page offers three URLs that look interchangeable.
-          // The "Public URL to this calendar" is an HTML page, which parses to
-          // zero events and would otherwise show a silent, permanently empty
-          // agenda. Fail loudly instead.
-          if (!text.includes('BEGIN:VCALENDAR')) {
-            throw new Error(
-              'not an iCalendar feed — use the "Secret address in iCal format" ' +
-                'from Google Calendar settings, not the embed or public web URL',
-            );
-          }
-          return text;
-        }),
-      );
-      return {
-        status: 'ok',
-        data: expandCalendar(texts, new Date(), config.timezone),
-        fetchedAt: new Date().toISOString(),
-      };
-    } catch (err) {
-      return { status: 'error', error: err instanceof Error ? err.message : String(err) };
-    }
-  },
-};
+/** One source run and one last-good raw cache per configured feed URL. */
+export function createIcalFeedSource(fetchText: CalendarTextFetcher): Source<IcalFeedConfig, string> {
+  return {
+    id: 'ical',
+    async fetch(config, signal): Promise<SourceResult<string>> {
+      let url: URL;
+      try {
+        url = parseCalendarUrl(config.url);
+      } catch {
+        return { status: 'error', error: 'calendar feed URL is not supported' };
+      }
+
+      const host = calendarHostDescription(url);
+      try {
+        const text = await fetchText(config.url, signal);
+        validateIcalendar(text);
+        return { status: 'ok', data: text, fetchedAt: new Date().toISOString() };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'calendar fetch failed';
+        const knownSafeReason = reason.includes('Google Calendar settings') ||
+          reason === 'calendar fetch aborted' ||
+          reason === 'calendar redirect limit exceeded' ||
+          reason.startsWith(`calendar host ${host} `) ||
+          reason.startsWith(`calendar feed from ${host} `);
+        const safeReason = knownSafeReason ? reason : `calendar feed from ${host} is invalid`;
+        return { status: 'error', error: safeReason };
+      }
+    },
+  };
+}
+
+export const icalFeedSource = createIcalFeedSource(
+  createCalendarTextFetcher({ allowPrivateNetworks: false }),
+);

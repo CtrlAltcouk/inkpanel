@@ -17,6 +17,7 @@
 #   BRIDGE=vmbr0 STORAGE=local-lvm TEMPLATE_STORAGE=local
 #   REPO_URL=https://github.com/CtrlAltcouk/inkpanel.git BRANCH=main
 #   UNPRIVILEGED=1 START_ON_BOOT=1 HTTPS_PORT=8443
+#   CALENDAR_ALLOW_PRIVATE_NETWORKS=0
 #
 set -Eeuo pipefail
 
@@ -73,6 +74,10 @@ START_ON_BOOT="${START_ON_BOOT:-1}"
 REPO_URL="${REPO_URL:-https://github.com/CtrlAltcouk/inkpanel.git}"
 BRANCH="${BRANCH:-main}"
 HTTPS_PORT="${HTTPS_PORT:-8443}"
+CALENDAR_ALLOW_PRIVATE_NETWORKS="${CALENDAR_ALLOW_PRIVATE_NETWORKS:-0}"
+
+[[ "$CALENDAR_ALLOW_PRIVATE_NETWORKS" =~ ^[01]$ ]] \
+  || die "CALENDAR_ALLOW_PRIVATE_NETWORKS must be 0 or 1"
 
 [[ "$HTTPS_PORT" =~ ^[0-9]+$ && ${#HTTPS_PORT} -le 5 ]] \
   || die "HTTPS_PORT must be an integer from 1 to 65535"
@@ -328,6 +333,10 @@ PUBLIC_BASE_URL=http://${CT_IP}:${APP_PORT}
 
 # Browser-only HTTPS port used by the Flash tab. Panels still use HTTP above.
 HTTPS_PORT=${HTTPS_PORT}
+
+# Set to 1 only when calendar feeds are deliberately hosted on the private LAN.
+# Loopback and link-local calendar destinations are always blocked.
+CALENDAR_ALLOW_PRIVATE_NETWORKS=${CALENDAR_ALLOW_PRIVATE_NETWORKS}
 
 # Uncomment to require a password for the web UI. The panel's own endpoint stays
 # open regardless, because firmware cannot log in.

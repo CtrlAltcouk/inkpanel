@@ -9,6 +9,11 @@ import { DeviceStore } from './devices/store.ts';
 import { FrameService } from './render/frameService.ts';
 import { Renderer } from './render/browser.ts';
 import { SourceCache } from './sources/cache.ts';
+import {
+  createCalendarTextFetcher,
+  parseCalendarAllowPrivateNetworks,
+} from './sources/calendarHttp.ts';
+import { createIcalFeedSource } from './sources/ical.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
@@ -47,10 +52,20 @@ export async function main(): Promise<void> {
   const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${detectedLanAddress}:${port}`;
   const resolvedHttps = resolveHttpsPort(process.env.HTTPS_PORT);
   const runtimeState = createRuntimeState();
+  const allowPrivateCalendarNetworks = parseCalendarAllowPrivateNetworks(
+    process.env.CALENDAR_ALLOW_PRIVATE_NETWORKS,
+  );
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
   const renderer = new Renderer();
-  const frames = new FrameService({ renderer, cache: new SourceCache(join(dataDir, 'cache')) });
+  const calendarSource = createIcalFeedSource(createCalendarTextFetcher({
+    allowPrivateNetworks: allowPrivateCalendarNetworks,
+  }));
+  const frames = new FrameService({
+    renderer,
+    cache: new SourceCache(join(dataDir, 'cache')),
+    calendarSource,
+  });
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
   const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
@@ -76,6 +91,7 @@ export async function main(): Promise<void> {
   console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
   console.log(`data directory: ${dataDir}`);
   console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
+  console.log(`private calendar networks: ${allowPrivateCalendarNetworks ? 'enabled' : 'blocked'}`);
 
   // Additive: :8080 keeps serving firmware check-ins over plain HTTP, which
   // an ESP32 cannot do over a self-signed cert anyway. This second listener

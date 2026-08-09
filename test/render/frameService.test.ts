@@ -311,3 +311,38 @@ test('a failing source is reported without hiding that the device was checked', 
     ]);
   });
 });
+
+test('partial calendar data still renders when aggregate calendar health is error', async () => {
+  const bundle: SourceBundle = {
+    calendar: {
+      today: [{
+        uid: 'partial-1',
+        title: 'Healthy feed event',
+        start: '2026-08-03T08:30:00.000Z',
+        end: '2026-08-03T09:00:00.000Z',
+        allDay: false,
+      }],
+      tomorrow: [],
+    },
+    weather: null,
+    bins: null,
+    sourceHealth: [{
+      id: 'ical',
+      status: 'error',
+      fetchedAt: '2026-08-03T07:00:00.000Z',
+      error: '1 of 3 calendar feeds unavailable',
+    }],
+  };
+  await withService(async () => bundle, async (service) => {
+    const device = { ...defaultDevice('panel-a'), claimed: true };
+    const html = await service.previewHtml(device);
+    assert.match(html, /Healthy feed event/);
+    assert.equal((await service.frameFor(device, 4.0)).buffer.length, 48000);
+    assert.deepEqual(service.sourceIssues(), [{
+      deviceId: 'panel-a',
+      sourceId: 'ical',
+      status: 'error',
+      error: '1 of 3 calendar feeds unavailable',
+    }]);
+  });
+});
