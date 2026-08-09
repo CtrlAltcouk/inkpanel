@@ -86,7 +86,8 @@ https://<your-server-ip>:<HTTPS_PORT>/#flash
 
 `HTTPS_PORT` defaults to `8443` and can be changed in `inkpanel.env` or the
 Docker Compose environment. The HTTP Flash page obtains the effective port
-from the server, so its secure-connection link stays correct after a change.
+from the server only after the HTTPS listener is active, so its secure-connection
+link stays correct after a change and is omitted if certificates or binding fail.
 
 The locally generated certificate includes the detected LAN IP and the valid
 host/IP from `PUBLIC_BASE_URL`, but it is still self-signed, so the browser may

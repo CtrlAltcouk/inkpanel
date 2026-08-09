@@ -8,6 +8,7 @@ import { isIP } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type express from 'express';
+import type { RuntimeState } from './runtimeConfig.ts';
 
 const run = promisify(execFile);
 
@@ -261,4 +262,24 @@ export async function startHttpsListener(
     console.error('https disabled: failed to start listener:', err);
     return null;
   }
+}
+
+type HttpsListenerStarter = typeof startHttpsListener;
+
+/** Publish HTTPS only after the requested listener has actually started. */
+export async function activateHttpsListener(
+  app: express.Express,
+  options: HttpsOptions,
+  runtimeState: RuntimeState,
+  start: HttpsListenerStarter = startHttpsListener,
+): Promise<Server | null> {
+  runtimeState.httpsPort = null;
+  const server = await start(app, options);
+  if (server?.listening) {
+    runtimeState.httpsPort = options.port;
+    server.once('close', () => {
+      if (runtimeState.httpsPort === options.port) runtimeState.httpsPort = null;
+    });
+  }
+  return server;
 }

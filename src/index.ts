@@ -4,12 +4,12 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './http/app.ts';
 import { loadOrCreateSecret } from './http/auth.ts';
-import { startHttpsListener } from './https.ts';
+import { activateHttpsListener } from './https.ts';
 import { DeviceStore } from './devices/store.ts';
 import { FrameService } from './render/frameService.ts';
 import { Renderer } from './render/browser.ts';
 import { SourceCache } from './sources/cache.ts';
-import { resolveHttpsPort } from './runtimeConfig.ts';
+import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
 
@@ -46,6 +46,7 @@ export async function main(): Promise<void> {
   const detectedLanAddress = lanAddress();
   const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${detectedLanAddress}:${port}`;
   const resolvedHttps = resolveHttpsPort(process.env.HTTPS_PORT);
+  const runtimeState = createRuntimeState();
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
   const renderer = new Renderer();
@@ -56,14 +57,25 @@ export async function main(): Promise<void> {
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
 
   const app = createApp({
-    store, frames, publicBaseUrl, httpsPort: resolvedHttps.httpsPort,
+    store, frames, publicBaseUrl, runtimeState,
     dataDir, firmwareDir, auth: { password, secret }, trustProxy,
   });
-  const server = app.listen(port, () => {
-    console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
-    console.log(`data directory: ${dataDir}`);
-    console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
+  const server = app.listen(port);
+  await new Promise<void>((resolveListening, rejectListening) => {
+    if (server.listening) {
+      resolveListening();
+      return;
+    }
+    const onError = (err: Error) => rejectListening(err);
+    server.once('error', onError);
+    server.once('listening', () => {
+      server.off('error', onError);
+      resolveListening();
+    });
   });
+  console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
+  console.log(`data directory: ${dataDir}`);
+  console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
 
   // Additive: :8080 keeps serving firmware check-ins over plain HTTP, which
   // an ESP32 cannot do over a self-signed cert anyway. This second listener
@@ -71,18 +83,18 @@ export async function main(): Promise<void> {
   // context — see docs/superpowers/specs/2026-08-06-inkpanel-web-flash-design.md.
   const httpsServer = resolvedHttps.httpsPort === null
     ? null
-    : await startHttpsListener(app, {
+    : await activateHttpsListener(app, {
       dataDir,
       port: resolvedHttps.httpsPort,
       identities: { lanAddress: detectedLanAddress, publicBaseUrl, hostname: hostname() },
-    });
+    }, runtimeState);
   if (resolvedHttps.error) {
     console.error(`https disabled: ${resolvedHttps.error}; plain HTTP remains available`);
   } else {
     console.log(
-    httpsServer
-      ? `https listening on https://${detectedLanAddress}:${resolvedHttps.httpsPort} (self-signed; needed for the Flash tab)`
-      : 'https disabled: could not generate a certificate (openssl missing?) — flashing will be unavailable',
+      httpsServer
+        ? `https listening on https://${detectedLanAddress}:${resolvedHttps.httpsPort} (self-signed; needed for the Flash tab)`
+        : 'https disabled: could not generate a certificate (openssl missing?) — flashing will be unavailable',
     );
   }
 

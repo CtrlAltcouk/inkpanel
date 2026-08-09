@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DeviceStoreError, type DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
+import type { RuntimeState } from '../runtimeConfig.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
 import { firmwareRoutes } from './firmwareRoutes.ts';
@@ -34,8 +35,8 @@ export interface AppDeps {
   store: DeviceStore;
   frames: FrameService;
   publicBaseUrl: string;
-  /** Resolved once by the server; null means optional HTTPS is disabled. */
-  httpsPort: number | null;
+  /** Shared live state; HTTPS remains null until its listener has started. */
+  runtimeState: RuntimeState;
   /** Where device config and caches live; used to report free disk space. */
   dataDir: string;
   /** Where build-firmware.sh wrote its output. */
@@ -95,7 +96,7 @@ export function createApp(deps: AppDeps): express.Express {
   // is intentionally public and mounted before the authenticated API gate.
   app.get('/api/runtime-config', (_req, res) => {
     res.set('cache-control', 'no-store');
-    res.json({ httpsPort: deps.httpsPort });
+    res.json({ httpsPort: deps.runtimeState.httpsPort });
   });
 
   const auth = createAuth(deps.auth);

@@ -162,7 +162,7 @@ async function withApp(password: string | null, fn: (base: string, store: Device
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-auth-'));
   const store = new DeviceStore(join(dir, 'config.json'));
   const app = createApp({
-    store, frames, publicBaseUrl: 'http://test:8080', httpsPort: 8443,
+    store, frames, publicBaseUrl: 'http://test:8080', runtimeState: { httpsPort: null },
     dataDir: dir, firmwareDir: dir,
     auth: { password, secret: SECRET },
   });

@@ -276,6 +276,23 @@ test('runtime-config failure shows no guessed HTTPS port', async () => {
   );
 });
 
+test('inactive HTTPS runtime state shows no dead redirect', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/path?q=1#flash' } }, () =>
+      withFetch(
+        async () => ({ status: 200, ok: true, json: async () => ({ httpsPort: null }) }),
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.equal(occurrences(root.innerHTML, 'no HTTPS address has been guessed'), 1);
+          assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:8080'), 0);
+          assert.equal(occurrences(root.innerHTML, '<a href'), 0);
+        },
+      ),
+    ),
+  );
+});
+
 // "Firefox + HTTP" quadrant: this is the defect. Both isSecureContext is
 // false and the browser lacks WebSerial, but only the unsupported-browser
 // notice is correct — an HTTPS link would not give Firefox WebSerial.

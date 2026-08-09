@@ -1,5 +1,14 @@
 export const DEFAULT_HTTPS_PORT = 8443;
 
+/** Public runtime capabilities. HTTPS is advertised only while its listener is active. */
+export interface RuntimeState {
+  httpsPort: number | null;
+}
+
+export function createRuntimeState(): RuntimeState {
+  return { httpsPort: null };
+}
+
 export interface ResolvedHttpsPort {
   httpsPort: number | null;
   error: string | null;

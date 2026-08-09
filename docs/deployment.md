@@ -147,7 +147,9 @@ warning when the corrected certificate is first generated. It remains
 self-signed, so the initial trust warning is expected even when its SANs match.
 
 An invalid `HTTPS_PORT` disables only optional browser HTTPS and is reported in
-the service log and `/api/runtime-config`; the plain HTTP panel/device service
+the service log. `/api/runtime-config` reports an HTTPS port only after that
+listener has successfully started; certificate or bind failures leave it null so
+the Flash page never links to a dead endpoint. The plain HTTP panel/device service
 continues running. Use an integer from 1 through 65535 and restart the service.
 
 ## TrueNAS

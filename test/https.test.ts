@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { X509Certificate } from 'node:crypto';
+import { once } from 'node:events';
 import {
   chmod, mkdtemp, stat, rm, mkdir, readFile, writeFile,
 } from 'node:fs/promises';
@@ -11,11 +12,12 @@ import { get as httpGet, type Server as HttpServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import express from 'express';
 import {
-  deriveCertificateIdentities, ensureCertificate, startHttpsListener,
+  activateHttpsListener, deriveCertificateIdentities, ensureCertificate, startHttpsListener,
 } from '../src/https.ts';
 import { createApp } from '../src/http/app.ts';
 import { DeviceStore } from '../src/devices/store.ts';
 import type { FrameService } from '../src/render/frameService.ts';
+import { createRuntimeState, type RuntimeState } from '../src/runtimeConfig.ts';
 
 async function tempDir() {
   return mkdtemp(join(tmpdir(), 'inkpanel-https-'));
@@ -350,6 +352,103 @@ const frames = {
   warmUp: async () => {},
 } as unknown as FrameService;
 
+function createRuntimeApp(dir: string, runtimeState: RuntimeState) {
+  return createApp({
+    store: new DeviceStore(join(dir, 'config.json')),
+    frames,
+    publicBaseUrl: 'http://127.0.0.1:8080',
+    runtimeState,
+    dataDir: dir,
+    firmwareDir: dir,
+    auth: { password: null, secret: Buffer.from('b'.repeat(64), 'hex') },
+  });
+}
+
+test('active HTTPS port is published only after a successful listener start', async () => {
+  const dir = await tempDir();
+  const runtimeState = createRuntimeState();
+  const app = createRuntimeApp(dir, runtimeState);
+  const httpServer = app.listen(0, '127.0.0.1');
+  const listener = createNetServer();
+  let releaseStart!: () => void;
+  const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+  try {
+    await once(httpServer, 'listening');
+    const httpPort = (httpServer.address() as AddressInfo).port;
+
+    const activation = activateHttpsListener(
+      app,
+      { dataDir: dir, port: 9443 },
+      runtimeState,
+      async (_app, options) => {
+        await new Promise<void>((resolve, reject) => {
+          listener.once('error', reject);
+          listener.listen(options.port, '127.0.0.1', resolve);
+        });
+        await startGate;
+        return listener as unknown as Server;
+      },
+    );
+
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null },
+      'a requested port must not be advertised while listener startup is still pending');
+    releaseStart();
+    const server = await activation;
+    assert.ok(server?.listening);
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: 9443 });
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null },
+      'a stopped listener must no longer be advertised');
+  } finally {
+    releaseStart();
+    if (listener.listening) await new Promise<void>((resolve) => listener.close(() => resolve()));
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed HTTPS activation leaves runtime config unavailable', async () => {
+  const dir = await tempDir();
+  const runtimeState = createRuntimeState();
+  const app = createRuntimeApp(dir, runtimeState);
+  const server = await activateHttpsListener(
+    app,
+    { dataDir: dir, port: 9443 },
+    runtimeState,
+    async () => null,
+  );
+  assert.equal(server, null);
+  assert.deepEqual(runtimeState, { httpsPort: null });
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('HTTP and HTTPS port collision keeps HTTP healthy and HTTPS undisclosed', async () => {
+  const dir = await tempDir();
+  const runtimeState = createRuntimeState();
+  const app = createRuntimeApp(dir, runtimeState);
+  const httpServer = app.listen(0);
+  let httpsServer: Server | null = null;
+  try {
+    await once(httpServer, 'listening');
+    const httpPort = (httpServer.address() as AddressInfo).port;
+    if (await ensureCertificate(dir) === null) return;
+
+    httpsServer = await activateHttpsListener(
+      app,
+      { dataDir: dir, port: httpPort },
+      runtimeState,
+    );
+    assert.equal(httpsServer, null, 'the already-bound HTTP port must reject the HTTPS listener');
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null });
+    assert.equal((await getPlainJson(httpPort, '/health')).status, 200,
+      'optional HTTPS failure must not affect the primary HTTP service');
+  } finally {
+    await closeServer(httpsServer);
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 /** Request over real TLS, accepting the self-signed cert for this call only. */
 function getOverTls(port: number, path: string): Promise<{ status: number; body: Buffer }> {
   return new Promise((resolve, reject) => {
@@ -375,7 +474,7 @@ test('the frame endpoint and health stay open over HTTPS even with a password se
       store,
       frames,
       publicBaseUrl: 'https://test:8443',
-      httpsPort: 8443,
+      runtimeState: { httpsPort: null },
       dataDir: dir,
       firmwareDir: dir,
       auth: { password: 'hunter2', secret: Buffer.from('a'.repeat(64), 'hex') },
