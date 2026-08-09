@@ -178,7 +178,7 @@ printf 'candidate dependencies\n' > "$prefix/node_modules/package.txt"
     'TRANSACTION_ROOT=/var/lib/inkpanel-update',
     `TRANSACTION_ROOT=${bashPath(join(dir, 'transaction-state'))}`,
   );
-  script = script.replace('HEALTH_MAX_ATTEMPTS=45', 'HEALTH_MAX_ATTEMPTS=4');
+  script = script.replace('HEALTH_MAX_ATTEMPTS=45', 'HEALTH_MAX_ATTEMPTS=5');
   await writeExecutable(updater, script);
   await cp(WRITE_STATUS, join(dir, 'write-status.mjs'));
 
@@ -279,7 +279,7 @@ test('failed candidate health rolls back multiple commits to the exact baseline 
 
     const result = await runUpdater(
       fixture,
-      ['200', '503', '503', '503', '503', '200', '200', '200'],
+      ['200', '503', '503', '503', '503', '503', '200', '200', '200'],
     );
 
     assert.notEqual(result.code, 0);
@@ -298,7 +298,7 @@ test('rollback restores exact config bytes after a failed candidate writes a fut
     });
     const result = await runUpdater(
       fixture,
-      ['200', '503', '503', '503', '503', '200', '200', '200'],
+      ['200', '503', '503', '503', '503', '503', '200', '200', '200'],
       { CANDIDATE_CONFIG_CONTENT: '{"schemaVersion":999,"devices":[]}' },
     );
 
@@ -317,7 +317,7 @@ test('rollback restores config absence when the candidate creates config.json', 
     });
     await runUpdater(
       fixture,
-      ['200', '503', '503', '503', '503', '200', '200', '200'],
+      ['200', '503', '503', '503', '503', '503', '200', '200', '200'],
       { CANDIDATE_CONFIG_CONTENT: '{"schemaVersion":999,"devices":[]}' },
     );
 
@@ -330,7 +330,7 @@ test('candidate server rollback restores the previous firmware package', async (
     await commitUpstream(fixture, 'firmware candidate', async () => {
       await writeFile(join(fixture.upstream, 'firmware', 'marker.txt'), 'new firmware input\n');
     });
-    await runUpdater(fixture, ['200', '503', '503', '503', '503', '200', '200', '200']);
+    await runUpdater(fixture, ['200', '503', '503', '503', '503', '503', '200', '200', '200']);
 
     assert.equal(
       await readFile(join(fixture.repoDir, 'firmware', 'dist', 'package.txt'), 'utf8'),
@@ -346,7 +346,7 @@ test('candidate server rollback restores firmware package absence', async () => 
     await commitUpstream(fixture, 'firmware candidate', async () => {
       await writeFile(join(fixture.upstream, 'firmware', 'marker.txt'), 'new firmware input\n');
     });
-    await runUpdater(fixture, ['200', '503', '503', '503', '503', '200', '200', '200']);
+    await runUpdater(fixture, ['200', '503', '503', '503', '503', '503', '200', '200', '200']);
 
     await assert.rejects(access(dist));
   });
@@ -379,7 +379,7 @@ test('health failure after dependency activation restores old node_modules witho
     await commitUpstream(fixture, 'dependency candidate', async () => {
       await writeFile(join(fixture.upstream, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
     });
-    await runUpdater(fixture, ['200', '503', '503', '503', '503', '200', '200', '200']);
+    await runUpdater(fixture, ['200', '503', '503', '503', '503', '503', '200', '200', '200']);
 
     assert.equal(
       await readFile(join(fixture.repoDir, 'node_modules', 'package.txt'), 'utf8'),
@@ -422,7 +422,7 @@ test('rollback failure reports manual intervention required', async () => {
     });
     const result = await runUpdater(
       fixture,
-      ['200', '503', '503', '503', '503', '503', '503', '503', '503'],
+      ['200', '503', '503', '503', '503', '503', '503', '503', '503', '503', '503'],
     );
 
     assert.notEqual(result.code, 0);

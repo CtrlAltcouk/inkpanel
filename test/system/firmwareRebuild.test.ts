@@ -158,7 +158,7 @@ test('a pull that touches firmware/ triggers a rebuild, and the update still suc
 
     const { code, status } = await runUpdater(fixture);
 
-    assert.equal(code, 0);
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success');
     assert.ok(
       status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
@@ -197,7 +197,7 @@ for (const changedFile of ['scripts/build-firmware.sh', 'scripts/firmware-manife
 
       const { code, status } = await runUpdater(fixture);
 
-      assert.equal(code, 0);
+      assert.equal(code, 0, status.log.join('\n'));
       assert.equal(status.state, 'success');
       assert.ok(
         status.log.some((l) => /firmware rebuild \(firmware inputs changed\)/.test(l)),
@@ -225,7 +225,7 @@ test('a failing firmware rebuild does NOT fail the update', async () => {
 
     const { code, status } = await runUpdater(fixture, { BUILD_EXIT_CODE: '1' });
 
-    assert.equal(code, 0, 'the updater process itself must exit 0');
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success', 'the update must still be recorded as successful');
     assert.ok(
       status.log.some((l) => /firmware rebuild: FAILED/.test(l)),
@@ -246,7 +246,7 @@ test('a pull that does not touch firmware/ skips the rebuild entirely', async ()
 
     const { code, status } = await runUpdater(fixture);
 
-    assert.equal(code, 0);
+    assert.equal(code, 0, status.log.join('\n'));
     assert.equal(status.state, 'success');
     assert.ok(status.log.some((l) => /firmware rebuild skipped/.test(l)));
     await assert.rejects(
