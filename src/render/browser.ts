@@ -8,14 +8,30 @@ import type { PanelProfile } from '../panel/profile.ts';
  */
 export class Renderer {
   private browser: Browser | null = null;
+  private launchPromise: Promise<Browser> | null = null;
+
+  constructor(
+    private readonly launchBrowser: () => Promise<Browser> = () => chromium.launch({
+      // Required in most container configurations.
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+    }),
+  ) {}
 
   private async ensure(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
-    this.browser = await chromium.launch({
-      // Required in most container configurations.
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-    });
-    return this.browser;
+    if (!this.launchPromise) {
+      this.launchPromise = this.launchBrowser()
+        .then((browser) => {
+          this.browser = browser;
+          return browser;
+        })
+        .finally(() => {
+          // A failure must be retryable, and a success is thereafter served
+          // from this.browser. Neither outcome leaves a poisoned promise.
+          this.launchPromise = null;
+        });
+    }
+    return this.launchPromise;
   }
 
   /**
@@ -49,7 +65,15 @@ export class Renderer {
   }
 
   async close(): Promise<void> {
+    if (this.launchPromise) {
+      try {
+        await this.launchPromise;
+      } catch {
+        // There is no browser to close after a failed cold launch.
+      }
+    }
     await this.browser?.close();
     this.browser = null;
+    this.launchPromise = null;
   }
 }

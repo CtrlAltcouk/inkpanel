@@ -266,9 +266,13 @@ async function runUpdater(
     code = (err as { code?: number }).code ?? 1;
     stderr = (err as { stderr?: string }).stderr ?? '';
   }
-  const status = JSON.parse(
-    await readFile(join(fixture.dataDir, 'update-status.json'), 'utf8'),
-  ) as UpdateStatus;
+  let statusText: string;
+  try {
+    statusText = await readFile(join(fixture.dataDir, 'update-status.json'), 'utf8');
+  } catch (err) {
+    throw new Error(`updater produced no status (exit ${code}): ${stderr}`, { cause: err });
+  }
+  const status = JSON.parse(statusText) as UpdateStatus;
   return { code, status, stderr };
 }
 
@@ -510,6 +514,32 @@ test('the deployed updater never promotes checkout content into privileged paths
     /(?:cp|install)\s+[^\n]*(?:\/usr\/local\/bin|\/etc\/systemd\/system)/,
     'an app-owned checkout must never replace a root executable or unit during self-update',
   );
+});
+
+test('root never follows app-controlled firmware paths during snapshot or restore', async () => {
+  const script = await readFile(UPDATER, 'utf8');
+  assert.doesNotMatch(script, /(^|\n)\s*(?:cp|rm\s+-rf)\b[^\n]*\$FIRMWARE_DIST/);
+  assert.match(script, /runuser -u "\$APP" -- cp -a -- "\$FIRMWARE_DIST"/);
+  assert.match(script, /runuser -u "\$APP" -- rm -rf -- "\$FIRMWARE_DIST"/);
+  assert.match(
+    script,
+    /mv -- "\$FIRMWARE_STAGE" "\$TRANSACTION_DIR\/firmware-snapshot"/,
+  );
+  assert.match(
+    script,
+    /mv -T -- "\$TRANSACTION_DIR\/firmware-snapshot" "\$restore_stage"/,
+    'root must treat the app-owned restore destination as a final path, not a directory',
+  );
+  assert.doesNotMatch(
+    script,
+    /(^|\n)\s*mv\s+[^\n]*\$FIRMWARE_STAGE\//,
+    'root must rename the staging object without traversing its contents',
+  );
+  assert.match(
+    script,
+    /runuser -u "\$APP" -- mv -- "\$restore_stage\/firmware-dist" "\$FIRMWARE_DIST"/,
+  );
+  assert.match(script, /\[\[ ! -d "\$REPO_DIR" \|\| -L "\$REPO_DIR" \]\]/);
 });
 
 test('status publication and mode changes run as the unprivileged app user', async () => {

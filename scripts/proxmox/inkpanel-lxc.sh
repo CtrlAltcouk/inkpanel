@@ -205,7 +205,10 @@ run "install -o root -g root -m 755 ${APP_DIR}/app/scripts/proxmox/files/inkpane
      chmod 755 /usr/local/bin/inkpanel-update
      install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.path /etc/systemd/system/inkpanel-update.path
      install -o root -g root -m 644 ${APP_DIR}/app/scripts/proxmox/files/inkpanel-update.service /etc/systemd/system/inkpanel-update.service
-     chown -R ${APP}:${APP} ${APP_DIR}"
+     mkdir -p ${APP_DIR}/data ${APP_DIR}/.cache ${APP_DIR}/.npm ${APP_DIR}/.arduino15
+     chown -R ${APP}:${APP} ${APP_DIR}/app ${APP_DIR}/data ${APP_DIR}/.cache ${APP_DIR}/.npm ${APP_DIR}/.arduino15
+     chown root:root ${APP_DIR}
+     chmod 755 ${APP_DIR}"
 
 step "npm dependencies"
 run "cd ${APP_DIR}/app && runuser -u ${APP} -- npm ci --omit=dev --silent >/dev/null 2>&1"
@@ -321,7 +324,10 @@ PUBLIC_BASE_URL=http://${CT_IP}:${APP_PORT}
 # guards against casual access, not against anyone capturing packets.
 #INKPANEL_PASSWORD=change-me
 ENVFILE
-chown ${APP}:${APP} ${APP_DIR}/${APP}.env"
+chown root:${APP} ${APP_DIR}/${APP}.env
+chmod 640 ${APP_DIR}/${APP}.env
+chown root:root ${APP_DIR}
+chmod 755 ${APP_DIR}"
 
 run "systemctl daemon-reload && systemctl enable --now ${APP}.service >/dev/null 2>&1"
 

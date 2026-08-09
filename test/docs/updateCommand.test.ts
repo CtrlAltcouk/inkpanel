@@ -54,6 +54,9 @@ test('existing-LXC helper refresh leaves the live checkout untouched until the u
   assert.ok(block, 'expected a pinned, root-owned helper refresh block');
   assert.doesNotMatch(block, /git\s+(?:-C\s+\S+\s+)?(?:pull|reset)\b/);
   assert.doesNotMatch(block, /\/opt\/inkpanel\/app\/scripts\/proxmox\/files/);
+  assert.match(block, /chown root:root \/opt\/inkpanel/);
+  assert.match(block, /chmod 755 \/opt\/inkpanel/);
+  assert.doesNotMatch(block, /chown\s+-R[^\n]*\/opt\/inkpanel/);
   assert.match(block, /raw\.githubusercontent\.com\/CtrlAltcouk\/inkpanel\/\$HELPER_REF/);
   assert.match(block, /\/usr\/local\/bin\/inkpanel-update/);
 });

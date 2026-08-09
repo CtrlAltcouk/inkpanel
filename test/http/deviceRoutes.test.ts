@@ -18,6 +18,7 @@ function stubFrames(): FrameService {
     previewHtml: async () => '<html></html>',
     sourceIssues: () => [],
     renderedDeviceCount: () => 0,
+    warmUp: async () => {},
   } as unknown as FrameService;
 }
 

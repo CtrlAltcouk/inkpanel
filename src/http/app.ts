@@ -62,12 +62,9 @@ export function createApp(deps: AppDeps): express.Express {
 
   app.get('/health', async (_req, res) => {
     const uptimeSeconds = Math.round(process.uptime());
+    let devices: number;
     try {
-      res.json({
-        status: 'ok',
-        devices: (await deps.store.list()).length,
-        uptimeSeconds,
-      });
+      devices = (await deps.store.list()).length;
     } catch (err) {
       if (err instanceof DeviceStoreError) {
         res.status(503).json({ ...deviceStoreErrorBody(err), devices: null, uptimeSeconds });
@@ -75,6 +72,21 @@ export function createApp(deps: AppDeps): express.Express {
       }
       throw err;
     }
+
+    try {
+      await deps.frames.warmUp();
+    } catch (err) {
+      res.status(503).json({
+        status: 'error',
+        component: 'renderer',
+        error: err instanceof Error ? err.message : String(err),
+        devices,
+        uptimeSeconds,
+      });
+      return;
+    }
+
+    res.json({ status: 'ok', devices, uptimeSeconds });
   });
 
   const auth = createAuth(deps.auth);

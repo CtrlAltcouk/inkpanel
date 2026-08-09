@@ -83,6 +83,8 @@ files, and install the same bytes you inspected:
 
 ```bash
 pct enter <CTID>
+chown root:root /opt/inkpanel
+chmod 755 /opt/inkpanel
 HELPER_DIR="$(mktemp -d /root/inkpanel-helper.XXXXXX)"
 chmod 700 "$HELPER_DIR"
 HELPER_REF="$(git ls-remote https://github.com/CtrlAltcouk/inkpanel.git refs/heads/main | awk '{print $1}')"
@@ -102,6 +104,11 @@ exit
 
 The download is pinned before either file is fetched, and installation uses the
 same root-owned files that were inspected, avoiding an inspection/install race.
+The ownership repair changes only `/opt/inkpanel` itself; it is intentionally
+not recursive, so the app checkout and data directory remain `inkpanel`-owned.
+Fresh installs enforce the same boundary: `/opt/inkpanel` is `root:root` mode
+`0755`, while `app`, `data`, `.cache`, `.npm`, and `.arduino15` beneath it are
+owned by `inkpanel`.
 The live `/opt/inkpanel/app` HEAD and worktree remain unchanged until the new
 transactional updater captures the true `COMMIT_BEFORE` and performs the pull.
 This promotion is deliberately manual: the unprivileged application can ask

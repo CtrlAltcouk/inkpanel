@@ -8,7 +8,9 @@ import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
 
-const frames = { sourceIssues: () => [], renderedDeviceCount: () => 0 } as unknown as FrameService;
+const frames = {
+  warmUp: async () => {}, sourceIssues: () => [], renderedDeviceCount: () => 0,
+} as unknown as FrameService;
 
 async function withServer(fn: (base: string, dataDir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-system-'));

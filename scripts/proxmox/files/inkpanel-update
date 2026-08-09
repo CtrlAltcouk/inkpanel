@@ -49,6 +49,7 @@ CONFIG_MODE=600
 FIRMWARE_SNAPSHOTTED=0
 FIRMWARE_EXISTED=0
 FIRMWARE_REPLACED=0
+FIRMWARE_STAGE=""
 SERVICE_STOPPED=0
 CANDIDATE_STARTED=0
 HEALTH_PORT=8080
@@ -72,6 +73,9 @@ remove_path() {
 }
 
 cleanup_artifacts() {
+  if [[ -n "$FIRMWARE_STAGE" && -e "$FIRMWARE_STAGE" ]]; then
+    runuser -u "$APP" -- rm -rf -- "$FIRMWARE_STAGE" || true
+  fi
   if [[ -n "$DEPS_STAGE" && -e "$DEPS_STAGE" ]]; then remove_path "$DEPS_STAGE" || true; fi
   if [[ -n "$DEPS_OLD" && -e "$DEPS_OLD" ]]; then remove_path "$DEPS_OLD" || true; fi
   if [[ -n "$TRANSACTION_DIR" && -e "$TRANSACTION_DIR" ]]; then
@@ -191,17 +195,31 @@ restore_config() {
 }
 
 restore_firmware() {
-  local ok=0
+  local ok=0 restore_stage=""
   [[ "$FIRMWARE_REPLACED" -eq 1 ]] || return 0
   log "rollback: restoring previous firmware/dist package"
-  remove_path "$FIRMWARE_DIST" || ok=1
+  if [[ ! -d "$REPO_DIR" || -L "$REPO_DIR" ]]; then
+    log "rollback: refusing firmware restore because checkout root is not a real directory"
+    return 1
+  fi
   if [[ "$FIRMWARE_EXISTED" -eq 1 ]]; then
-    if [[ -e "$TRANSACTION_DIR/firmware-dist" ]]; then
-      cp -a -- "$TRANSACTION_DIR/firmware-dist" "$FIRMWARE_DIST" || ok=1
+    if [[ -L "$TRANSACTION_DIR/firmware-snapshot" || \
+          -e "$TRANSACTION_DIR/firmware-snapshot" ]]; then
+      restore_stage="$REPO_DIR/.firmware-restore.$(basename "$TRANSACTION_DIR")"
+      # Root only renames the protected snapshot object into the validated
+      # checkout root. It never traverses app-controlled snapshot contents.
+      mv -T -- "$TRANSACTION_DIR/firmware-snapshot" "$restore_stage" || return 1
+      runuser -u "$APP" -- rm -rf -- "$FIRMWARE_DIST" || ok=1
+      runuser -u "$APP" -- mkdir -p -- "$REPO_DIR/firmware" || ok=1
+      runuser -u "$APP" -- mv -- "$restore_stage/firmware-dist" "$FIRMWARE_DIST" \
+        || ok=1
+      runuser -u "$APP" -- rmdir -- "$restore_stage" || ok=1
     else
       log "rollback: firmware/dist snapshot is missing"
       ok=1
     fi
+  else
+    runuser -u "$APP" -- rm -rf -- "$FIRMWARE_DIST" || ok=1
   fi
   return "$ok"
 }
@@ -376,7 +394,14 @@ if [[ "$NEEDS_FIRMWARE_BUILD" -eq 1 ]]; then
   FIRMWARE_SNAPSHOTTED=1
   if [[ -e "$FIRMWARE_DIST" ]]; then
     FIRMWARE_EXISTED=1
-    cp -a -- "$FIRMWARE_DIST" "$TRANSACTION_DIR/firmware-dist"
+    FIRMWARE_STAGE="$(runuser -u "$APP" -- mktemp -d "$REPO_DIR/.firmware-snapshot.XXXXXX")"
+    runuser -u "$APP" -- cp -a -- "$FIRMWARE_DIST" "$FIRMWARE_STAGE/firmware-dist" \
+      || abort_update "could not snapshot previous firmware package as inkpanel"
+    # Move the staging object itself. Root must not resolve a child through an
+    # app-controlled intermediate directory, even if that directory is raced.
+    mv -- "$FIRMWARE_STAGE" "$TRANSACTION_DIR/firmware-snapshot" \
+      || abort_update "could not protect previous firmware package"
+    FIRMWARE_STAGE=""
   fi
   if runuser -u "$APP" -- ./scripts/build-firmware.sh >>"$LOG_FILE" 2>&1; then
     FIRMWARE_REPLACED=1
