@@ -181,9 +181,14 @@ export class DeviceStore {
   }
 
   async getOrCreate(id: string): Promise<DeviceRecord> {
+    return (await this.getOrCreateWithStatus(id)).device;
+  }
+
+  /** Atomically report whether this mutation created the returned record. */
+  async getOrCreateWithStatus(id: string): Promise<{ device: DeviceRecord; created: boolean }> {
     return this.mutate((file) => {
       const existing = file.devices.find((d) => d.id === id);
-      if (existing) return existing;
+      if (existing) return { device: existing, created: false };
       const validation = currentDeviceRecordSchema.safeParse(defaultDevice(id));
       if (!validation.success) {
         throw new DeviceStoreError(
@@ -193,7 +198,7 @@ export class DeviceStore {
       }
       const created = validation.data;
       file.devices.push(created);
-      return created;
+      return { device: created, created: true };
     });
   }
 

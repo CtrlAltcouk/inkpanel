@@ -112,6 +112,19 @@ test('concurrent getOrCreate for the same id creates only one record', async () 
   });
 });
 
+test('concurrent getOrCreateWithStatus reports exactly one creation', async () => {
+  await withStore(async (store) => {
+    const results = await Promise.all([
+      store.getOrCreateWithStatus('esp32-a1b2c3'),
+      store.getOrCreateWithStatus('esp32-a1b2c3'),
+      store.getOrCreateWithStatus('esp32-a1b2c3'),
+    ]);
+    assert.equal(results.filter(({ created }) => created).length, 1);
+    assert.equal(results.filter(({ created }) => !created).length, 2);
+    assert.equal((await store.list()).length, 1);
+  });
+});
+
 test('id cannot be overwritten by a patch', async () => {
   await withStore(async (store) => {
     await store.getOrCreate('esp32-a1b2c3');

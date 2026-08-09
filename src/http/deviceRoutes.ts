@@ -3,6 +3,10 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { nextWakeSeconds } from '../schedule/nextWake.ts';
 import { deviceIdSchema } from '../devices/schema.ts';
+import {
+  DeviceEnrolmentLimiter,
+  firmwareAutoEnrolmentIdSchema,
+} from './deviceEnrolment.ts';
 
 const ERROR_RETRY_SECONDS = 300;
 
@@ -16,6 +20,7 @@ export function deviceRoutes(
   store: DeviceStore,
   frames: FrameService,
   publicBaseUrl: string,
+  enrolmentLimiter = new DeviceEnrolmentLimiter(),
 ): Router {
   const router = Router();
 
@@ -26,7 +31,31 @@ export function deviceRoutes(
       return;
     }
 
-    const device = await store.getOrCreate(id);
+    let device = await store.get(id);
+    if (!device) {
+      // Express serves HEAD through GET routes. Preserve HEAD for known panels,
+      // but never let a probe create persistent state.
+      if (req.method !== 'GET' || !firmwareAutoEnrolmentIdSchema.safeParse(id).success) {
+        res.status(404).json({ error: 'unknown device' });
+        return;
+      }
+
+      const reserved = enrolmentLimiter.reserve(req.ip ?? 'unknown');
+      if (!reserved.allowed) {
+        res.set('Retry-After', String(reserved.retryAfterSeconds));
+        res.status(429).json({ error: 'device enrolment rate limit exceeded' });
+        return;
+      }
+
+      try {
+        const result = await store.getOrCreateWithStatus(id);
+        reserved.reservation.complete(result.created);
+        device = result.device;
+      } catch (err) {
+        reserved.reservation.complete(false);
+        throw err;
+      }
+    }
     const batteryVolts = parseVolts(req.get('x-battery-voltage'));
 
     const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });

@@ -201,7 +201,7 @@ test('a password gates the system info endpoint', async () => {
 
 test('the frame endpoint stays open even with a password set', async () => {
   await withApp('hunter2', async (base) => {
-    const res = await fetch(`${base}/api/devices/esp32-1/frame`);
+    const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`);
     assert.equal(res.status, 200, 'firmware cannot log in');
     assert.equal((await res.arrayBuffer()).byteLength, 48000);
   });
@@ -219,22 +219,32 @@ test('health stays open even with a password set', async () => {
 // with no picture on the panel and no visible error.
 test('the frame endpoint stays open with a trailing slash', async () => {
   await withApp('hunter2', async (base) => {
-    const res = await fetch(`${base}/api/devices/esp32-1/frame/`);
+    const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame/`);
     assert.equal(res.status, 200);
   });
 });
 
 test('the frame endpoint stays open regardless of case', async () => {
   await withApp('hunter2', async (base) => {
-    const res = await fetch(`${base}/api/DEVICES/esp32-1/FRAME`);
+    const res = await fetch(`${base}/api/DEVICES/esp32-a1b2c3/FRAME`);
     assert.equal(res.status, 200);
   });
 });
 
 test('the frame endpoint stays open for HEAD requests', async () => {
-  await withApp('hunter2', async (base) => {
-    const res = await fetch(`${base}/api/devices/esp32-1/frame`, { method: 'HEAD' });
+  await withApp('hunter2', async (base, store) => {
+    await store.getOrCreate('test-panel');
+    const res = await fetch(`${base}/api/devices/test-panel/frame`, { method: 'HEAD' });
     assert.equal(res.status, 200);
+  });
+});
+
+test('POST and PUT to the frame path remain behind the authentication gate', async () => {
+  await withApp('hunter2', async (base) => {
+    for (const method of ['POST', 'PUT']) {
+      const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`, { method });
+      assert.equal(res.status, 401, method);
+    }
   });
 });
 

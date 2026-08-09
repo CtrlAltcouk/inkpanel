@@ -1,14 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../src/http/app.ts';
-import { DeviceStore } from '../../src/devices/store.ts';
+import { DeviceStore, DeviceStoreError } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
+import { DeviceEnrolmentLimiter } from '../../src/http/deviceEnrolment.ts';
 
 const ETAG = 'a'.repeat(32);
+
+function firmwareId(value: number): string {
+  return `esp32-${value.toString(16).padStart(6, '0')}`;
+}
 
 /** A frame service stub — these tests are about the HTTP contract, not pixels. */
 function stubFrames(): FrameService {
@@ -23,21 +28,32 @@ function stubFrames(): FrameService {
 }
 
 async function withServer(
-  fn: (base: string, store: DeviceStore) => Promise<void>,
-  frames: FrameService = stubFrames(),
+  fn: (base: string, store: DeviceStore, configPath: string) => Promise<void>,
+  options: {
+    frames?: FrameService;
+    limiter?: DeviceEnrolmentLimiter;
+    trustProxy?: boolean | number | string;
+    password?: string | null;
+    prepare?: (store: DeviceStore, configPath: string) => Promise<void>;
+  } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-http-'));
-  const store = new DeviceStore(join(dir, 'config.json'));
+  const configPath = join(dir, 'config.json');
+  const store = new DeviceStore(configPath);
+  await options.prepare?.(store, configPath);
   const app = createApp({
-    store, frames, publicBaseUrl: 'http://test.local:8080', runtimeState: { httpsPort: null },
+    store, frames: options.frames ?? stubFrames(), publicBaseUrl: 'http://test.local:8080',
+    runtimeState: { httpsPort: null },
     dataDir: dir, firmwareDir: dir,
-    auth: { password: null, secret: randomBytes(32) },
+    auth: { password: options.password ?? null, secret: randomBytes(32) },
+    trustProxy: options.trustProxy,
+    enrolmentLimiter: options.limiter,
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
   try {
-    await fn(`http://127.0.0.1:${port}`, store);
+    await fn(`http://127.0.0.1:${port}`, store, configPath);
   } finally {
     server.close();
     await rm(dir, { recursive: true, force: true });
@@ -58,17 +74,17 @@ async function claim(store: DeviceStore, id: string) {
 
 test('serves an enrolment frame for an unknown device', async () => {
   await withServer(async (base, store) => {
-    const res = await fetch(`${base}/api/devices/esp32-new/frame`);
+    const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/octet-stream');
     assert.equal((await res.arrayBuffer()).byteLength, 48000);
-    assert.equal((await store.get('esp32-new'))?.claimed, false, 'auto-registered as unclaimed');
+    assert.equal((await store.get('esp32-a1b2c3'))?.claimed, false, 'auto-registered as unclaimed');
   });
 });
 
 test('unclaimed devices are told to come back quickly', async () => {
   await withServer(async (base) => {
-    const res = await fetch(`${base}/api/devices/esp32-new/frame`);
+    const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`);
     assert.equal(res.headers.get('x-next-wake-seconds'), '60');
   });
 });
@@ -161,7 +177,7 @@ test('returns 503 with a retry interval when rendering fails', async () => {
     const res = await fetch(`${base}/api/devices/esp32-1/frame`);
     assert.equal(res.status, 503);
     assert.ok(Number(res.headers.get('x-next-wake-seconds')) > 0, 'device still needs a schedule');
-  }, failing);
+  }, { frames: failing });
 });
 
 test('a failed render stores the same retry interval it sends', async () => {
@@ -178,7 +194,7 @@ test('a failed render stores the same retry interval it sends', async () => {
     const handed = Number(res.headers.get('x-next-wake-seconds'));
     assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
       'stored lastWakeSeconds must match the retry interval actually sent, not the pre-failure value');
-  }, failing);
+  }, { frames: failing });
 });
 
 test('records the wake interval it handed out', async () => {
@@ -189,4 +205,162 @@ test('records the wake interval it handed out', async () => {
     assert.equal((await store.get('esp32-1'))?.lastWakeSeconds, handed,
       'what we told the device must match what we remember telling it');
   });
+});
+
+test('unknown legacy, uppercase, and malformed IDs cannot auto-enrol or create config', async () => {
+  const limiter = new DeviceEnrolmentLimiter({ perIpLimit: 1, globalLimit: 1 });
+  await withServer(async (base, store, configPath) => {
+    for (const id of ['test-panel', 'ESP32-A1B2C3', 'esp32-a1b2', 'esp32-a1b2c3d4']) {
+      const res = await fetch(`${base}/api/devices/${id}/frame`);
+      assert.equal(res.status, 404, id);
+    }
+    assert.deepEqual(await store.list(), []);
+    await assert.rejects(stat(configPath), { code: 'ENOENT' }, 'rejections must not write config.json');
+
+    const valid = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`);
+    assert.equal(valid.status, 200, 'invalid attempts did not consume the sole creation slot');
+  }, { limiter });
+});
+
+test('an existing custom ID stays compatible and bypasses exhausted enrolment limits', async () => {
+  const limiter = new DeviceEnrolmentLimiter({ perIpLimit: 1, globalLimit: 1 });
+  await withServer(async (base, store) => {
+    await store.getOrCreate('test-panel');
+
+    assert.equal((await fetch(`${base}/api/devices/test-panel/frame`)).status, 200);
+    assert.equal((await fetch(`${base}/api/devices/esp32-000001/frame`)).status, 200,
+      'known device did not consume creation capacity');
+    assert.equal((await fetch(`${base}/api/devices/test-panel/frame`)).status, 200,
+      'known device remains available after global capacity is exhausted');
+    assert.equal((await fetch(`${base}/api/devices/esp32-000002/frame`)).status, 429);
+  }, { limiter });
+});
+
+test('per-IP creation limit returns Retry-After and resets after one hour', async () => {
+  let now = 10_000;
+  const limiter = new DeviceEnrolmentLimiter({ now: () => now });
+  await withServer(async (base) => {
+    for (let id = 1; id <= 5; id += 1) {
+      assert.equal((await fetch(`${base}/api/devices/${firmwareId(id)}/frame`)).status, 200);
+    }
+    const limited = await fetch(`${base}/api/devices/${firmwareId(6)}/frame`);
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get('retry-after'), '3600');
+    assert.deepEqual(await limited.json(), { error: 'device enrolment rate limit exceeded' });
+
+    now += 60 * 60 * 1000;
+    assert.equal((await fetch(`${base}/api/devices/${firmwareId(6)}/frame`)).status, 200);
+  }, { limiter });
+});
+
+test('global creation limit stops rotating trusted-proxy client IPs at twenty', async () => {
+  const limiter = new DeviceEnrolmentLimiter();
+  await withServer(async (base) => {
+    for (let id = 1; id <= 20; id += 1) {
+      const res = await fetch(`${base}/api/devices/${firmwareId(id)}/frame`, {
+        headers: { 'x-forwarded-for': `198.51.100.${id}` },
+      });
+      assert.equal(res.status, 200, `creation ${id}`);
+    }
+    const limited = await fetch(`${base}/api/devices/${firmwareId(21)}/frame`, {
+      headers: { 'x-forwarded-for': '198.51.100.21' },
+    });
+    assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
+  }, { limiter, trustProxy: true });
+});
+
+test('untrusted X-Forwarded-For does not bypass the req.ip client limit', async () => {
+  const limiter = new DeviceEnrolmentLimiter({ perIpLimit: 1, globalLimit: 3 });
+  await withServer(async (base) => {
+    assert.equal((await fetch(`${base}/api/devices/esp32-000001/frame`, {
+      headers: { 'x-forwarded-for': '198.51.100.1' },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/api/devices/esp32-000002/frame`, {
+      headers: { 'x-forwarded-for': '198.51.100.2' },
+    })).status, 429, 'Express ignores forwarded addresses when trust proxy is disabled');
+  }, { limiter });
+});
+
+test('DeviceStore creation failure refunds reserved capacity', async () => {
+  const limiter = new DeviceEnrolmentLimiter({ perIpLimit: 1, globalLimit: 1 });
+  await withServer(async (base) => {
+    assert.equal((await fetch(`${base}/api/devices/esp32-000001/frame`)).status, 503);
+    assert.equal((await fetch(`${base}/api/devices/esp32-000002/frame`)).status, 200,
+      'failed mutation did not permanently consume capacity');
+  }, {
+    limiter,
+    prepare: async (store) => {
+      const create = store.getOrCreateWithStatus.bind(store);
+      let fail = true;
+      store.getOrCreateWithStatus = async (id) => {
+        if (fail) {
+          fail = false;
+          throw new DeviceStoreError('config_io', 'simulated creation failure');
+        }
+        return create(id);
+      };
+    },
+  });
+});
+
+test('concurrent same-ID enrolment persists once and refunds the duplicate reservation', async () => {
+  const limiter = new DeviceEnrolmentLimiter({ perIpLimit: 2, globalLimit: 2 });
+  const target = 'esp32-000001';
+  await withServer(async (base, store) => {
+    const results = await Promise.all([
+      fetch(`${base}/api/devices/${target}/frame`),
+      fetch(`${base}/api/devices/${target}/frame`),
+    ]);
+    assert.deepEqual(results.map(({ status }) => status), [200, 200]);
+    assert.equal((await store.list()).filter(({ id }) => id === target).length, 1);
+
+    assert.equal((await fetch(`${base}/api/devices/esp32-000002/frame`)).status, 200,
+      'duplicate request refunded its reservation');
+    assert.equal((await fetch(`${base}/api/devices/esp32-000003/frame`)).status, 429,
+      'exactly two distinct successful creations remain counted');
+  }, {
+    limiter,
+    prepare: async (store) => {
+      const get = store.get.bind(store);
+      let arrivals = 0;
+      let release!: () => void;
+      const bothUnknown = new Promise<void>((resolve) => { release = resolve; });
+      store.get = async (id) => {
+        const result = await get(id);
+        if (id === target && result === null && arrivals < 2) {
+          arrivals += 1;
+          if (arrivals === 2) release();
+          await bothUnknown;
+        }
+        return result;
+      };
+    },
+  });
+});
+
+test('HEAD never creates an unknown device but remains available for an existing legacy ID', async () => {
+  await withServer(async (base, store, configPath) => {
+    const unknown = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`, { method: 'HEAD' });
+    assert.equal(unknown.status, 404);
+    assert.equal(await store.get('esp32-a1b2c3'), null);
+    await assert.rejects(stat(configPath), { code: 'ENOENT' });
+
+    await store.getOrCreate('test-panel');
+    assert.equal((await fetch(`${base}/api/devices/test-panel/frame`, { method: 'HEAD' })).status, 200);
+  });
+});
+
+test('corrupt and future-version stores fail closed without replacement on auto-enrolment', async () => {
+  for (const [contents, statusCode] of [
+    ['{ not json', 'config_corrupt'],
+    ['{"schemaVersion":99,"devices":[],"future":true}\n', 'config_unsupported_version'],
+  ] as const) {
+    await withServer(async (base, _store, configPath) => {
+      const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`);
+      assert.equal(res.status, 503);
+      assert.equal((await res.json() as { code: string }).code, statusCode);
+      assert.equal(await readFile(configPath, 'utf8'), contents);
+    }, { prepare: async (_store, configPath) => writeFile(configPath, contents, 'utf8') });
+  }
 });
