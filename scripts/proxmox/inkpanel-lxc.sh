@@ -16,7 +16,7 @@
 #   CTID=910 CT_HOSTNAME=inkpanel CORES=2 RAM=1024 DISK=12
 #   BRIDGE=vmbr0 STORAGE=local-lvm TEMPLATE_STORAGE=local
 #   REPO_URL=https://github.com/CtrlAltcouk/inkpanel.git BRANCH=main
-#   UNPRIVILEGED=1 START_ON_BOOT=1
+#   UNPRIVILEGED=1 START_ON_BOOT=1 HTTPS_PORT=8443
 #
 set -Eeuo pipefail
 
@@ -72,6 +72,14 @@ UNPRIVILEGED="${UNPRIVILEGED:-1}"
 START_ON_BOOT="${START_ON_BOOT:-1}"
 REPO_URL="${REPO_URL:-https://github.com/CtrlAltcouk/inkpanel.git}"
 BRANCH="${BRANCH:-main}"
+HTTPS_PORT="${HTTPS_PORT:-8443}"
+
+[[ "$HTTPS_PORT" =~ ^[0-9]+$ && ${#HTTPS_PORT} -le 5 ]] \
+  || die "HTTPS_PORT must be an integer from 1 to 65535"
+HTTPS_PORT_NUMBER=$((10#$HTTPS_PORT))
+(( HTTPS_PORT_NUMBER >= 1 && HTTPS_PORT_NUMBER <= 65535 )) \
+  || die "HTTPS_PORT must be an integer from 1 to 65535"
+HTTPS_PORT="$HTTPS_PORT_NUMBER"
 
 if pct status "$CTID" >/dev/null 2>&1; then
   die "container $CTID already exists — set CTID to something free"
@@ -92,6 +100,7 @@ TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-$(pick_storage vztmpl)}"
 step "CTID ${CTID}, hostname ${CT_HOSTNAME}"
 step "${CORES} cores, ${RAM} MB RAM, ${DISK} GB disk on ${STORAGE}"
 step "network: ${BRIDGE}, DHCP"
+step "browser HTTPS port: ${HTTPS_PORT} (panels remain on HTTP ${APP_PORT})"
 
 # -------------------------------------------------------------------- template
 
@@ -317,6 +326,9 @@ run "cat > ${APP_DIR}/${APP}.env <<ENVFILE
 # Address panels use to reach this server. Shown on the enrolment screen.
 PUBLIC_BASE_URL=http://${CT_IP}:${APP_PORT}
 
+# Browser-only HTTPS port used by the Flash tab. Panels still use HTTP above.
+HTTPS_PORT=${HTTPS_PORT}
+
 # Uncomment to require a password for the web UI. The panel's own endpoint stays
 # open regardless, because firmware cannot log in.
 #
@@ -350,6 +362,7 @@ if [[ $HEALTHY -eq 1 ]]; then
   ok "inkpanel is running"
   printf '\n'
   printf '  %s\n' "Open:      ${C_PINK}http://${CT_IP}:${APP_PORT}${C_RESET}"
+  printf '  %s\n' "Flash UI:  ${C_PINK}https://${CT_IP}:${HTTPS_PORT}/#flash${C_RESET} (self-signed)"
   printf '  %s\n' "Container: ${CTID} (${CT_HOSTNAME})"
   printf '  %s\n' "Logs:      pct exec ${CTID} -- journalctl -u ${APP} -f"
   printf '  %s\n' "Update:    pct exec ${CTID} -- ${APP}-update"
