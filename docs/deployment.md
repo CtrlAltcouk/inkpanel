@@ -76,17 +76,35 @@ Git, npm, and firmware builds as the service user; root is retained only for
 systemd control and transaction snapshots.
 
 Containers created before the transactional helper existed need a one-time,
-explicit administrator refresh after this release is merged. First update and
-inspect the exact helper you intend to trust, then install it as root:
+explicit administrator refresh after this release is merged. Do this without
+touching the live checkout: resolve one exact official `main` SHA, download both
+helper files at that SHA into a root-only directory, inspect those exact local
+files, and install the same bytes you inspected:
 
 ```bash
-pct exec <CTID> -- bash -c 'cd /opt/inkpanel/app && runuser -u inkpanel -- git pull --ff-only origin main'
-pct exec <CTID> -- less /opt/inkpanel/app/scripts/proxmox/files/inkpanel-update
-pct exec <CTID> -- bash -c 'install -o root -g root -m 755 /opt/inkpanel/app/scripts/proxmox/files/inkpanel-update /usr/local/bin/inkpanel-update \
-  && install -o root -g root -m 644 /opt/inkpanel/app/scripts/proxmox/files/write-status.mjs /usr/local/bin/write-status.mjs'
+pct enter <CTID>
+HELPER_DIR="$(mktemp -d /root/inkpanel-helper.XXXXXX)"
+chmod 700 "$HELPER_DIR"
+HELPER_REF="$(git ls-remote https://github.com/CtrlAltcouk/inkpanel.git refs/heads/main | awk '{print $1}')"
+[[ "$HELPER_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "Could not resolve official main" >&2; exit 1; }
+curl -fL "https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/$HELPER_REF/scripts/proxmox/files/inkpanel-update" -o "$HELPER_DIR/inkpanel-update"
+curl -fL "https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/$HELPER_REF/scripts/proxmox/files/write-status.mjs" -o "$HELPER_DIR/write-status.mjs"
+sha256sum "$HELPER_DIR/inkpanel-update" "$HELPER_DIR/write-status.mjs"
+less "$HELPER_DIR/inkpanel-update"
+less "$HELPER_DIR/write-status.mjs"
+install -o root -g root -m 755 "$HELPER_DIR/inkpanel-update" /usr/local/bin/inkpanel-update
+install -o root -g root -m 644 "$HELPER_DIR/write-status.mjs" /usr/local/bin/write-status.mjs
+rm -f "$HELPER_DIR/inkpanel-update" "$HELPER_DIR/write-status.mjs"
+rmdir "$HELPER_DIR"
+/usr/local/bin/inkpanel-update
+exit
 ```
 
-That promotion is deliberately manual: the unprivileged application can ask
+The download is pinned before either file is fetched, and installation uses the
+same root-owned files that were inspected, avoiding an inspection/install race.
+The live `/opt/inkpanel/app` HEAD and worktree remain unchanged until the new
+transactional updater captures the true `COMMIT_BEFORE` and performs the pull.
+This promotion is deliberately manual: the unprivileged application can ask
 for an update, but cannot choose new root-executed code.
 
 ## Proxmox LXC — manual, with Docker

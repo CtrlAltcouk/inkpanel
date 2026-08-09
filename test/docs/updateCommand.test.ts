@@ -48,6 +48,16 @@ test('deployment.md explains why the full path matters, so the fix is not just a
   assert.match(text, /does not carry.*PATH|PATH.*does not carry/i);
 });
 
+test('existing-LXC helper refresh leaves the live checkout untouched until the updater runs', async () => {
+  const text = await readFile(join(root, 'docs/deployment.md'), 'utf8');
+  const block = bashBlocks(text).find((candidate) => candidate.includes('HELPER_REF='));
+  assert.ok(block, 'expected a pinned, root-owned helper refresh block');
+  assert.doesNotMatch(block, /git\s+(?:-C\s+\S+\s+)?(?:pull|reset)\b/);
+  assert.doesNotMatch(block, /\/opt\/inkpanel\/app\/scripts\/proxmox\/files/);
+  assert.match(block, /raw\.githubusercontent\.com\/CtrlAltcouk\/inkpanel\/\$HELPER_REF/);
+  assert.match(block, /\/usr\/local\/bin\/inkpanel-update/);
+});
+
 // flashing.md never hands out its own copy of this command — it defers to
 // deployment.md — so it has no ```bash block for this at all. It only needs
 // to never show the broken bare form anywhere, prose included.

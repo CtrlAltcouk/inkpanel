@@ -26,6 +26,12 @@ LOG_FILE="$(mktemp)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The status writer runs unprivileged, so give its group deliberate read-only
+# access to this root-owned log. Keeping root ownership matters: the app cannot
+# replace the log pathname and redirect later root appends through a symlink.
+chown "root:$APP" "$LOG_FILE"
+chmod 640 "$LOG_FILE"
+
 FINALIZED=0
 ROLLBACK_IN_PROGRESS=0
 COMMIT_BEFORE=""
@@ -33,6 +39,7 @@ COMMIT_AFTER=""
 TRANSACTION_DIR=""
 DEPS_STAGE=""
 DEPS_OLD=""
+DEPS_OLD_MODE=755
 DEPS_CHANGED=0
 DEPS_SWAPPED=0
 LIVE_DEPS_EXISTED=0
@@ -51,8 +58,8 @@ HEALTH_URL=""
 rm -f "$FLAG"
 
 write_status() {
-  node "$SCRIPT_DIR/write-status.mjs" "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
-  chmod 644 "$STATUS"
+  runuser -u "$APP" -- node "$SCRIPT_DIR/write-status.mjs" \
+    "$1" "${2:-}" "$LOG_FILE" "$STATUS" "$STARTED_AT"
   if [[ "$1" == "success" || "$1" == "failed" ]]; then FINALIZED=1; fi
 }
 
@@ -155,6 +162,8 @@ restore_dependencies() {
   if [[ "$LIVE_DEPS_EXISTED" -eq 1 ]]; then
     if [[ -n "$DEPS_OLD" && -d "$DEPS_OLD" ]]; then
       mv -- "$DEPS_OLD" "$REPO_DIR/node_modules" || ok=1
+      chown "$APP:$APP" "$REPO_DIR/node_modules" || ok=1
+      chmod "$DEPS_OLD_MODE" "$REPO_DIR/node_modules" || ok=1
       DEPS_OLD=""
     else
       log "rollback: previous node_modules snapshot is missing"
@@ -399,11 +408,20 @@ fi
 CONFIG_SNAPSHOTTED=1
 
 if [[ "$DEPS_CHANGED" -eq 1 ]]; then
-  DEPS_OLD="$REPO_DIR/.node_modules.rollback.$(basename "$TRANSACTION_DIR")"
+  DEPS_OLD="$TRANSACTION_DIR/node_modules.before"
   if [[ -e "$REPO_DIR/node_modules" ]]; then
     LIVE_DEPS_EXISTED=1
+    DEPS_OLD_MODE="$(runuser -u "$APP" -- stat -c '%a' "$REPO_DIR/node_modules" \
+      2>/dev/null || printf '755')"
+    [[ "$DEPS_OLD_MODE" =~ ^[0-7]{3,4}$ ]] || DEPS_OLD_MODE=755
     mv -- "$REPO_DIR/node_modules" "$DEPS_OLD" \
       || abort_update "could not preserve live node_modules"
+    DEPS_SWAPPED=1
+    chown root:root "$DEPS_OLD" \
+      || abort_update "could not protect previous node_modules ownership"
+    chmod 700 "$DEPS_OLD" \
+      || abort_update "could not protect previous node_modules permissions"
+    log "previous dependencies protected at $DEPS_OLD"
   fi
   DEPS_SWAPPED=1
   mv -- "$DEPS_STAGE/node_modules" "$REPO_DIR/node_modules" \

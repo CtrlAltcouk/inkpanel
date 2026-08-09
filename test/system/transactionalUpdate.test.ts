@@ -10,6 +10,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -49,6 +50,8 @@ interface Fixture {
   serviceState: string;
   startCount: string;
   buildMarker: string;
+  protectedDepsLog: string;
+  transactionRoot: string;
 }
 
 async function writeExecutable(path: string, body: string): Promise<void> {
@@ -70,6 +73,8 @@ async function setupFixture(dir: string): Promise<Fixture> {
   const serviceState = join(dir, 'service-state.txt');
   const startCount = join(dir, 'start-count.txt');
   const buildMarker = join(dir, 'build-ran.txt');
+  const protectedDepsLog = join(dir, 'protected-deps-path.txt');
+  const transactionRoot = join(dir, 'transaction-state');
 
   await mkdir(join(upstream, 'firmware'), { recursive: true });
   await mkdir(join(upstream, 'scripts'), { recursive: true });
@@ -121,6 +126,15 @@ case "\${1:-}" in
     if [[ "$count" -eq 1 && "\${CANDIDATE_START_FAIL:-0}" == 1 ]]; then exit 1; fi
     if [[ "$count" -gt 1 && "\${ROLLBACK_START_FAIL:-0}" == 1 ]]; then exit 1; fi
     printf active > "$SERVICE_STATE"
+    if [[ "$count" -eq 1 && "\${CANDIDATE_TAMPER_DEPS:-0}" == 1 ]]; then
+      snapshot="$(find "$TRANSACTION_ROOT_PATH" -type d -name node_modules.before -print -quit)"
+      printf '%s' "$snapshot" > "$PROTECTED_DEPS_LOG"
+      parent_mode="$(stat -c '%a' "$(dirname "$snapshot")")"
+      snapshot_mode="$(stat -c '%a' "$snapshot")"
+      if (( (8#$parent_mode & 0077) != 0 || (8#$snapshot_mode & 0077) != 0 )); then
+        printf compromised > "$snapshot/candidate-tampered.txt"
+      fi
+    fi
     if [[ "$count" -eq 1 && -n "\${CANDIDATE_CONFIG_CONTENT:-}" ]]; then
       printf '%s' "$CANDIDATE_CONFIG_CONTENT" > "$CONFIG_PATH"
     fi
@@ -176,7 +190,7 @@ printf 'candidate dependencies\n' > "$prefix/node_modules/package.txt"
   script = script.replace('APP_DIR=/opt/inkpanel', `APP_DIR=${bashPath(appDir)}`);
   script = script.replace(
     'TRANSACTION_ROOT=/var/lib/inkpanel-update',
-    `TRANSACTION_ROOT=${bashPath(join(dir, 'transaction-state'))}`,
+    `TRANSACTION_ROOT=${bashPath(transactionRoot)}`,
   );
   script = script.replace('HEALTH_MAX_ATTEMPTS=45', 'HEALTH_MAX_ATTEMPTS=5');
   await writeExecutable(updater, script);
@@ -185,6 +199,7 @@ printf 'candidate dependencies\n' > "$prefix/node_modules/package.txt"
   return {
     dir, upstream, appDir, repoDir, dataDir, updater, stubbin, healthPlan,
     curlLog, systemctlLog, npmLog, statusTrace, serviceState, startCount, buildMarker,
+    protectedDepsLog, transactionRoot,
   };
 }
 
@@ -238,6 +253,12 @@ async function runUpdater(
         CONFIG_PATH: process.platform === 'win32'
           ? bashPath(join(fixture.dataDir, 'config.json'))
           : join(fixture.dataDir, 'config.json'),
+        PROTECTED_DEPS_LOG: process.platform === 'win32'
+          ? bashPath(fixture.protectedDepsLog)
+          : fixture.protectedDepsLog,
+        TRANSACTION_ROOT_PATH: process.platform === 'win32'
+          ? bashPath(fixture.transactionRoot)
+          : fixture.transactionRoot,
         ...env,
       },
     });
@@ -379,13 +400,40 @@ test('health failure after dependency activation restores old node_modules witho
     await commitUpstream(fixture, 'dependency candidate', async () => {
       await writeFile(join(fixture.upstream, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
     });
-    await runUpdater(fixture, ['200', '503', '503', '503', '503', '503', '200', '200', '200']);
+    await runUpdater(
+      fixture,
+      ['200', '503', '503', '503', '503', '503', '200', '200', '200'],
+      { CANDIDATE_TAMPER_DEPS: '1' },
+    );
 
+    const protectedPath = await readFile(fixture.protectedDepsLog, 'utf8');
+    assert.ok(protectedPath.startsWith(fixture.transactionRoot));
+    assert.ok(!protectedPath.startsWith(fixture.repoDir));
     assert.equal(
       await readFile(join(fixture.repoDir, 'node_modules', 'package.txt'), 'utf8'),
       'old dependencies\n',
     );
+    await assert.rejects(access(join(fixture.repoDir, 'node_modules', 'candidate-tampered.txt')));
     assert.equal((await readFile(fixture.npmLog, 'utf8')).trim().split('\n').length, 1);
+  });
+});
+
+test('an app-controlled status symlink cannot redirect the update writer', async () => {
+  await withFixture(async (fixture) => {
+    const sentinel = join(fixture.dir, 'protected-sentinel.txt');
+    const statusPath = join(fixture.dataDir, 'update-status.json');
+    const original = Buffer.from('root-owned sentinel bytes\n');
+    await writeFile(sentinel, original);
+    await symlink(sentinel, statusPath);
+    await commitUpstream(fixture, 'candidate', async () => {
+      await writeFile(join(fixture.upstream, 'README.md'), 'candidate\n');
+    });
+
+    const result = await runUpdater(fixture, ['200', '200', '200', '200']);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(await readFile(sentinel), original);
+    assert.equal(result.status.state, 'success');
   });
 });
 
@@ -462,4 +510,14 @@ test('the deployed updater never promotes checkout content into privileged paths
     /(?:cp|install)\s+[^\n]*(?:\/usr\/local\/bin|\/etc\/systemd\/system)/,
     'an app-owned checkout must never replace a root executable or unit during self-update',
   );
+});
+
+test('status publication and mode changes run as the unprivileged app user', async () => {
+  const script = await readFile(UPDATER, 'utf8');
+  const start = script.indexOf('write_status() {');
+  const end = script.indexOf('\n}', start);
+  assert.ok(start > -1 && end > start, 'could not locate write_status');
+  const block = script.slice(start, end);
+  assert.match(block, /runuser -u "\$APP" -- node/);
+  assert.doesNotMatch(block, /(^|\n)\s*(?:node|chmod)\s/);
 });
