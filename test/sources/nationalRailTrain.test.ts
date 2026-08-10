@@ -98,6 +98,18 @@ test('malformed individual services are dropped without poisoning valid rows', a
   }
 });
 
+test('a non-empty board with no usable services fails closed', async () => {
+  const source = sourceWith((async () => jsonResponse({
+    trainServices: [
+      { nonsense: true },
+      { std: 123, etd: 'On time' },
+      { std: 'not-a-time', etd: 'Delayed', platform: '1' },
+    ],
+  })) as typeof fetch);
+  const result = await source.fetch(ROUTE, new AbortController().signal);
+  assert.deepEqual(result, { status: 'error', error: 'National Rail returned no usable train services' });
+});
+
 test('fundamentally malformed departure-board JSON fails cleanly', async () => {
   const source = sourceWith((async () => jsonResponse({ trainServices: 'not-an-array' })) as typeof fetch);
   const result = await source.fetch(ROUTE, new AbortController().signal);
