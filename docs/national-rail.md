@@ -1,32 +1,62 @@
 # National Rail live departures
 
-InkPanel can populate a **Trains** dashboard widget from the National Rail live departure-board service. The widget itself stores only the origin and destination CRS codes. API credentials stay on the InkPanel server and are never written to `config.json`, browser settings, framebuffer data, firmware, or source-cache configuration.
+InkPanel can populate a **Trains** dashboard widget from the National Rail/Rail Delivery Group Live Departure Board service. The widget stores only origin and destination CRS codes. API credentials stay on the InkPanel server and are never written to `config.json`, browser settings, framebuffer data, firmware, or source-cache configuration.
 
-## Before configuring it
+## Current RDM product contract
 
-Subscribe to the current **LDB Webservice Public Version** product in Rail Data Marketplace (RDM), then use the product's **Specification** page as the source of truth for the gateway URL and authentication method.
+This implementation targets the Rail Data Marketplace **Live Departure Board** product, version **1.1**, as shown by the subscribed product Specification.
 
-Do not copy credentials into this repository. Do not assume an old National Rail/Data Portal endpoint or authentication example still applies.
+The current API root is:
 
-InkPanel currently accepts one configured authentication header/value pair. If the current RDM product specification requires a different scheme (for example multiple headers or token exchange), update the transport before entering production credentials rather than trying to encode multiple secrets into one value.
+```text
+https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/
+```
+
+Departure boards are requested from:
+
+```text
+GET GetDepartureBoard/{crs}
+```
+
+InkPanel uses the documented query parameters:
+
+```text
+numRows=8
+filterCrs=<destination CRS>
+filterType=to
+timeOffset=0
+timeWindow=120
+```
+
+The current RDM Specification authenticates the request with the subscription **Consumer key** in this HTTP header:
+
+```text
+x-apikey: <Consumer key>
+```
+
+The Specification also displays a Consumer secret, but its documented cURL/request example uses only `x-apikey`. InkPanel therefore does not store or send the Consumer secret.
+
+If RDM changes the product contract, update this transport against the current subscribed Specification rather than copying legacy National Rail/Data Portal examples.
 
 ## Server environment
 
-The transport uses these environment variables:
+Normally only one value is required:
+
+```text
+NATIONAL_RAIL_LDB_API_KEY=<Consumer key>
+```
+
+An optional base-URL override exists only for a future gateway migration or controlled testing:
 
 ```text
 NATIONAL_RAIL_LDB_BASE_URL=https://.../
-NATIONAL_RAIL_LDB_AUTH_HEADER=Authorization
-NATIONAL_RAIL_LDB_AUTH_VALUE=...
 ```
 
-`NATIONAL_RAIL_LDB_AUTH_HEADER` defaults to `Authorization`; set it to the exact header name documented by the subscribed RDM product.
-
-The base URL must be HTTPS and must not contain embedded username/password credentials. A partial configuration fails server startup so a typo cannot silently disable a transport that an administrator intended to enable.
+If the API key is absent, live Train transport is disabled. If a base-URL override is supplied without an API key, startup fails closed. Base URLs must use HTTPS and cannot contain embedded credentials.
 
 ### Proxmox LXC installer
 
-The systemd unit already reads the root-owned environment file `/opt/inkpanel/inkpanel.env`. Enter the container as root, edit that file, and restart InkPanel:
+The systemd unit reads the root-owned environment file `/opt/inkpanel/inkpanel.env`. Enter the container as root, edit that file, and restart InkPanel:
 
 ```bash
 pct enter <CTID>
@@ -36,7 +66,13 @@ journalctl -u inkpanel -n 50 --no-pager
 exit
 ```
 
-The existing installer keeps that file `root:inkpanel` and mode `0640`. Do not put the API credential into `/opt/inkpanel/app`, Git, `config.json`, or a shell script in the app checkout.
+Add:
+
+```text
+NATIONAL_RAIL_LDB_API_KEY=<Consumer key>
+```
+
+The installer keeps that file `root:inkpanel` and mode `0640`. Do not put the API key or Consumer secret into `/opt/inkpanel/app`, Git, `config.json`, PR/issue comments, screenshots, or shell scripts in the app checkout.
 
 At startup the journal should report only:
 
@@ -44,19 +80,11 @@ At startup the journal should report only:
 National Rail live departures: configured
 ```
 
-It deliberately does not print the endpoint's credential value.
+It deliberately never prints the API key.
 
 ### Docker / Compose
 
-`docker-compose.yml` passes the same three optional variables from the local Compose environment. Put the secret in a deployment-local `.env` or proper secret-management system, not in the tracked Compose file:
-
-```text
-NATIONAL_RAIL_LDB_BASE_URL=https://.../
-NATIONAL_RAIL_LDB_AUTH_HEADER=Authorization
-NATIONAL_RAIL_LDB_AUTH_VALUE=...
-```
-
-Then recreate/restart the container.
+`docker-compose.yml` passes `NATIONAL_RAIL_LDB_API_KEY` from the deployment environment. Put the Consumer key in a deployment-local `.env` or proper secret-management system, not in the tracked Compose file.
 
 ## Widget behaviour
 
@@ -71,15 +99,20 @@ With both CRS codes configured:
 
 Stale data is scoped by device, source, origin CRS and destination CRS. `MKC → EUS` cannot borrow cached data from `EUS → MKC` or from another panel.
 
+## Licence and attribution
+
+The subscribed product licence identifies **Rail Delivery Group** as the attribution party. National Rail's current Darwin developer guidance also requires attribution of National Rail as the data provider in line with the published brand guidelines. Do not invent a logo or attribution treatment: confirm the downloadable product licence/brand guidance before the physical widget is considered production-ready.
+
 ## Live acceptance test
 
-Before declaring the transport production-ready, verify it against the currently subscribed RDM product rather than mocks alone. A useful first route is **Milton Keynes Central (MKC) → London Euston (EUS)**:
+Before merging the transport, verify it against the live subscribed RDM product. A useful first route is **Milton Keynes Central (MKC) → London Euston (EUS)**:
 
-1. Configure the current gateway/authentication in the server environment.
-2. Restart InkPanel and confirm the journal reports the train transport as configured without printing any secret.
-3. Set one dashboard section to Trains, `MKC` → `EUS`, and save.
-4. Open the panel preview and confirm live departure times/platforms are plausible against National Rail.
-5. Wake/push the physical panel and confirm the same data renders cleanly.
-6. Confirm the current RDM/National Rail product terms and required attribution presentation before relying on the feed in production.
+1. Ensure any API key that has appeared in a screenshot/chat/log has been revoked and replaced.
+2. Put the replacement Consumer key directly into `/opt/inkpanel/inkpanel.env` as `NATIONAL_RAIL_LDB_API_KEY`.
+3. Restart InkPanel and confirm the journal reports the train transport as configured without printing the key.
+4. Set one dashboard section to Trains, `MKC` → `EUS`, and save.
+5. Open the panel preview and confirm live departure times/platforms are plausible against National Rail.
+6. Wake the physical panel and confirm the same data renders cleanly.
+7. Confirm the final attribution presentation against the current downloadable licence/brand guidance.
 
-Do not paste the live credential into issue/PR comments or screenshots. When reviewing the RDM Specification page, redact the credential value but leave the gateway URL, authentication scheme/header names, request format, and attribution terms visible.
+Never paste live credentials into issue/PR comments or screenshots.
