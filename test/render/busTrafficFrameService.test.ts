@@ -56,7 +56,7 @@ const BUS_DATA: BusData = {
 };
 const TRAFFIC_DATA: TrafficData = {
   origin: 'MK9 1EA', destination: 'London Euston',
-  durationMinutes: 36, staticDurationMinutes: 24, delayMinutes: 12,
+  durationMinutes: 36, staticDurationMinutes: 24,
   distanceMiles: 50, description: 'A5 and M1', warning: null,
 };
 
@@ -99,6 +99,7 @@ test('configured Bus and Traffic widgets fetch and render independently', async 
     assert.deepEqual(trafficSeen, [{ origin: 'MK9 1EA', destination: 'London Euston' }]);
     assert.match(html, /Lakes Estate/);
     assert.match(html, /36 min/);
+    assert.match(html, /No live traffic: 24 min/);
     assert.match(html, /Google Maps/);
   });
 });
