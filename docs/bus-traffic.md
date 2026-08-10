@@ -34,7 +34,7 @@ Traffic uses Google Maps Platform Routes API `Compute Routes`:
 POST https://routes.googleapis.com/directions/v2:computeRoutes
 ```
 
-InkPanel requests a driving route with `routingPreference: TRAFFIC_AWARE`. Google returns both `duration` and `staticDuration`. InkPanel displays those returned duration values directly as the traffic-aware journey time and the no-live-traffic reference time; it does not create a separate calculated delay metric from Google Maps Content.
+InkPanel requests a driving route with `routingPreference: TRAFFIC_AWARE`, `languageCode: en-GB`, and imperial units. Its field mask asks Google for `routes.localizedValues` plus any route description/warnings. The Traffic cell displays Google's returned `localizedValues.duration.text` as the traffic-aware journey time and `localizedValues.staticDuration.text` as the without-traffic reference. InkPanel does not convert Google's seconds into display minutes and does not calculate a separate delay metric from Google Maps Content.
 
 In Google Cloud:
 
