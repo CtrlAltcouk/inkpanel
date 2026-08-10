@@ -4,6 +4,8 @@ import type { Source, SourceResult } from './types.ts';
 
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_ROWS = 8;
+export const NATIONAL_RAIL_LDB_BASE_URL =
+  'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120/';
 
 export interface TrainSourceConfig {
   originCrs: string;
@@ -11,30 +13,16 @@ export interface TrainSourceConfig {
 }
 
 export interface NationalRailTrainSourceOptions {
-  /** API root from the subscribed RDM product specification. Must be HTTPS. */
-  baseUrl: string;
-  /** Header name issued/documented by the subscribed RDM product. */
-  authHeaderName?: string;
-  /** Complete header value. Kept in this source closure; never part of cache config. */
-  authHeaderValue: string;
+  /** Consumer key issued by the subscribed RDM Live Departure Board product. */
+  apiKey: string;
+  /** Optional override for tests/future gateway migrations; production defaults to the current RDM v1.1 endpoint. */
+  baseUrl?: string;
   fetchImpl?: typeof fetch;
   maxResponseBytes?: number;
   numRows?: number;
 }
 
 const crsSchema = z.string().regex(/^[A-Z]{3}$/, 'CRS must be three uppercase letters');
-const headerNameSchema = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, 'invalid HTTP header name');
-
-const rawBoardSchema = z.object({
-  trainServices: z.array(z.unknown()).nullable().optional(),
-});
-
-const rawServiceSchema = z.object({
-  std: z.string(),
-  etd: z.string().nullable().optional(),
-  platform: z.union([z.string(), z.number()]).nullable().optional(),
-  isCancelled: z.boolean().optional(),
-});
 
 function apiRoot(value: string): URL {
   const url = new URL(value);
@@ -53,6 +41,17 @@ function requestUrl(baseUrl: URL, config: TrainSourceConfig, numRows: number): U
   url.searchParams.set('timeWindow', '120');
   return url;
 }
+
+const rawBoardSchema = z.object({
+  trainServices: z.array(z.unknown()).nullable().optional(),
+});
+
+const rawServiceSchema = z.object({
+  std: z.string(),
+  etd: z.string().nullable().optional(),
+  platform: z.union([z.string(), z.number()]).nullable().optional(),
+  isCancelled: z.boolean().optional(),
+});
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   const declared = response.headers.get('content-length');
@@ -107,18 +106,13 @@ function mapBoard(
     });
   }
   const data = buildTrainData(originCrs, destinationCrs, raw);
-  // An actually empty board is valid. A non-empty board from which we cannot
-  // build even one departure is much more likely to mean the upstream schema
-  // changed; fail closed so stale data can be used instead of claiming there
-  // are no trains.
   return candidates.length > 0 && data.departures.length === 0 ? null : data;
 }
 
 export function createNationalRailTrainSource(options: NationalRailTrainSourceOptions): Source<TrainSourceConfig, TrainData> {
-  const baseUrl = apiRoot(options.baseUrl.trim());
-  const authHeaderName = headerNameSchema.parse((options.authHeaderName ?? 'Authorization').trim());
-  const authHeaderValue = options.authHeaderValue.trim();
-  if (!authHeaderValue) throw new Error('National Rail API auth value is required');
+  const baseUrl = apiRoot((options.baseUrl ?? NATIONAL_RAIL_LDB_BASE_URL).trim());
+  const apiKey = options.apiKey.trim();
+  if (!apiKey) throw new Error('National Rail RDM API key is required');
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
   const numRows = options.numRows ?? DEFAULT_ROWS;
@@ -139,7 +133,7 @@ export function createNationalRailTrainSource(options: NationalRailTrainSourceOp
         signal,
         headers: {
           Accept: 'application/json',
-          [authHeaderName]: authHeaderValue,
+          'x-apikey': apiKey,
         },
       });
 
