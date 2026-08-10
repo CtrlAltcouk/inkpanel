@@ -14,6 +14,7 @@ import {
   parseCalendarAllowPrivateNetworks,
 } from './sources/calendarHttp.ts';
 import { createIcalFeedSource } from './sources/ical.ts';
+import { createNationalRailTrainSource } from './sources/nationalRailTrain.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
@@ -33,6 +34,30 @@ export function parseTrustProxy(raw: string | undefined): boolean | number | str
   if (value.toLowerCase() === 'true') return true;
   if (value.toLowerCase() === 'false') return false;
   return value;
+}
+
+export interface TrainEnvironment {
+  NATIONAL_RAIL_LDB_BASE_URL?: string;
+  NATIONAL_RAIL_LDB_AUTH_HEADER?: string;
+  NATIONAL_RAIL_LDB_AUTH_VALUE?: string;
+}
+
+/**
+ * Build the credentialled train source only when the server has been given a
+ * complete RDM product configuration. The auth value is never persisted or
+ * handed to FrameService as source config, so it cannot enter cache keys.
+ */
+export function createTrainSourceFromEnv(env: TrainEnvironment) {
+  const baseUrl = env.NATIONAL_RAIL_LDB_BASE_URL?.trim() ?? '';
+  const authHeaderName = env.NATIONAL_RAIL_LDB_AUTH_HEADER?.trim() || 'Authorization';
+  const authHeaderValue = env.NATIONAL_RAIL_LDB_AUTH_VALUE?.trim() ?? '';
+  if (!baseUrl && !authHeaderValue && !env.NATIONAL_RAIL_LDB_AUTH_HEADER?.trim()) return undefined;
+  if (!baseUrl || !authHeaderValue) {
+    throw new Error(
+      'National Rail live departures require both NATIONAL_RAIL_LDB_BASE_URL and NATIONAL_RAIL_LDB_AUTH_VALUE',
+    );
+  }
+  return createNationalRailTrainSource({ baseUrl, authHeaderName, authHeaderValue });
 }
 
 function lanAddress(): string {
@@ -61,10 +86,12 @@ export async function main(): Promise<void> {
   const calendarSource = createIcalFeedSource(createCalendarTextFetcher({
     allowPrivateNetworks: allowPrivateCalendarNetworks,
   }));
+  const trainSource = createTrainSourceFromEnv(process.env);
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
     calendarSource,
+    trainSource,
   });
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
@@ -92,6 +119,7 @@ export async function main(): Promise<void> {
   console.log(`data directory: ${dataDir}`);
   console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
   console.log(`private calendar networks: ${allowPrivateCalendarNetworks ? 'enabled' : 'blocked'}`);
+  console.log(`National Rail live departures: ${trainSource ? 'configured' : 'not configured'}`);
 
   // Additive: :8080 keeps serving firmware check-ins over plain HTTP, which
   // an ESP32 cannot do over a self-signed cert anyway. This second listener
