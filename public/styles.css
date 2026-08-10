@@ -83,6 +83,7 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="number"],
 select,
 textarea {
@@ -218,215 +219,140 @@ body { max-width: none; }
 
 .tabs {
   display: flex;
-  gap: var(--sp-6);
-  border-bottom: 1px solid var(--line-1);
+  gap: var(--sp-2);
   margin-bottom: var(--sp-6);
+  overflow-x: auto;
 }
 
 .tabs a {
-  padding: var(--sp-3) 0;
-  font-size: var(--fs-sm);
-  color: var(--fg-3);
+  color: var(--fg-2);
   text-decoration: none;
-  border-bottom: 2px solid transparent;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
 }
 
-.tabs a.on { color: var(--fg-1); font-weight: 600; border-bottom-color: var(--brand-pink); }
-.tabs a:hover { color: var(--fg-1); }
+.tabs a.on { background: var(--brand-pink-dim); color: var(--brand-pink); }
 
 .panel-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-6);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
 }
 
 .panel-card {
-  background: var(--bg-2);
+  text-align: left;
   border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   border-radius: var(--radius-md);
   padding: var(--sp-3);
-  cursor: pointer;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
   margin: 0;
-  font-family: var(--font-body);
-  color: var(--fg-1);
-  transition: border-color var(--dur-fast) var(--ease-out);
 }
 
-.panel-card:hover { border-color: var(--line-2); }
-.panel-card.on { border-color: var(--brand-pink); }
+.panel-card.on { border-color: var(--brand-pink); box-shadow: var(--shadow-glow); }
 
 .panel-thumb {
   width: 100%;
-  aspect-ratio: 800 / 480;
-  background: #fff;
-  border-radius: var(--radius-sm);
+  aspect-ratio: 5 / 3;
   object-fit: contain;
+  background: white;
+  border-radius: var(--radius-sm);
+  display: block;
+  margin-bottom: var(--sp-2);
 }
 
-/*
- * "View full size" in the detail pane, and clicking the thumbnail again to
- * close it, both toggle this class on the strip's own <img> — the same
- * element, same already-fetched bytes, just enlarged in place. This is
- * deliberately not a second <img src="...render.png"> in the detail pane,
- * which would cost another live render request for a picture already on
- * screen.
- */
 .panel-thumb--zoomed {
   position: fixed;
-  inset: 0;
-  margin: auto;
-  width: min(92vw, 900px);
-  height: auto;
-  max-height: 92vh;
+  inset: 4vh 4vw;
+  width: 92vw;
+  height: 92vh;
+  object-fit: contain;
   z-index: 1000;
-  cursor: zoom-out;
-  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.7);
+  background: white;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .8);
 }
 
-.panel-name { font-weight: 700; font-size: var(--fs-base); }
-.panel-meta { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-3); }
-.panel-card .status { margin-left: 0; align-self: flex-start; }
+.panel-name { display: block; font-weight: 700; }
+.panel-meta { display: block; color: var(--fg-3); font-size: var(--fs-xs); }
 
-.actions { display: flex; gap: var(--sp-3); align-items: center; }
-button.ghost { background: transparent; color: var(--brand-pink); border: 1px solid var(--brand-pink); }
-button.ghost:hover { background: var(--brand-pink-dim); }
-button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); cursor: default; }
-
-.notice { color: var(--fg-2); font-size: var(--fs-sm); margin-top: var(--sp-3); }
-
-#city-picker { position: relative; }
-
-.city-results {
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 5;
-  background: var(--bg-3);
-  border: 1px solid var(--brand-pink);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
+.actions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
 }
 
-.city-option {
-  display: block;
-  width: 100%;
-  text-align: left;
+button.ghost {
   background: transparent;
-  color: var(--fg-1);
-  border: 0;
-  border-bottom: 1px solid var(--line-1);
-  border-radius: 0;
-  margin: 0;
-  padding: var(--sp-3);
-  font-size: var(--fs-sm);
-  font-weight: 400;
-  cursor: pointer;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
 }
 
-.city-option:last-child { border-bottom: 0; }
-.city-option:hover { background: var(--brand-pink-dim); }
-.city-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-3); }
-.city-current { margin-top: var(--sp-2); }
-
-.station-picker { position: relative; margin-bottom: var(--sp-3); }
-.station-current { margin-top: var(--sp-2); }
+.notice {
+  color: var(--brand-pink);
+  font-size: var(--fs-sm);
+  margin-top: var(--sp-3);
+  white-space: pre-wrap;
+}
 
 .dashboard-editor {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
 }
 
 .dashboard-editor-cell {
   min-width: 0;
   border: 1px solid var(--line-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--sp-4);
-  background: var(--bg-2);
+  background: var(--bg-1);
 }
-
-.dashboard-editor-cell select { margin-bottom: var(--sp-3); }
 
 .dashboard-position {
-  color: var(--fg-1);
   font-family: var(--font-display);
   font-size: var(--fs-lg);
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-2);
 }
+
+.dashboard-editor select,
+.dashboard-editor input,
+.dashboard-editor textarea {
+  box-sizing: border-box;
+}
+
+.train-api-status {
+  margin-top: var(--sp-2);
+}
+
+.station-picker { position: relative; }
+
+.station-picker-results {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.station-picker-results button {
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--fg-1);
+  font-weight: 400;
+}
+
+.station-picker-results button:hover { background: var(--bg-4); }
 
 @media (max-width: 720px) {
+  body { padding: var(--sp-4); }
   .dashboard-editor { grid-template-columns: 1fr; }
-}
-
-.update-log {
-  background: var(--bg-0);
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-3);
-  margin-top: var(--sp-4);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  max-height: 260px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-
-.issue-list {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-3);
-  margin: var(--sp-2) 0 0;
-  padding-left: var(--sp-5);
-}
-
-.flash-mode {
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-4);
-  margin: var(--sp-4) 0;
-}
-
-.flash-mode legend {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--fg-2);
-  padding: 0 var(--sp-2);
-}
-
-.flash-mode label {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  margin: var(--sp-3) 0 0;
-  font-size: var(--fs-base);
-  color: var(--fg-1);
-}
-
-.flash-mode label:first-of-type { margin-top: 0; }
-
-.flash-mode input[type="radio"] {
-  margin-top: 3px;
-  accent-color: var(--brand-pink);
-}
-
-.flash-log {
-  background: var(--bg-0);
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-3);
-  margin-top: var(--sp-4);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  max-height: 260px;
-  overflow: auto;
-  white-space: pre-wrap;
 }
