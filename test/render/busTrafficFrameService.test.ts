@@ -56,8 +56,8 @@ const BUS_DATA: BusData = {
 };
 const TRAFFIC_DATA: TrafficData = {
   origin: 'MK9 1EA', destination: 'London Euston',
-  durationMinutes: 36, staticDurationMinutes: 24,
-  distanceMiles: 50, description: 'A5 and M1', warning: null,
+  durationText: '36 mins', staticDurationText: '24 mins',
+  description: 'A5 and M1', warning: null,
 };
 
 test('unconfigured Bus and Traffic widgets make no provider requests', async () => {
@@ -98,8 +98,8 @@ test('configured Bus and Traffic widgets fetch and render independently', async 
     assert.deepEqual(busSeen, [{ stopCode: '049000000001', stopLabel: 'Central Station', routeFilter: '6' }]);
     assert.deepEqual(trafficSeen, [{ origin: 'MK9 1EA', destination: 'London Euston' }]);
     assert.match(html, /Lakes Estate/);
-    assert.match(html, /36 min/);
-    assert.match(html, /No live traffic: 24 min/);
+    assert.match(html, /36 mins/);
+    assert.match(html, /Without traffic: 24 mins/);
     assert.match(html, /Google Maps/);
   });
 });
@@ -142,13 +142,13 @@ test('Bus may use its own stale cache but Google Traffic never replays a failed 
     };
     const live = await service.previewHtml(device);
     assert.match(live, /Lakes Estate/);
-    assert.match(live, /36 min/);
+    assert.match(live, /36 mins/);
 
     fail = true;
     const failed = await service.previewHtml(device);
     assert.match(failed, /Lakes Estate/, 'Bus may use its same-device same-config stale cache');
     assert.match(failed, /from \d{2}:\d{2}/, 'stale Bus data is visibly marked');
     assert.match(failed, /Traffic unavailable/);
-    assert.doesNotMatch(failed, /36 min/, 'Google traffic result must not be replayed after provider failure');
+    assert.doesNotMatch(failed, /36 mins/, 'Google traffic result must not be replayed after provider failure');
   });
 });
