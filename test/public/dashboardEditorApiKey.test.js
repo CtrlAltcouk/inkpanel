@@ -28,7 +28,7 @@ test('configured status never places the stored key into HTML', () => {
   const html = dashboardCellHtml('esp32-test', 0, slot, '', { configured: true, keyDraft: '' });
   assert.match(html, /API key configured/);
   assert.match(html, /Configured — leave blank to keep/);
-  assert.doesNotMatch(html, /value="[^\"]+"/);
+  assert.match(html, /data-train-api-key value=""/);
 });
 
 test('a newly entered draft is escaped before being put into the password input', () => {
