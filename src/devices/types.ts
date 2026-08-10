@@ -1,8 +1,9 @@
-import { defaultDeviceV1, type DeviceRecordV1 } from './schema.ts';
+import { defaultDeviceV1, deviceRecordV2Schema, migrateV1ToV2, type DeviceRecordV2 } from './schema.ts';
 
 /** Runtime model alias. Advance this with the current persisted schema. */
-export type DeviceRecord = DeviceRecordV1;
+export type DeviceRecord = DeviceRecordV2;
 
 export function defaultDevice(id: string): DeviceRecord {
-  return defaultDeviceV1(id);
+  const migrated = migrateV1ToV2({ schemaVersion: 1, devices: [defaultDeviceV1(id)] });
+  return deviceRecordV2Schema.parse(migrated.devices[0]);
 }

@@ -19,6 +19,15 @@ const frames = {
   warmUp: async () => {},
 } as unknown as FrameService;
 
+function dashboardSections(overrides: Partial<Record<'calendar' | 'trains' | 'bins', unknown>> = {}) {
+  return [
+    { type: 'calendar', version: 1, config: overrides.calendar ?? { calendarUrls: [] } },
+    { type: 'weather', version: 1, config: {} },
+    { type: 'trains', version: 1, config: overrides.trains ?? { originCrs: '', destinationCrs: '' } },
+    { type: 'bins', version: 1, config: overrides.bins ?? { uprn: '' } },
+  ];
+}
+
 async function withServer(fn: (base: string, store: DeviceStore) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-mgmt-'));
   const store = new DeviceStore(join(dir, 'config.json'));
@@ -62,6 +71,23 @@ test('updates and claims a device', async () => {
   });
 });
 
+test('saves exactly four freely ordered sections including duplicate widget types', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const layout = [
+      { type: 'bins', version: 1, config: { uprn: '100080152345' } },
+      { type: 'calendar', version: 1, config: { calendarUrls: ['https://work.example/feed.ics'] } },
+      { type: 'empty', version: 1, config: {} },
+      { type: 'calendar', version: 1, config: { calendarUrls: ['https://personal.example/feed.ics'] } },
+    ];
+    const response = await fetch(`${base}/api/devices/esp32-1`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dashboardSections: layout }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await store.get('esp32-1'))?.dashboardSections, layout);
+  });
+});
+
 test('rejects invalid config instead of corrupting the store', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');
@@ -87,13 +113,47 @@ test('rejects unknown fields rather than silently ignoring them', async () => {
   });
 });
 
+test('rejects deprecated top-level dashboard source fields', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    for (const body of [
+      { calendarUrls: [] }, { binsUprn: '' }, { trainOriginCrs: '' }, { trainDestinationCrs: '' },
+    ]) {
+      const response = await fetch(`${base}/api/devices/esp32-1`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 400);
+    }
+  });
+});
+
+test('rejects unknown widget types, versions, malformed configs, and non-four layouts', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-1');
+    const invalidLayouts = [
+      dashboardSections().map((section, index) => index === 0 ? { type: 'future', version: 1, config: {} } : section),
+      dashboardSections().map((section, index) => index === 0 ? { type: 'calendar', version: 2, config: { calendarUrls: [] } } : section),
+      dashboardSections().map((section, index) => index === 0 ? { type: 'calendar', version: 1, config: { calendarUrls: [], extra: true } } : section),
+      dashboardSections().slice(0, 3),
+    ];
+    for (const dashboardSections of invalidLayouts) {
+      const before = structuredClone((await store.get('esp32-1'))?.dashboardSections);
+      const response = await fetch(`${base}/api/devices/esp32-1`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dashboardSections }),
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual((await store.get('esp32-1'))?.dashboardSections, before);
+    }
+  });
+});
+
 test('rejects a non-URL calendar entry', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ calendarUrls: ['not a url'] }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ calendar: { calendarUrls: ['not a url'] } }) }),
     });
     assert.equal(res.status, 400);
   });
@@ -106,7 +166,7 @@ test('accepts only credential-free HTTP(S) calendar URLs on new writes', async (
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        calendarUrls: ['http://calendar.example/a.ics', 'https://calendar.example/b.ics'],
+        dashboardSections: dashboardSections({ calendar: { calendarUrls: ['http://calendar.example/a.ics', 'https://calendar.example/b.ics'] } }),
       }),
     });
     assert.equal(accepted.status, 200);
@@ -120,7 +180,7 @@ test('accepts only credential-free HTTP(S) calendar URLs on new writes', async (
       const rejected = await fetch(`${base}/api/devices/esp32-1`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ calendarUrls: [url] }),
+        body: JSON.stringify({ dashboardSections: dashboardSections({ calendar: { calendarUrls: [url] } }) }),
       });
       assert.equal(rejected.status, 400, url);
     }
@@ -130,7 +190,7 @@ test('accepts only credential-free HTTP(S) calendar URLs on new writes', async (
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        calendarUrls: [`http://user:password@calendar.example/${secret}.ics?key=${secret}`],
+        dashboardSections: dashboardSections({ calendar: { calendarUrls: [`http://user:password@calendar.example/${secret}.ics?key=${secret}`] } }),
       }),
     });
     assert.equal(privateError.status, 400);
@@ -330,12 +390,11 @@ test('accepts a known CRS pair', async () => {
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ trainOriginCrs: 'mkc', trainDestinationCrs: 'EUS' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ trains: { originCrs: 'mkc', destinationCrs: 'EUS' } }) }),
     });
     assert.equal(res.status, 200);
     const saved = await store.get('esp32-1');
-    assert.equal(saved?.trainOriginCrs, 'MKC', 'stored uppercase regardless of what was typed');
-    assert.equal(saved?.trainDestinationCrs, 'EUS');
+    assert.deepEqual(saved?.dashboardSections[2], { type: 'trains', version: 1, config: { originCrs: 'MKC', destinationCrs: 'EUS' } });
   });
 });
 
@@ -345,7 +404,7 @@ test('rejects a CRS that is well-formed but does not exist', async () => {
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ trainOriginCrs: 'ZZZ' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ trains: { originCrs: 'ZZZ', destinationCrs: '' } }) }),
     });
     // Three letters is not enough — an unknown code would fail silently at
     // fetch time, hours later, as "Trains unavailable".
@@ -359,7 +418,7 @@ test('empty CRS fields are allowed — they mean trains are switched off', async
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ trainOriginCrs: '', trainDestinationCrs: '' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ trains: { originCrs: '', destinationCrs: '' } }) }),
     });
     assert.equal(res.status, 200);
   });
@@ -371,10 +430,10 @@ test('accepts a valid UPRN', async () => {
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ binsUprn: '100080152345' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ bins: { uprn: '100080152345' } }) }),
     });
     assert.equal(res.status, 200);
-    assert.equal((await store.get('esp32-1'))?.binsUprn, '100080152345');
+    assert.deepEqual((await store.get('esp32-1'))?.dashboardSections[3], { type: 'bins', version: 1, config: { uprn: '100080152345' } });
   });
 });
 
@@ -384,7 +443,7 @@ test('rejects a UPRN that is not digits', async () => {
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ binsUprn: 'not-a-uprn' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ bins: { uprn: 'not-a-uprn' } }) }),
     });
     assert.equal(res.status, 400);
   });
@@ -396,7 +455,7 @@ test('an empty UPRN is allowed — it means bins are switched off', async () => 
     const res = await fetch(`${base}/api/devices/esp32-1`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ binsUprn: '' }),
+      body: JSON.stringify({ dashboardSections: dashboardSections({ bins: { uprn: '' } }) }),
     });
     assert.equal(res.status, 200);
   });

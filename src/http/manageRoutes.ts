@@ -10,6 +10,28 @@ import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 
+const stationCodeInputSchema = z
+  .string()
+  .transform((value) => value.trim().toUpperCase())
+  .refine((value) => value === '' || findStation(value) !== null, 'unknown station code');
+
+const dashboardSectionInputSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('calendar'), version: z.literal(1),
+    config: z.strictObject({ calendarUrls: z.array(calendarUrlInputSchema).max(10) }),
+  }),
+  z.strictObject({ type: z.literal('weather'), version: z.literal(1), config: z.strictObject({}) }),
+  z.strictObject({
+    type: z.literal('trains'), version: z.literal(1),
+    config: z.strictObject({ originCrs: stationCodeInputSchema, destinationCrs: stationCodeInputSchema }),
+  }),
+  z.strictObject({
+    type: z.literal('bins'), version: z.literal(1),
+    config: z.strictObject({ uprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits') }),
+  }),
+  z.strictObject({ type: z.literal('empty'), version: z.literal(1), config: z.strictObject({}) }),
+]);
+
 const patchSchema = z
   .object({
     name: z.string().min(1).max(64).optional(),
@@ -18,25 +40,18 @@ const patchSchema = z
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     locationLabel: z.string().max(120).optional(),
-    // Empty is valid and means "bins off". A UPRN is up to 12 digits.
-    binsUprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits').optional(),
-    calendarUrls: z.array(calendarUrlInputSchema).max(10).optional(),
+    dashboardSections: z.tuple([
+      dashboardSectionInputSchema,
+      dashboardSectionInputSchema,
+      dashboardSectionInputSchema,
+      dashboardSectionInputSchema,
+    ]).optional(),
     panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),
     quietHoursEnd: z.number().int().min(0).max(23).optional(),
     activeIntervalSeconds: z.number().int().min(60).max(86400).optional(),
     lowBatteryIntervalSeconds: z.number().int().min(60).max(86400).optional(),
     lowBatteryVolts: z.number().min(2.5).max(4.2).optional(),
-    trainOriginCrs: z
-      .string()
-      .transform((v) => v.trim().toUpperCase())
-      .refine((v) => v === '' || findStation(v) !== null, 'unknown station code')
-      .optional(),
-    trainDestinationCrs: z
-      .string()
-      .transform((v) => v.trim().toUpperCase())
-      .refine((v) => v === '' || findStation(v) !== null, 'unknown station code')
-      .optional(),
   })
   .strict();
 

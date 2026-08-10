@@ -1,6 +1,6 @@
 import { getJson, sendJson } from './api.js';
 import { esc, formatRelative, formatVolts, field, pill } from './components.js';
-import { renderStationPicker } from './stationPicker.js';
+import { collectDashboardSections, renderDashboardEditor } from './dashboardEditor.js';
 
 let selectedId = null;
 
@@ -30,21 +30,8 @@ function detail(device) {
       <div id="city-picker"></div>
       ${field(device.id, 'timezone', 'Timezone', device.timezone)}
 
-      <h3>Calendar</h3>
-      <label for="${esc(device.id)}-cal">Secret iCal URLs, one per line</label>
-      <textarea id="${esc(device.id)}-cal" name="calendarUrls" rows="3"
-        placeholder="https://calendar.google.com/calendar/ical/.../private-xxxx/basic.ics">${esc((device.calendarUrls ?? []).join('\n'))}</textarea>
-
-      <h3>Bins</h3>
-      ${field(device.id, 'binsUprn', 'UPRN', device.binsUprn)}
-      <p class="meta">Milton Keynes only. Find your UPRN at
-        <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.
-        Leave blank to hide the bins panel.</p>
-
-      <h3>Trains</h3>
-      <div class="station-picker" data-field="trainOriginCrs"></div>
-      <div class="station-picker" data-field="trainDestinationCrs"></div>
-      <p class="meta">Both stations are needed. Leave either blank to hide the departures panel.</p>
+      <h3>Dashboard sections</h3>
+      <div class="dashboard-editor" id="dashboard-editor"></div>
 
       <h3>Refresh schedule</h3>
       <div class="row">
@@ -114,8 +101,7 @@ async function save(event, root) {
   const body = {
     name: raw.name,
     timezone: raw.timezone,
-    calendarUrls: String(raw.calendarUrls || '').split('\n').map((s) => s.trim()).filter(Boolean),
-    binsUprn: raw.binsUprn,
+    dashboardSections: collectDashboardSections(form.querySelector('#dashboard-editor')),
     activeIntervalSeconds: Number(raw.activeIntervalSeconds),
     quietHoursStart: Number(raw.quietHoursStart),
     quietHoursEnd: Number(raw.quietHoursEnd),
@@ -130,14 +116,6 @@ async function save(event, root) {
     body.locationLabel = picker.dataset.label;
     if (picker.dataset.timezone) body.timezone = picker.dataset.timezone;
   }
-
-  // The station pickers show "Milton Keynes Central (MKC)" in the visible
-  // input, which is not a CRS code — read the dataset seam they maintain
-  // instead of collecting the input's text.
-  const origin = form.querySelector('[data-field="trainOriginCrs"]');
-  const destination = form.querySelector('[data-field="trainDestinationCrs"]');
-  body.trainOriginCrs = origin?.dataset.crs ?? '';
-  body.trainDestinationCrs = destination?.dataset.crs ?? '';
 
   await sendJson('PUT', `/api/devices/${encodeURIComponent(form.dataset.id)}`, body);
   await renderPanels(root);
@@ -194,15 +172,7 @@ async function renderDetail(root, device) {
   const { renderCityPicker } = await import('./cityPicker.js');
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
 
-  detailEl.querySelectorAll('.station-picker').forEach((container) => {
-    const field = container.dataset.field;
-    renderStationPicker(container, {
-      id: device.id,
-      field,
-      label: field === 'trainOriginCrs' ? 'From' : 'To',
-      value: device[field] || '',
-    });
-  });
+  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device);
 }
 
 // Switching the selected card must not re-fetch every thumbnail: it only

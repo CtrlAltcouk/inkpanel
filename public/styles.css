@@ -84,6 +84,7 @@ label {
 
 input[type="text"],
 input[type="number"],
+select,
 textarea {
   width: 100%;
   background: var(--bg-3);
@@ -102,6 +103,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--brand-pink);
@@ -334,6 +336,34 @@ button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); curso
 
 .station-picker { position: relative; margin-bottom: var(--sp-3); }
 .station-current { margin-top: var(--sp-2); }
+
+.dashboard-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+.dashboard-editor-cell {
+  min-width: 0;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-4);
+  background: var(--bg-2);
+}
+
+.dashboard-editor-cell select { margin-bottom: var(--sp-3); }
+
+.dashboard-position {
+  color: var(--fg-1);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  margin-bottom: var(--sp-3);
+}
+
+@media (max-width: 720px) {
+  .dashboard-editor { grid-template-columns: 1fr; }
+}
 
 .update-log {
   background: var(--bg-0);
