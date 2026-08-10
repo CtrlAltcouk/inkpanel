@@ -13,14 +13,13 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 function sourceWith(fetchImpl: typeof fetch, overrides: Partial<Parameters<typeof createNationalRailTrainSource>[0]> = {}) {
   return createNationalRailTrainSource({
     baseUrl: 'https://rail.example/api/',
-    authHeaderName: 'X-Consumer-Key',
-    authHeaderValue: 'super-secret-key',
+    apiKey: 'super-secret-key',
     fetchImpl,
     ...overrides,
   });
 }
 
-test('requests a filtered departure board and maps live services', async () => {
+test('requests a filtered departure board using the current RDM x-apikey contract', async () => {
   let seenUrl = '';
   let seenInit: RequestInit | undefined;
   const source = sourceWith((async (input, init) => {
@@ -47,7 +46,7 @@ test('requests a filtered departure board and maps live services', async () => {
   assert.equal(url.searchParams.get('timeOffset'), '0');
   assert.equal(url.searchParams.get('timeWindow'), '120');
   assert.equal(new Headers(seenInit?.headers).get('accept'), 'application/json');
-  assert.equal(new Headers(seenInit?.headers).get('x-consumer-key'), 'super-secret-key');
+  assert.equal(new Headers(seenInit?.headers).get('x-apikey'), 'super-secret-key');
   assert.equal(seenInit?.redirect, 'error');
 
   assert.equal(result.data.originCrs, 'MKC');
@@ -59,7 +58,7 @@ test('requests a filtered departure board and maps live services', async () => {
   assert.deepEqual(result.data.departures[1], {
     scheduled: '07:58', expected: '08:06', status: 'delayed', delayMinutes: 8, platform: '1',
   });
-  assert.equal(result.data.departures[2]?.status, 'cancelled', 'isCancelled overrides a benign etd');
+  assert.equal(result.data.departures[2]?.status, 'cancelled');
 });
 
 test('normalises lowercase route codes before the request', async () => {
@@ -133,7 +132,7 @@ test('invalid JSON and non-JSON responses fail without exposing credentials', as
   assert.doesNotMatch(JSON.stringify(result), /super-secret-key/);
 });
 
-test('non-2xx responses return only status and never reflect secret response bodies', async () => {
+test('non-2xx responses never reflect secret response bodies', async () => {
   const source = sourceWith((async () => new Response('super-secret-key upstream diagnostic', {
     status: 401, headers: { 'content-type': 'text/plain' },
   })) as typeof fetch);
@@ -165,17 +164,12 @@ test('passes the caller AbortSignal to fetch', async () => {
   await assert.rejects(pending, (err: unknown) => err instanceof DOMException && err.name === 'AbortError');
 });
 
-test('source configuration refuses insecure or credential-bearing endpoints', () => {
+test('source configuration refuses insecure endpoints and empty API keys', () => {
   assert.throws(() => createNationalRailTrainSource({
-    baseUrl: 'http://rail.example/', authHeaderValue: 'secret',
+    baseUrl: 'http://rail.example/', apiKey: 'secret',
   }), /must use HTTPS/);
   assert.throws(() => createNationalRailTrainSource({
-    baseUrl: 'https://user:pass@rail.example/', authHeaderValue: 'secret',
+    baseUrl: 'https://user:pass@rail.example/', apiKey: 'secret',
   }), /must not contain credentials/);
-  assert.throws(() => createNationalRailTrainSource({
-    baseUrl: 'https://rail.example/', authHeaderValue: '',
-  }), /auth value is required/);
-  assert.throws(() => createNationalRailTrainSource({
-    baseUrl: 'https://rail.example/', authHeaderName: 'bad header', authHeaderValue: 'secret',
-  }), /invalid HTTP header name/);
+  assert.throws(() => createNationalRailTrainSource({ apiKey: '' }), /API key is required/);
 });
