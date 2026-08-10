@@ -1,6 +1,10 @@
 import { getJson, sendJson } from './api.js';
 import { esc, formatRelative, formatVolts, field, pill } from './components.js';
-import { collectDashboardSections, renderDashboardEditor } from './dashboardEditor.js';
+import {
+  collectDashboardSections,
+  collectTrainApiKey,
+  renderDashboardEditor,
+} from './dashboardEditor.js';
 
 let selectedId = null;
 
@@ -97,11 +101,12 @@ async function save(event, root) {
   const form = event.target;
   const raw = Object.fromEntries(new FormData(form));
   const picker = form.querySelector('#city-picker');
+  const dashboardEditor = form.querySelector('#dashboard-editor');
 
   const body = {
     name: raw.name,
     timezone: raw.timezone,
-    dashboardSections: collectDashboardSections(form.querySelector('#dashboard-editor')),
+    dashboardSections: collectDashboardSections(dashboardEditor),
     activeIntervalSeconds: Number(raw.activeIntervalSeconds),
     quietHoursStart: Number(raw.quietHoursStart),
     quietHoursEnd: Number(raw.quietHoursEnd),
@@ -117,6 +122,13 @@ async function save(event, root) {
     if (picker.dataset.timezone) body.timezone = picker.dataset.timezone;
   }
 
+  // A newly entered Consumer key is saved as a server secret before the
+  // device config, so the very next preview/render can use it. An empty field
+  // means "keep the existing key" — the stored secret is never sent back to
+  // the browser merely to populate an input.
+  const trainApiKey = collectTrainApiKey(dashboardEditor);
+  if (trainApiKey) await sendJson('PUT', '/api/national-rail', { apiKey: trainApiKey });
+
   await sendJson('PUT', `/api/devices/${encodeURIComponent(form.dataset.id)}`, body);
   await renderPanels(root);
 }
@@ -124,7 +136,7 @@ async function save(event, root) {
 // Renders (or replaces) the #detail card for `device` and wires its form,
 // push and zoom controls. Shared by the initial render and by card
 // selection so both stay in sync.
-async function renderDetail(root, device) {
+async function renderDetail(root, device, trainApi) {
   const html = detail(device);
   const existing = root.querySelector('#detail');
   if (existing) {
@@ -172,24 +184,27 @@ async function renderDetail(root, device) {
   const { renderCityPicker } = await import('./cityPicker.js');
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
 
-  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device);
+  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device, trainApi);
 }
 
 // Switching the selected card must not re-fetch every thumbnail: it only
 // swaps the detail pane and toggles which card is highlighted. The strip's
 // <img> elements are left completely untouched, so no new render.png
 // requests happen just from clicking around.
-function selectDevice(root, devices, id) {
+function selectDevice(root, devices, id, trainApi) {
   selectedId = id;
   root.querySelectorAll('[data-select]').forEach((card) => {
     card.classList.toggle('on', card.dataset.select === id);
   });
   const device = devices.find((d) => d.id === id);
-  void renderDetail(root, device);
+  void renderDetail(root, device, trainApi);
 }
 
 export async function renderPanels(root) {
-  const { devices } = await getJson('/api/devices');
+  const [{ devices }, trainApi] = await Promise.all([
+    getJson('/api/devices'),
+    getJson('/api/national-rail'),
+  ]);
 
   if (devices.length === 0) {
     root.innerHTML = '<div class="card"><p class="empty">No panels yet. Power one on and it will appear here.</p></div>';
@@ -200,7 +215,7 @@ export async function renderPanels(root) {
 
   root.innerHTML = `<div class="panel-strip">${devices.map(thumbnail).join('')}</div>`;
   root.querySelectorAll('[data-select]').forEach((card) => {
-    card.addEventListener('click', () => selectDevice(root, devices, card.dataset.select));
+    card.addEventListener('click', () => selectDevice(root, devices, card.dataset.select, trainApi));
   });
   root.querySelectorAll('.panel-thumb').forEach((img) => {
     // While zoomed, clicking the (now full-screen) picture closes it again.
@@ -213,5 +228,5 @@ export async function renderPanels(root) {
     });
   });
 
-  await renderDetail(root, devices.find((d) => d.id === selectedId));
+  await renderDetail(root, devices.find((d) => d.id === selectedId), trainApi);
 }
