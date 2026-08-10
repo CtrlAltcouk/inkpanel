@@ -88,9 +88,14 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
   return new TextDecoder().decode(bytes);
 }
 
-function mapBoard(originCrs: string, destinationCrs: string, parsed: z.infer<typeof rawBoardSchema>): TrainData {
+function mapBoard(
+  originCrs: string,
+  destinationCrs: string,
+  parsed: z.infer<typeof rawBoardSchema>,
+): TrainData | null {
+  const candidates = parsed.trainServices ?? [];
   const raw = [];
-  for (const candidate of parsed.trainServices ?? []) {
+  for (const candidate of candidates) {
     const service = rawServiceSchema.safeParse(candidate);
     if (!service.success) continue;
     raw.push({
@@ -101,7 +106,12 @@ function mapBoard(originCrs: string, destinationCrs: string, parsed: z.infer<typ
         : String(service.data.platform),
     });
   }
-  return buildTrainData(originCrs, destinationCrs, raw);
+  const data = buildTrainData(originCrs, destinationCrs, raw);
+  // An actually empty board is valid. A non-empty board from which we cannot
+  // build even one departure is much more likely to mean the upstream schema
+  // changed; fail closed so stale data can be used instead of claiming there
+  // are no trains.
+  return candidates.length > 0 && data.departures.length === 0 ? null : data;
 }
 
 export function createNationalRailTrainSource(options: NationalRailTrainSourceOptions): Source<TrainSourceConfig, TrainData> {
@@ -150,10 +160,12 @@ export function createNationalRailTrainSource(options: NationalRailTrainSourceOp
       }
       const board = rawBoardSchema.safeParse(json);
       if (!board.success) return { status: 'error', error: 'National Rail returned an invalid departure board' };
+      const data = mapBoard(route.originCrs, route.destinationCrs, board.data);
+      if (!data) return { status: 'error', error: 'National Rail returned no usable train services' };
 
       return {
         status: 'ok',
-        data: mapBoard(route.originCrs, route.destinationCrs, board.data),
+        data,
         fetchedAt: new Date().toISOString(),
       };
     },
