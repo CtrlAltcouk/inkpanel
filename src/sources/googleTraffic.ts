@@ -13,9 +13,10 @@ export interface TrafficSourceConfig {
 export interface TrafficData {
   origin: string;
   destination: string;
+  /** Google Routes `duration`, rounded to display minutes. */
   durationMinutes: number;
+  /** Google Routes `staticDuration`, rounded to display minutes. */
   staticDurationMinutes: number;
-  delayMinutes: number;
   distanceMiles: number | null;
   description: string | null;
   warning: string | null;
@@ -147,16 +148,13 @@ export function createGoogleTrafficSource(options: GoogleTrafficSourceOptions): 
       } catch (err) {
         return { status: 'error', error: err instanceof Error ? err.message : 'Google Routes returned an invalid duration' };
       }
-      const durationMinutes = Math.max(0, Math.round(duration / 60));
-      const staticDurationMinutes = Math.max(0, Math.round(staticDuration / 60));
       return {
         status: 'ok',
         data: {
           origin,
           destination,
-          durationMinutes,
-          staticDurationMinutes,
-          delayMinutes: Math.max(0, durationMinutes - staticDurationMinutes),
+          durationMinutes: Math.max(0, Math.round(duration / 60)),
+          staticDurationMinutes: Math.max(0, Math.round(staticDuration / 60)),
           distanceMiles: route.data.distanceMeters === undefined
             ? null
             : Math.round((route.data.distanceMeters / 1609.344) * 10) / 10,
