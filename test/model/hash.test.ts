@@ -58,6 +58,28 @@ test('trains not-set-up and unavailable states have different visible hashes', (
   assert.notEqual(contentHash(notSetUp), contentHash(unavailable));
 });
 
+test('bus not-set-up and unavailable states have different visible hashes', () => {
+  const notSetUp = dashboardData();
+  notSetUp.sections[2] = { type: 'bus', data: null, health: null };
+  const unavailable = structuredClone(notSetUp);
+  unavailable.sections[2] = {
+    type: 'bus', data: null,
+    health: { id: 'bus', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+  };
+  assert.notEqual(contentHash(notSetUp), contentHash(unavailable));
+});
+
+test('traffic not-set-up and unavailable states have different visible hashes', () => {
+  const notSetUp = dashboardData();
+  notSetUp.sections[2] = { type: 'traffic', data: null, health: null };
+  const unavailable = structuredClone(notSetUp);
+  unavailable.sections[2] = {
+    type: 'traffic', data: null,
+    health: { id: 'traffic', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+  };
+  assert.notEqual(contentHash(notSetUp), contentHash(unavailable));
+});
+
 test('configured widget diagnostic details do not affect its visible hash', () => {
   const first = dashboardData();
   first.sections[3] = {
