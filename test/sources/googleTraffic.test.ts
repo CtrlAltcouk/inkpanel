@@ -11,7 +11,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-test('Google traffic source requests TRAFFIC_AWARE driving route and calculates delay', async () => {
+test('Google traffic source requests TRAFFIC_AWARE driving route and retains returned durations', async () => {
   let seenUrl = '';
   let seenHeaders = new Headers();
   let seenBody: unknown = null;
@@ -53,9 +53,9 @@ test('Google traffic source requests TRAFFIC_AWARE driving route and calculates 
   });
   assert.equal(result.data.durationMinutes, 36);
   assert.equal(result.data.staticDurationMinutes, 24);
-  assert.equal(result.data.delayMinutes, 12);
   assert.equal(result.data.distanceMiles, 18);
   assert.equal(result.data.description, 'A5 and M1');
+  assert.equal('delayMinutes' in result.data, false, 'do not create a derived Google Maps metric');
 });
 
 test('Google traffic source preserves provider warnings for display', async () => {
