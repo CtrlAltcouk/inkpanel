@@ -14,7 +14,12 @@ export const trainsWidgetConfigV1Schema = z.strictObject({
   destinationCrs: crsSchema,
 });
 
-const busStopCodeSchema = z.string().regex(/^(?:|[A-Za-z0-9]{3,32})$/, 'ATCO stop code must be empty or 3-32 alphanumeric characters');
+// DfT NaPTAN: first three authority digits, fourth character 0, followed by
+// one to eight locally allocated alphanumeric characters (maximum size 12).
+const busStopCodeSchema = z.string().regex(
+  /^(?:|\d{3}0[A-Za-z0-9]{1,8})$/,
+  'ATCO stop code must be empty or use the NaPTAN ATCO format',
+);
 
 export const busWidgetConfigV1Schema = z.strictObject({
   stopCode: busStopCodeSchema,
