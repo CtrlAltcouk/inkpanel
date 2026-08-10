@@ -114,15 +114,16 @@ function busCell(bus: BusData | null, health: SourceHealth | null): string {
   if (!health) return emptySlot('Bus — not set up');
   if (!bus) return emptySlot('Bus unavailable');
   if (bus.departures.length === 0) return emptySlot('No bus departures');
-  return `<div class="bus-rows">${bus.departures.slice(0, 4).map(busRow).join('')}</div><div class="provider">source: TransportAPI</div>`;
+  return `<div class="bus-rows">${bus.departures.slice(0, 4).map(busRow).join('')}</div><div class="provider">source: http://transportapi.com/</div>`;
 }
 
 function trafficCell(traffic: TrafficData | null, health: SourceHealth | null): string {
   if (!health) return emptySlot('Traffic — not set up');
   if (!traffic) return emptySlot('Traffic unavailable');
-  const delay = traffic.delayMinutes <= 1 ? 'Normal traffic' : `+${traffic.delayMinutes} min traffic`;
   const route = traffic.warning ?? traffic.description ?? (traffic.distanceMiles === null ? '' : `${traffic.distanceMiles} miles`);
-  return `<div class="traffic-time disp">${traffic.durationMinutes} min</div><div class="traffic-delay">${esc(delay)}</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google">Google Maps</div>`;
+  // Show the two Google-provided route durations directly rather than deriving
+  // a new delay metric from Google Maps Content.
+  return `<div class="traffic-time disp">${traffic.durationMinutes} min</div><div class="traffic-delay">Traffic-aware</div><div class="traffic-static">No live traffic: ${traffic.staticDurationMinutes} min</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google" translate="no">Google Maps</div>`;
 }
 
 const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
