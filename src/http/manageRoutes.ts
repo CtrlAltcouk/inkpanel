@@ -6,6 +6,8 @@ import { bufferToPng } from '../panel/quantise.ts';
 import { PROFILES, WFT0583 } from '../panel/profile.ts';
 import { geocode } from '../sources/geocode.ts';
 import { findStation, searchStations } from '../sources/stations.ts';
+import type { NationalRailCredentialStore } from '../sources/nationalRailCredentials.ts';
+import { validateNationalRailApiKey } from '../sources/nationalRailCredentials.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
@@ -55,12 +57,50 @@ const patchSchema = z
   })
   .strict();
 
+const nationalRailKeySchema = z.strictObject({
+  apiKey: z.string().transform((value, ctx) => {
+    try {
+      return validateNationalRailApiKey(value);
+    } catch (err) {
+      ctx.addIssue({
+        code: 'custom',
+        message: err instanceof Error ? err.message : 'invalid National Rail API key',
+      });
+      return z.NEVER;
+    }
+  }),
+});
+
 export function manageRoutes(
   store: DeviceStore,
   frames: FrameService,
   publicBaseUrl: string,
+  trainCredentials?: NationalRailCredentialStore,
 ): Router {
   const router = Router();
+
+  // The secret itself is write-only from the browser. The GET exposes only a
+  // boolean so reopening the editor can say "configured" without ever
+  // sending the stored Consumer key back across HTTP.
+  router.get('/national-rail', (_req, res) => {
+    res.set('cache-control', 'no-store');
+    res.json(trainCredentials?.status() ?? { configured: false, managed: false });
+  });
+
+  router.put('/national-rail', async (req, res) => {
+    if (!trainCredentials) {
+      res.status(503).json({ error: 'National Rail credential storage is unavailable' });
+      return;
+    }
+    const parsed = nationalRailKeySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid National Rail API key', issues: parsed.error.issues });
+      return;
+    }
+    await trainCredentials.set(parsed.data.apiKey);
+    res.set('cache-control', 'no-store');
+    res.json(trainCredentials.status());
+  });
 
   router.get('/devices', async (_req, res) => {
     res.json({ devices: await store.list() });
