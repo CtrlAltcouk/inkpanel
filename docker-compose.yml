@@ -31,6 +31,17 @@ services:
       NATIONAL_RAIL_LDB_API_KEY: "${NATIONAL_RAIL_LDB_API_KEY:-}"
       # Optional override for a future RDM gateway migration; normally omit it.
       NATIONAL_RAIL_LDB_BASE_URL: "${NATIONAL_RAIL_LDB_BASE_URL:-}"
+      # Optional Bus transport fallback. Normally configure these from the Bus
+      # section in the Web UI; if supplied here both values are required.
+      TRANSPORTAPI_APP_ID: "${TRANSPORTAPI_APP_ID:-}"
+      TRANSPORTAPI_APP_KEY: "${TRANSPORTAPI_APP_KEY:-}"
+      # Optional override for controlled testing/future TransportAPI migration.
+      TRANSPORTAPI_BASE_URL: "${TRANSPORTAPI_BASE_URL:-}"
+      # Optional Google Traffic fallback. Normally configure this from the
+      # Traffic section in the Web UI. The Google Maps Routes API must be enabled.
+      GOOGLE_MAPS_ROUTES_API_KEY: "${GOOGLE_MAPS_ROUTES_API_KEY:-}"
+      # Optional override for controlled testing/future Google endpoint migration.
+      GOOGLE_ROUTES_URL: "${GOOGLE_ROUTES_URL:-}"
       # Uncomment to require a password for the web UI. The panel's own
       # endpoint (/api/devices/:id/frame) and /health stay open regardless,
       # since firmware cannot log in. NOTE: this is plain HTTP — the password
