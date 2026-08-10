@@ -67,6 +67,22 @@ test('TransportAPI bus source keeps credentials in headers and maps live departu
   assert.equal(result.data.departures[1]?.status, 'scheduled');
 });
 
+test('TransportAPI Bus source rejects a stop name masquerading as an ATCO code before network access', async () => {
+  let calls = 0;
+  const source = createTransportApiBusSource({
+    credentials,
+    fetchImpl: (async () => {
+      calls += 1;
+      return jsonResponse({ departures: { all: [] } });
+    }) as typeof fetch,
+  });
+  await assert.rejects(
+    source.fetch({ stopCode: 'central', stopLabel: '', routeFilter: '' }, new AbortController().signal),
+    /invalid ATCO stop code/,
+  );
+  assert.equal(calls, 0);
+});
+
 test('TransportAPI route filter is applied after parsing without putting it into credentials', async () => {
   const source = createTransportApiBusSource({
     credentials,
@@ -88,7 +104,7 @@ test('TransportAPI route filter is applied after parsing without putting it into
   if (result.status === 'ok') assert.deepEqual(result.data.departures.map((row) => row.line), ['X5']);
 });
 
-test('TransportAPI stop search maps ATCO-coded bus stops', async () => {
+test('TransportAPI stop search maps only valid ATCO-coded bus stops', async () => {
   const store = new TransportApiCredentialStore('/unused', credentials.appId, credentials.appKey);
   let seenHeaders = new Headers();
   const results = await searchTransportApiBusStops(
@@ -102,6 +118,7 @@ test('TransportAPI stop search maps ATCO-coded bus stops', async () => {
           member: [
             { type: 'bus_stop', name: 'Central Railway Station Stop Y4', atcocode: '049000000001', locality: 'Milton Keynes' },
             { type: 'bus_stop', name: 'Duplicate', atcocode: '049000000001' },
+            { type: 'bus_stop', name: 'Malformed', atcocode: 'central' },
             { type: 'train_station', name: 'No ATCO' },
           ],
         });
