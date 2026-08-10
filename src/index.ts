@@ -19,6 +19,10 @@ import {
   createManagedNationalRailTrainSource,
   NationalRailCredentialStore,
 } from './sources/nationalRailCredentials.ts';
+import { TransportApiCredentialStore } from './sources/transportApiCredentials.ts';
+import { createManagedTransportApiBusSource } from './sources/transportApiBus.ts';
+import { GoogleMapsCredentialStore } from './sources/googleMapsCredentials.ts';
+import { createManagedGoogleTrafficSource } from './sources/googleTraffic.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
@@ -91,11 +95,36 @@ export async function main(): Promise<void> {
     trainBaseUrl ? { baseUrl: trainBaseUrl } : {},
   );
 
+  const busCredentials = new TransportApiCredentialStore(
+    join(dataDir, '.transportapi-credentials.json'),
+    process.env.TRANSPORTAPI_APP_ID,
+    process.env.TRANSPORTAPI_APP_KEY,
+  );
+  await busCredentials.load();
+  const transportApiBaseUrl = process.env.TRANSPORTAPI_BASE_URL?.trim() || undefined;
+  const busSource = createManagedTransportApiBusSource(
+    busCredentials,
+    transportApiBaseUrl ? { baseUrl: transportApiBaseUrl } : {},
+  );
+
+  const googleMapsCredentials = new GoogleMapsCredentialStore(
+    join(dataDir, '.google-maps-api-key'),
+    process.env.GOOGLE_MAPS_ROUTES_API_KEY,
+  );
+  await googleMapsCredentials.load();
+  const googleRoutesEndpoint = process.env.GOOGLE_ROUTES_URL?.trim() || undefined;
+  const trafficSource = createManagedGoogleTrafficSource(
+    googleMapsCredentials,
+    googleRoutesEndpoint ? { endpoint: googleRoutesEndpoint } : {},
+  );
+
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
     calendarSource,
     trainSource,
+    busSource,
+    trafficSource,
   });
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
@@ -106,6 +135,9 @@ export async function main(): Promise<void> {
     store, frames, publicBaseUrl, runtimeState,
     dataDir, firmwareDir, auth: { password, secret }, trustProxy,
     trainCredentials,
+    busCredentials,
+    googleMapsCredentials,
+    transportApiBaseUrl,
   });
   const server = app.listen(port);
   await new Promise<void>((resolveListening, rejectListening) => {
@@ -125,6 +157,8 @@ export async function main(): Promise<void> {
   console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
   console.log(`private calendar networks: ${allowPrivateCalendarNetworks ? 'enabled' : 'blocked'}`);
   console.log(`National Rail live departures: ${trainCredentials.status().configured ? 'configured' : 'not configured'}`);
+  console.log(`TransportAPI bus departures: ${busCredentials.status().configured ? 'configured' : 'not configured'}`);
+  console.log(`Google traffic routes: ${googleMapsCredentials.status().configured ? 'configured' : 'not configured'}`);
 
   const httpsServer = resolvedHttps.httpsPort === null
     ? null
