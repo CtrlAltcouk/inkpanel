@@ -3,7 +3,10 @@ import { esc } from './components.js';
 
 const DEBOUNCE_MS = 180;
 const MIN_CHARS = 2;
-const STOP_CODE = /^[A-Za-z0-9]{3,32}$/;
+// DfT NaPTAN ATCO code: 3 authority digits + 0 + 1-8 local alphanumerics.
+// Keeping this strict is important in a combined search/code field: a stop
+// name such as "central" must never silently become the saved stop code.
+const STOP_CODE = /^\d{3}0[A-Za-z0-9]{1,8}$/;
 
 /**
  * Bus-stop picker backed by TransportAPI Places once credentials are saved.
