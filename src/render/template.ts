@@ -1,9 +1,12 @@
 import type {
+  BusData,
+  BusDeparture,
   CalendarData,
   CalendarEvent,
   DashboardData,
   DashboardSectionData,
   SourceHealth,
+  TrafficData,
   TrainData,
   TrainDeparture,
   WeatherData,
@@ -94,6 +97,34 @@ function trainCell(train: TrainData | null, health: SourceHealth | null): string
   return train.departures.map(departureRow).join('');
 }
 
+function busRow(departure: BusDeparture): string {
+  const time = departure.status === 'cancelled'
+    ? (departure.scheduled ?? '--:--')
+    : (departure.expected ?? departure.scheduled ?? '--:--');
+  const statusClass = departure.status === 'cancelled' ? 'bus-time dep-was' : 'bus-time';
+  const destination = departure.status === 'cancelled' ? 'Cancelled' : departure.destination;
+  return `<div class="bus-row"><span class="bus-line">${esc(departure.line)}</span><span class="${statusClass}">${esc(time)}</span><span class="bus-dest">${esc(destination)}</span></div>`;
+}
+
+function busLabel(bus: BusData | null): string {
+  return bus ? `Bus &middot; ${esc(bus.stopName)}` : 'Bus';
+}
+
+function busCell(bus: BusData | null, health: SourceHealth | null): string {
+  if (!health) return emptySlot('Bus — not set up');
+  if (!bus) return emptySlot('Bus unavailable');
+  if (bus.departures.length === 0) return emptySlot('No bus departures');
+  return `<div class="bus-rows">${bus.departures.slice(0, 4).map(busRow).join('')}</div><div class="provider">source: TransportAPI</div>`;
+}
+
+function trafficCell(traffic: TrafficData | null, health: SourceHealth | null): string {
+  if (!health) return emptySlot('Traffic — not set up');
+  if (!traffic) return emptySlot('Traffic unavailable');
+  const delay = traffic.delayMinutes <= 1 ? 'Normal traffic' : `+${traffic.delayMinutes} min traffic`;
+  const route = traffic.warning ?? traffic.description ?? (traffic.distanceMiles === null ? '' : `${traffic.distanceMiles} miles`);
+  return `<div class="traffic-time disp">${traffic.durationMinutes} min</div><div class="traffic-delay">${esc(delay)}</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google">Google Maps</div>`;
+}
+
 const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
 };
@@ -130,6 +161,14 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
     case 'trains':
       label = trainLabel(section.data);
       content = trainCell(section.data, section.health);
+      break;
+    case 'bus':
+      label = busLabel(section.data);
+      content = busCell(section.data, section.health);
+      break;
+    case 'traffic':
+      label = 'Traffic';
+      content = trafficCell(section.data, section.health);
       break;
     case 'bins':
       label = 'Bins';
