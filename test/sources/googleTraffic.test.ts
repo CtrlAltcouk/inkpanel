@@ -11,7 +11,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-test('Google traffic source requests TRAFFIC_AWARE driving route and retains returned durations', async () => {
+test('Google traffic source requests TRAFFIC_AWARE driving route and retains localized durations', async () => {
   let seenUrl = '';
   let seenHeaders = new Headers();
   let seenBody: unknown = null;
@@ -23,9 +23,10 @@ test('Google traffic source requests TRAFFIC_AWARE driving route and retains ret
       seenBody = JSON.parse(String(init?.body));
       return jsonResponse({
         routes: [{
-          duration: '2160s',
-          staticDuration: '1440s',
-          distanceMeters: 28968,
+          localizedValues: {
+            duration: { text: '36 mins' },
+            staticDuration: { text: '24 mins' },
+          },
           description: 'A5 and M1',
           warnings: [],
         }],
@@ -42,7 +43,7 @@ test('Google traffic source requests TRAFFIC_AWARE driving route and retains ret
   if (result.status !== 'ok') return;
   assert.equal(seenUrl, 'https://routes.googleapis.com/directions/v2:computeRoutes');
   assert.equal(seenHeaders.get('X-Goog-Api-Key'), API_KEY);
-  assert.match(seenHeaders.get('X-Goog-FieldMask') ?? '', /routes\.duration/);
+  assert.match(seenHeaders.get('X-Goog-FieldMask') ?? '', /routes\.localizedValues/);
   assert.deepEqual(seenBody, {
     origin: { address: 'Milton Keynes' },
     destination: { address: 'London Euston' },
@@ -51,10 +52,10 @@ test('Google traffic source requests TRAFFIC_AWARE driving route and retains ret
     languageCode: 'en-GB',
     units: 'IMPERIAL',
   });
-  assert.equal(result.data.durationMinutes, 36);
-  assert.equal(result.data.staticDurationMinutes, 24);
-  assert.equal(result.data.distanceMiles, 18);
+  assert.equal(result.data.durationText, '36 mins');
+  assert.equal(result.data.staticDurationText, '24 mins');
   assert.equal(result.data.description, 'A5 and M1');
+  assert.equal('durationMinutes' in result.data, false, 'do not manufacture a duration value from Google Maps Content');
   assert.equal('delayMinutes' in result.data, false, 'do not create a derived Google Maps metric');
 });
 
@@ -62,7 +63,13 @@ test('Google traffic source preserves provider warnings for display', async () =
   const source = createGoogleTrafficSource({
     apiKey: API_KEY,
     fetchImpl: (async () => jsonResponse({
-      routes: [{ duration: '600s', staticDuration: '540s', warnings: ['Private road restrictions may apply'] }],
+      routes: [{
+        localizedValues: {
+          duration: { text: '10 mins' },
+          staticDuration: { text: '9 mins' },
+        },
+        warnings: ['Private road restrictions may apply'],
+      }],
     })) as typeof fetch,
   });
   const result = await source.fetch(
@@ -71,6 +78,18 @@ test('Google traffic source preserves provider warnings for display', async () =
   );
   assert.equal(result.status, 'ok');
   if (result.status === 'ok') assert.equal(result.data.warning, 'Private road restrictions may apply');
+});
+
+test('Google traffic rejects a route missing required localized duration values', async () => {
+  const source = createGoogleTrafficSource({
+    apiKey: API_KEY,
+    fetchImpl: (async () => jsonResponse({ routes: [{ description: 'A5' }] })) as typeof fetch,
+  });
+  const result = await source.fetch(
+    { origin: 'A', destination: 'B' },
+    new AbortController().signal,
+  );
+  assert.deepEqual(result, { status: 'error', error: 'Google Routes returned an invalid route' });
 });
 
 test('Google traffic HTTP errors do not reflect the API key or response body', async () => {
