@@ -32,6 +32,15 @@ export const trafficWidgetConfigV1Schema = z.strictObject({
   destination: z.string().max(200),
 });
 
+const octopusTariffCodeSchema = z.string().regex(
+  /^(?:|E-1R-AGILE-[A-Z0-9-]+-[A-Z])$/,
+  'Octopus Agile tariff code must be empty or look like E-1R-AGILE-24-10-01-C',
+);
+
+export const octopusWidgetConfigV1Schema = z.strictObject({
+  tariffCode: octopusTariffCodeSchema,
+});
+
 export const binsWidgetConfigV1Schema = z.strictObject({
   uprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits'),
 });
@@ -63,6 +72,11 @@ export const trafficWidgetV1Schema = z.strictObject({
   version: z.literal(1),
   config: trafficWidgetConfigV1Schema,
 });
+export const octopusWidgetV1Schema = z.strictObject({
+  type: z.literal('octopus'),
+  version: z.literal(1),
+  config: octopusWidgetConfigV1Schema,
+});
 export const binsWidgetV1Schema = z.strictObject({
   type: z.literal('bins'),
   version: z.literal(1),
@@ -80,6 +94,7 @@ export type DashboardWidget =
   | z.infer<typeof trainsWidgetV1Schema>
   | z.infer<typeof busWidgetV1Schema>
   | z.infer<typeof trafficWidgetV1Schema>
+  | z.infer<typeof octopusWidgetV1Schema>
   | z.infer<typeof binsWidgetV1Schema>
   | z.infer<typeof emptyWidgetV1Schema>;
 
@@ -90,6 +105,7 @@ export const widgetRegistry = {
   trains: { 1: trainsWidgetV1Schema },
   bus: { 1: busWidgetV1Schema },
   traffic: { 1: trafficWidgetV1Schema },
+  octopus: { 1: octopusWidgetV1Schema },
   bins: { 1: binsWidgetV1Schema },
   empty: { 1: emptyWidgetV1Schema },
 } as const;
