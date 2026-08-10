@@ -42,7 +42,9 @@ export interface TransportApiBusSourceOptions {
   limit?: number;
 }
 
-const stopCodeSchema = z.string().trim().regex(/^[A-Za-z0-9]{3,32}$/, 'invalid ATCO stop code');
+// DfT NaPTAN ATCO code: first three authority digits, a literal 0, then up to
+// eight locally allocated alphanumeric characters.
+const stopCodeSchema = z.string().trim().regex(/^\d{3}0[A-Za-z0-9]{1,8}$/, 'invalid ATCO stop code');
 const rawDepartureSchema = z.object({
   line: z.union([z.string(), z.number()]).optional(),
   line_name: z.union([z.string(), z.number()]).optional(),
@@ -256,7 +258,7 @@ export async function searchTransportApiBusStops(
     const parsed = rawPlaceSchema.safeParse(candidate);
     if (!parsed.success) continue;
     const stopCode = (parsed.data.atcocode ?? parsed.data.stop_code ?? '').trim();
-    if (!stopCode || seen.has(stopCode)) continue;
+    if (!stopCode || !stopCodeSchema.safeParse(stopCode).success || seen.has(stopCode)) continue;
     seen.add(stopCode);
     results.push({
       stopCode,
