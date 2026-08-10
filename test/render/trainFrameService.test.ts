@@ -13,6 +13,18 @@ import { buildTrainData, type TrainData } from '../../src/sources/train.ts';
 import type { Renderer } from '../../src/render/browser.ts';
 import { WEATHER } from '../fixtures/dashboard.ts';
 
+type DashboardSections = ReturnType<typeof defaultDevice>['dashboardSections'];
+type DashboardWidget = DashboardSections[number];
+
+function sections(
+  first: DashboardWidget,
+  second: DashboardWidget,
+  third: DashboardWidget,
+  fourth: DashboardWidget,
+): DashboardSections {
+  return [first, second, third, fourth];
+}
+
 function weatherSource(): Source<{ latitude: number; longitude: number; timezone: string }, WeatherData> {
   return {
     id: 'weather',
@@ -56,7 +68,7 @@ test('an unconfigured Train widget performs no train request', async () => {
     const empty = emptyWidget();
     const device = {
       ...defaultDevice('esp32-train-unconfigured'),
-      dashboardSections: [trainWidget('', ''), empty, structuredClone(empty), structuredClone(empty)],
+      dashboardSections: sections(trainWidget('', ''), empty, structuredClone(empty), structuredClone(empty)),
     };
     const html = await service.previewHtml(device);
     assert.equal(calls, 0);
@@ -85,7 +97,7 @@ test('a configured Train widget loads and renders live TrainData', async () => {
     const empty = emptyWidget();
     const device = {
       ...defaultDevice('esp32-train-live'),
-      dashboardSections: [trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)],
+      dashboardSections: sections(trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)),
     };
     const html = await service.previewHtml(device);
     assert.deepEqual(seen, [{ originCrs: 'MKC', destinationCrs: 'EUS' }]);
@@ -103,7 +115,7 @@ test('configured Train widget is unavailable when the server has no RDM transpor
     const empty = emptyWidget();
     const device = {
       ...defaultDevice('esp32-train-no-server-config'),
-      dashboardSections: [trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)],
+      dashboardSections: sections(trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)),
     };
     const html = await service.previewHtml(device);
     assert.match(html, /Trains unavailable/);
@@ -129,7 +141,7 @@ test('identical Train widgets dedupe within a render, while different routes sta
     const different = trainWidget('EUS', 'MKC');
     const device = {
       ...defaultDevice('esp32-train-dedupe'),
-      dashboardSections: [same, structuredClone(same), different, emptyWidget()],
+      dashboardSections: sections(same, structuredClone(same), different, emptyWidget()),
     };
     await service.previewHtml(device);
     assert.deepEqual(calls.sort(), ['EUS->MKC', 'MKC->EUS']);
@@ -156,14 +168,14 @@ test('stale fallback is scoped to the same device and exact train route', async 
     const device = defaultDevice('esp32-train-cache');
     const routeA = {
       ...device,
-      dashboardSections: [trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)],
+      dashboardSections: sections(trainWidget('MKC', 'EUS'), empty, structuredClone(empty), structuredClone(empty)),
     };
     assert.match(await service.previewHtml(routeA), /18:10/);
 
     fail = true;
     const routeB = {
       ...device,
-      dashboardSections: [trainWidget('EUS', 'MKC'), empty, structuredClone(empty), structuredClone(empty)],
+      dashboardSections: sections(trainWidget('EUS', 'MKC'), empty, structuredClone(empty), structuredClone(empty)),
     };
     const differentRoute = await service.previewHtml(routeB);
     assert.match(differentRoute, /Trains unavailable/);
