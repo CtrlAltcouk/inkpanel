@@ -5,6 +5,7 @@ import type {
   CalendarEvent,
   DashboardData,
   DashboardSectionData,
+  OctopusAgileData,
   SourceHealth,
   TrafficData,
   TrainData,
@@ -126,6 +127,39 @@ function trafficCell(traffic: TrafficData | null, health: SourceHealth | null): 
   return `<div class="traffic-time disp">${esc(traffic.durationText)}</div><div class="traffic-delay">Traffic-aware</div><div class="traffic-static">Without traffic: ${esc(traffic.staticDurationText)}</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google" translate="no">Google Maps</div>`;
 }
 
+function addIsoDay(iso: string): string {
+  const date = new Date(`${iso}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function localIsoDate(iso: string, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(iso));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function octopusDayLabel(octopus: OctopusAgileData, data: DashboardData): string {
+  if (octopus.isCurrent) return 'NOW';
+  const slotDate = localIsoDate(octopus.cheapest.validFrom, data.timezone);
+  if (slotDate === data.today.iso) return 'TODAY';
+  if (slotDate === addIsoDay(data.today.iso)) return 'TOMORROW';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: data.timezone, weekday: 'short', day: 'numeric', month: 'short',
+  }).format(new Date(octopus.cheapest.validFrom)).toUpperCase();
+}
+
+function octopusCell(octopus: OctopusAgileData | null, health: SourceHealth | null, data: DashboardData): string {
+  if (!health) return emptySlot('Octopus — not set up');
+  if (!octopus) return emptySlot('Octopus unavailable');
+  const from = hhmm(octopus.cheapest.validFrom, data.timezone);
+  const to = hhmm(octopus.cheapest.validTo, data.timezone);
+  const price = octopus.cheapest.pencePerKwh.toFixed(2);
+  return `<div class="octopus-kicker">CHEAPEST UPCOMING</div><div class="octopus-time disp tnum">${esc(from)}&ndash;${esc(to)}</div><div class="octopus-day">${esc(octopusDayLabel(octopus, data))}</div><div class="octopus-price"><span class="disp tnum">${esc(price)}p</span><span>/kWh</span></div>`;
+}
+
 const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
 };
@@ -170,6 +204,10 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
     case 'traffic':
       label = 'Traffic';
       content = trafficCell(section.data, section.health);
+      break;
+    case 'octopus':
+      label = 'Octopus Agile';
+      content = octopusCell(section.data, section.health, data);
       break;
     case 'bins':
       label = 'Bins';
