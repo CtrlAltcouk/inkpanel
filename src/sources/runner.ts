@@ -57,3 +57,45 @@ export async function runSource<TConfig, TData>(
     health: { id: source.id, status: 'error', fetchedAt: null, error },
   };
 }
+
+/**
+ * Run a source with the same timeout/error boundary as runSource but without
+ * writing or reading persistent SourceCache data.
+ *
+ * This is for providers whose terms do not permit InkPanel's normal stale-data
+ * cache. It deliberately returns an error instead of replaying an older
+ * response when the live request fails.
+ */
+export async function runLiveSource<TConfig, TData>(
+  source: Source<TConfig, TData>,
+  config: TConfig,
+  options: RunSourceOptions,
+): Promise<RunOutcome<TData>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  try {
+    const result = await source.fetch(config, controller.signal);
+    if (result.status === 'ok') {
+      return {
+        data: result.data,
+        health: { id: source.id, status: 'ok', fetchedAt: result.fetchedAt, error: null },
+      };
+    }
+    return {
+      data: null,
+      health: { id: source.id, status: 'error', fetchedAt: null, error: result.error },
+    };
+  } catch (err) {
+    return {
+      data: null,
+      health: {
+        id: source.id,
+        status: 'error',
+        fetchedAt: null,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
