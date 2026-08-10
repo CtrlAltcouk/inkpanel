@@ -120,10 +120,10 @@ function busCell(bus: BusData | null, health: SourceHealth | null): string {
 function trafficCell(traffic: TrafficData | null, health: SourceHealth | null): string {
   if (!health) return emptySlot('Traffic — not set up');
   if (!traffic) return emptySlot('Traffic unavailable');
-  const route = traffic.warning ?? traffic.description ?? (traffic.distanceMiles === null ? '' : `${traffic.distanceMiles} miles`);
-  // Show the two Google-provided route durations directly rather than deriving
-  // a new delay metric from Google Maps Content.
-  return `<div class="traffic-time disp">${traffic.durationMinutes} min</div><div class="traffic-delay">Traffic-aware</div><div class="traffic-static">No live traffic: ${traffic.staticDurationMinutes} min</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google" translate="no">Google Maps</div>`;
+  const route = traffic.warning ?? traffic.description ?? '';
+  // Both duration strings are localized text supplied by Google Routes. Keep
+  // them intact rather than deriving a new metric from Google Maps Content.
+  return `<div class="traffic-time disp">${esc(traffic.durationText)}</div><div class="traffic-delay">Traffic-aware</div><div class="traffic-static">Without traffic: ${esc(traffic.staticDurationText)}</div>${route ? `<div class="traffic-route">${esc(route)}</div>` : ''}<div class="provider provider--google" translate="no">Google Maps</div>`;
 }
 
 const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
