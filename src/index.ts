@@ -15,6 +15,10 @@ import {
 } from './sources/calendarHttp.ts';
 import { createIcalFeedSource } from './sources/ical.ts';
 import { createNationalRailTrainSource } from './sources/nationalRailTrain.ts';
+import {
+  createManagedNationalRailTrainSource,
+  NationalRailCredentialStore,
+} from './sources/nationalRailCredentials.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
@@ -72,7 +76,21 @@ export async function main(): Promise<void> {
   const calendarSource = createIcalFeedSource(createCalendarTextFetcher({
     allowPrivateNetworks: allowPrivateCalendarNetworks,
   }));
-  const trainSource = createTrainSourceFromEnv(process.env);
+
+  const trainCredentials = new NationalRailCredentialStore(
+    join(dataDir, '.national-rail-api-key'),
+    process.env.NATIONAL_RAIL_LDB_API_KEY,
+  );
+  await trainCredentials.load();
+  const trainBaseUrl = process.env.NATIONAL_RAIL_LDB_BASE_URL?.trim() || undefined;
+  if (trainBaseUrl && !trainCredentials.status().configured) {
+    throw new Error('National Rail live departures require NATIONAL_RAIL_LDB_API_KEY');
+  }
+  const trainSource = createManagedNationalRailTrainSource(
+    trainCredentials,
+    trainBaseUrl ? { baseUrl: trainBaseUrl } : {},
+  );
+
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
@@ -87,6 +105,7 @@ export async function main(): Promise<void> {
   const app = createApp({
     store, frames, publicBaseUrl, runtimeState,
     dataDir, firmwareDir, auth: { password, secret }, trustProxy,
+    trainCredentials,
   });
   const server = app.listen(port);
   await new Promise<void>((resolveListening, rejectListening) => {
@@ -105,7 +124,7 @@ export async function main(): Promise<void> {
   console.log(`data directory: ${dataDir}`);
   console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
   console.log(`private calendar networks: ${allowPrivateCalendarNetworks ? 'enabled' : 'blocked'}`);
-  console.log(`National Rail live departures: ${trainSource ? 'configured' : 'not configured'}`);
+  console.log(`National Rail live departures: ${trainCredentials.status().configured ? 'configured' : 'not configured'}`);
 
   const httpsServer = resolvedHttps.httpsPort === null
     ? null

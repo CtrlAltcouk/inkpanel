@@ -83,6 +83,7 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="number"],
 select,
 textarea {
@@ -360,6 +361,8 @@ button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); curso
   font-size: var(--fs-lg);
   margin-bottom: var(--sp-3);
 }
+
+.train-api-status { margin-top: var(--sp-2); }
 
 @media (max-width: 720px) {
   .dashboard-editor { grid-template-columns: 1fr; }

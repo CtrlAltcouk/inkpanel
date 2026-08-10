@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DeviceStoreError, type DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
+import type { NationalRailCredentialStore } from '../sources/nationalRailCredentials.ts';
 import type { RuntimeState } from '../runtimeConfig.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
@@ -42,6 +43,8 @@ export interface AppDeps {
   dataDir: string;
   /** Where build-firmware.sh wrote its output. */
   firmwareDir: string;
+  /** Optional only for tests/embedders; production supplies the managed secret store. */
+  trainCredentials?: NationalRailCredentialStore;
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -119,7 +122,7 @@ export function createApp(deps: AppDeps): express.Express {
     deps.publicBaseUrl,
     deps.enrolmentLimiter,
   ));
-  app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl));
+  app.use('/api', manageRoutes(deps.store, deps.frames, deps.publicBaseUrl, deps.trainCredentials));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
