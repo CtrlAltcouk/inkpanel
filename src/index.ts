@@ -19,13 +19,6 @@ import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 
 export const version = '0.1.0';
 
-/**
- * Parse `TRUST_PROXY` into whatever Express's `app.set('trust proxy', ...)`
- * expects: a hop count, `true`/`false`, or a string Express parses itself
- * (a single token like "loopback", or a comma-separated list of addresses/
- * subnets — Express's own `proxyaddr` compiler handles the splitting, so it
- * is passed through unchanged rather than split here).
- */
 export function parseTrustProxy(raw: string | undefined): boolean | number | string | undefined {
   if (raw === undefined) return undefined;
   const value = raw.trim();
@@ -37,27 +30,20 @@ export function parseTrustProxy(raw: string | undefined): boolean | number | str
 }
 
 export interface TrainEnvironment {
+  NATIONAL_RAIL_LDB_API_KEY?: string;
+  /** Optional emergency/future gateway override; normally omitted. */
   NATIONAL_RAIL_LDB_BASE_URL?: string;
-  NATIONAL_RAIL_LDB_AUTH_HEADER?: string;
-  NATIONAL_RAIL_LDB_AUTH_VALUE?: string;
 }
 
-/**
- * Build the credentialled train source only when the server has been given a
- * complete RDM product configuration. The auth value is never persisted or
- * handed to FrameService as source config, so it cannot enter cache keys.
- */
+/** Build the RDM train source only when a Consumer key has been configured. */
 export function createTrainSourceFromEnv(env: TrainEnvironment) {
+  const apiKey = env.NATIONAL_RAIL_LDB_API_KEY?.trim() ?? '';
   const baseUrl = env.NATIONAL_RAIL_LDB_BASE_URL?.trim() ?? '';
-  const authHeaderName = env.NATIONAL_RAIL_LDB_AUTH_HEADER?.trim() || 'Authorization';
-  const authHeaderValue = env.NATIONAL_RAIL_LDB_AUTH_VALUE?.trim() ?? '';
-  if (!baseUrl && !authHeaderValue && !env.NATIONAL_RAIL_LDB_AUTH_HEADER?.trim()) return undefined;
-  if (!baseUrl || !authHeaderValue) {
-    throw new Error(
-      'National Rail live departures require both NATIONAL_RAIL_LDB_BASE_URL and NATIONAL_RAIL_LDB_AUTH_VALUE',
-    );
+  if (!apiKey && !baseUrl) return undefined;
+  if (!apiKey) {
+    throw new Error('National Rail live departures require NATIONAL_RAIL_LDB_API_KEY');
   }
-  return createNationalRailTrainSource({ baseUrl, authHeaderName, authHeaderValue });
+  return createNationalRailTrainSource({ apiKey, ...(baseUrl ? { baseUrl } : {}) });
 }
 
 function lanAddress(): string {
@@ -121,10 +107,6 @@ export async function main(): Promise<void> {
   console.log(`private calendar networks: ${allowPrivateCalendarNetworks ? 'enabled' : 'blocked'}`);
   console.log(`National Rail live departures: ${trainSource ? 'configured' : 'not configured'}`);
 
-  // Additive: :8080 keeps serving firmware check-ins over plain HTTP, which
-  // an ESP32 cannot do over a self-signed cert anyway. This second listener
-  // exists so the browser will expose WebSerial, which requires a secure
-  // context — see docs/superpowers/specs/2026-08-06-inkpanel-web-flash-design.md.
   const httpsServer = resolvedHttps.httpsPort === null
     ? null
     : await activateHttpsListener(app, {
@@ -142,8 +124,6 @@ export async function main(): Promise<void> {
     );
   }
 
-  // Launch Chromium now rather than making the first device wait for it. A cold
-  // launch on a modest container can exceed a panel's HTTP read timeout.
   const warmStarted = Date.now();
   frames
     .warmUp()
@@ -160,9 +140,6 @@ export async function main(): Promise<void> {
   process.on('SIGINT', shutdown);
 }
 
-// Only start when run directly, so tests can import this module.
-// pathToFileURL rather than string comparison: on Windows argv[1] is a
-// backslash path that never matches an import.meta.url suffix.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }
