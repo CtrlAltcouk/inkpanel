@@ -25,6 +25,13 @@ services:
       # Explicit opt-in for calendars hosted on a private LAN address.
       # Loopback and link-local destinations remain blocked.
       CALENDAR_ALLOW_PRIVATE_NETWORKS: "${CALENDAR_ALLOW_PRIVATE_NETWORKS:-0}"
+      # Optional National Rail/RDM Live Departure Board transport. Obtain the
+      # exact gateway and authentication details from the subscribed RDM
+      # product Specification page. Keep the auth value out of source control;
+      # put it in your local Compose .env or deployment secret configuration.
+      NATIONAL_RAIL_LDB_BASE_URL: "${NATIONAL_RAIL_LDB_BASE_URL:-}"
+      NATIONAL_RAIL_LDB_AUTH_HEADER: "${NATIONAL_RAIL_LDB_AUTH_HEADER:-Authorization}"
+      NATIONAL_RAIL_LDB_AUTH_VALUE: "${NATIONAL_RAIL_LDB_AUTH_VALUE:-}"
       # Uncomment to require a password for the web UI. The panel's own
       # endpoint (/api/devices/:id/frame) and /health stay open regardless,
       # since firmware cannot log in. NOTE: this is plain HTTP — the password
