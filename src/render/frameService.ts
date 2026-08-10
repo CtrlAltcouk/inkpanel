@@ -19,6 +19,8 @@ import { runSource } from '../sources/runner.ts';
 import type { RunOutcome } from '../sources/runner.ts';
 import type { SourceCache } from '../sources/cache.ts';
 import type { Source } from '../sources/types.ts';
+import type { TrainSourceConfig } from '../sources/nationalRailTrain.ts';
+import type { TrainData } from '../sources/train.ts';
 import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderHtml } from './template.ts';
@@ -40,6 +42,8 @@ export interface FrameDeps {
   calendarSource?: Source<IcalFeedConfig, string>;
   weatherSource?: typeof openMeteoSource;
   binsSource?: typeof binsSource;
+  /** Credentialled National Rail source; omitted when live train transport is not configured. */
+  trainSource?: Source<TrainSourceConfig, TrainData>;
 }
 
 export interface Frame {
@@ -128,9 +132,29 @@ export class FrameService {
               .then((outcome) => ({ type: 'bins', data: outcome.data, health: outcome.health }))
             : Promise.resolve({ type: 'bins', data: null, health: null });
           break;
-        case 'trains':
-          request = Promise.resolve({ type: 'trains', data: null, health: null });
+        case 'trains': {
+          const configured = Boolean(widget.config.originCrs && widget.config.destinationCrs);
+          if (!configured) {
+            request = Promise.resolve({ type: 'trains', data: null, health: null });
+          } else if (!this.deps.trainSource) {
+            request = Promise.resolve({
+              type: 'trains',
+              data: null,
+              health: {
+                id: 'trains', status: 'error', fetchedAt: null,
+                error: 'National Rail live departures are not configured on this server',
+              },
+            });
+          } else {
+            request = runSource(
+              this.deps.trainSource,
+              { originCrs: widget.config.originCrs, destinationCrs: widget.config.destinationCrs },
+              this.deps.cache,
+              runOptions,
+            ).then((outcome) => ({ type: 'trains', data: outcome.data, health: outcome.health }));
+          }
           break;
+        }
         case 'empty':
           request = Promise.resolve({ type: 'empty' });
           break;
