@@ -2,15 +2,21 @@ import { esc } from './components.js';
 import { renderStationPicker } from './stationPicker.js';
 import { renderBusStopPicker } from './busStopPicker.js';
 
-const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'bins', 'empty'];
+const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'bins', 'empty'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
 const stateByRoot = new WeakMap();
+
+function typeLabel(type) {
+  if (type === 'octopus') return 'Octopus Agile';
+  return `${type[0].toUpperCase()}${type.slice(1)}`;
+}
 
 function defaultConfig(type) {
   if (type === 'calendar') return { calendarUrls: [] };
   if (type === 'trains') return { originCrs: '', destinationCrs: '' };
   if (type === 'bus') return { stopCode: '', stopLabel: '', routeFilter: '' };
   if (type === 'traffic') return { origin: '', destination: '' };
+  if (type === 'octopus') return { tariffCode: '' };
   if (type === 'bins') return { uprn: '' };
   return {};
 }
@@ -61,6 +67,10 @@ function rememberCell(cell, slot, type = slot.type) {
       origin: cell.querySelector('[data-traffic-origin]')?.value.trim() ?? '',
       destination: cell.querySelector('[data-traffic-destination]')?.value.trim() ?? '',
     };
+  } else if (type === 'octopus') {
+    slot.drafts[type] = {
+      tariffCode: cell.querySelector('[data-octopus-tariff]')?.value.trim().toUpperCase() ?? '',
+    };
   } else if (type === 'bins') {
     slot.drafts[type] = { uprn: cell.querySelector('[data-bins-uprn]').value.trim() };
   } else slot.drafts[type] = {};
@@ -88,6 +98,10 @@ function trafficControlsHtml(config, trafficApiConfigured, trafficApiKeyDraft) {
   return `<label>Google Maps API key</label><input type="password" data-traffic-api-key value="${esc(trafficApiKeyDraft)}" placeholder="${trafficApiConfigured ? 'Configured — leave blank to keep' : 'Google Maps API key'}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)}</p><label>From</label><input type="text" data-traffic-origin value="${esc(config.origin ?? '')}" placeholder="Home address or postcode" autocomplete="street-address"><label>To</label><input type="text" data-traffic-destination value="${esc(config.destination ?? '')}" placeholder="Work address or postcode" autocomplete="street-address"><p class="meta">Uses Google traffic-aware driving time. Google Maps attribution is shown on the panel.</p>`;
 }
 
+function octopusControlsHtml(config) {
+  return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C" autocomplete="off" spellcheck="false"><p class="meta">Paste the full electricity tariff code from Octopus. InkPanel derives the product automatically; no Octopus API key is required for public Agile prices.</p>`;
+}
+
 function controlsHtml(
   type,
   config,
@@ -106,7 +120,8 @@ function controlsHtml(
   if (type === 'empty') return '<p class="meta">This dashboard section will be blank.</p>';
   if (type === 'trains') return trainControlsHtml(trainApiConfigured, trainApiKeyDraft);
   if (type === 'bus') return busControlsHtml(config, busApiConfigured, busAppIdDraft, busAppKeyDraft);
-  return trafficControlsHtml(config, trafficApiConfigured, trafficApiKeyDraft);
+  if (type === 'traffic') return trafficControlsHtml(config, trafficApiConfigured, trafficApiKeyDraft);
+  return octopusControlsHtml(config);
 }
 
 export function dashboardCellHtml(
@@ -119,7 +134,7 @@ export function dashboardCellHtml(
   trafficApi = {},
 ) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${POSITIONS[index]}</div><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${type[0].toUpperCase()}${type.slice(1)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '')}</div>`;
+  return `<div class="dashboard-position">${POSITIONS[index]}</div><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '')}</div>`;
 }
 
 function syncInputs(root, selector, state, stateKey, value) {

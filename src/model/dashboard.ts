@@ -2,6 +2,7 @@ import type { TrainData } from '../sources/train.ts';
 import type { BinsData } from '../sources/bins.ts';
 import type { BusData } from '../sources/transportApiBus.ts';
 import type { TrafficData } from '../sources/googleTraffic.ts';
+import type { OctopusAgileData } from '../sources/octopusAgile.ts';
 
 export interface CalendarEvent {
   uid: string;
@@ -67,6 +68,7 @@ export type DashboardSectionData =
   | { type: 'trains'; data: TrainData | null; health: SourceHealth | null }
   | { type: 'bus'; data: BusData | null; health: SourceHealth | null }
   | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
+  | { type: 'octopus'; data: OctopusAgileData | null; health: SourceHealth | null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 
@@ -94,3 +96,4 @@ export type { TrainData, TrainDeparture, DepartureStatus } from '../sources/trai
 export type { BinsData, BinCollection, BinType } from '../sources/bins.ts';
 export type { BusData, BusDeparture, BusDepartureStatus } from '../sources/transportApiBus.ts';
 export type { TrafficData } from '../sources/googleTraffic.ts';
+export type { OctopusAgileData, OctopusRateSlot } from '../sources/octopusAgile.ts';

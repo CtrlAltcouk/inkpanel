@@ -65,6 +65,12 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .traffic-static{font-size:11px;margin-top:2px;}
 .traffic-route{font-size:9px;line-height:1.15;margin-top:3px;max-height:21px;overflow:hidden;}
 
+.octopus-kicker{font-size:10px;font-weight:800;letter-spacing:0.09em;margin-top:0;}
+.octopus-time{font-size:32px;line-height:1;margin-top:3px;white-space:nowrap;}
+.octopus-day{font-size:12px;font-weight:800;letter-spacing:0.08em;margin-top:3px;}
+.octopus-price{display:flex;align-items:baseline;gap:5px;margin-top:7px;font-size:12px;font-weight:700;}
+.octopus-price .disp{font-size:27px;line-height:1;}
+
 /* Dimmed appearance without greys: a 45-degree hatch of pure black on white. */
 .slot--empty{
   position:absolute;inset:14px 24px;border:2px solid #000;

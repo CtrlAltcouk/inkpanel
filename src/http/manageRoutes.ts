@@ -30,6 +30,14 @@ const busStopCodeInputSchema = z
     'invalid NaPTAN ATCO stop code',
   );
 
+const octopusTariffCodeInputSchema = z
+  .string()
+  .transform((value) => value.trim().toUpperCase())
+  .refine(
+    (value) => value === '' || /^E-1R-AGILE-[A-Z0-9-]+-[A-Z]$/.test(value),
+    'Octopus Agile tariff code must look like E-1R-AGILE-24-10-01-C',
+  );
+
 const dashboardSectionInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('calendar'), version: z.literal(1),
@@ -54,6 +62,10 @@ const dashboardSectionInputSchema = z.discriminatedUnion('type', [
       origin: z.string().trim().max(200),
       destination: z.string().trim().max(200),
     }),
+  }),
+  z.strictObject({
+    type: z.literal('octopus'), version: z.literal(1),
+    config: z.strictObject({ tariffCode: octopusTariffCodeInputSchema }),
   }),
   z.strictObject({
     type: z.literal('bins'), version: z.literal(1),

@@ -28,6 +28,7 @@ export function contentHash(data: DashboardData): string {
         || section.type === 'trains'
         || section.type === 'bus'
         || section.type === 'traffic'
+        || section.type === 'octopus'
         ? { configured: section.health !== null }
         : {}),
       displayedStaleTime: displayedStaleTime(section.health),
