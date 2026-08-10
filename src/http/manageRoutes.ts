@@ -25,7 +25,10 @@ const stationCodeInputSchema = z
 const busStopCodeInputSchema = z
   .string()
   .transform((value) => value.trim())
-  .refine((value) => value === '' || /^[A-Za-z0-9]{3,32}$/.test(value), 'invalid ATCO stop code');
+  .refine(
+    (value) => value === '' || /^\d{3}0[A-Za-z0-9]{1,8}$/.test(value),
+    'invalid NaPTAN ATCO stop code',
+  );
 
 const dashboardSectionInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
