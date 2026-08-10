@@ -15,12 +15,14 @@ import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
-import { runSource } from '../sources/runner.ts';
+import { runLiveSource, runSource } from '../sources/runner.ts';
 import type { RunOutcome } from '../sources/runner.ts';
 import type { SourceCache } from '../sources/cache.ts';
 import type { Source } from '../sources/types.ts';
 import type { TrainSourceConfig } from '../sources/nationalRailTrain.ts';
 import type { TrainData } from '../sources/train.ts';
+import type { BusData, BusSourceConfig } from '../sources/transportApiBus.ts';
+import type { TrafficData, TrafficSourceConfig } from '../sources/googleTraffic.ts';
 import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderHtml } from './template.ts';
@@ -42,8 +44,10 @@ export interface FrameDeps {
   calendarSource?: Source<IcalFeedConfig, string>;
   weatherSource?: typeof openMeteoSource;
   binsSource?: typeof binsSource;
-  /** Credentialled National Rail source; omitted when live train transport is not configured. */
   trainSource?: Source<TrainSourceConfig, TrainData>;
+  busSource?: Source<BusSourceConfig, BusData>;
+  /** Google Routes data is live-only and never persisted to SourceCache. */
+  trafficSource?: Source<TrafficSourceConfig, TrafficData>;
 }
 
 export interface Frame {
@@ -138,12 +142,8 @@ export class FrameService {
             request = Promise.resolve({ type: 'trains', data: null, health: null });
           } else if (!this.deps.trainSource) {
             request = Promise.resolve({
-              type: 'trains',
-              data: null,
-              health: {
-                id: 'trains', status: 'error', fetchedAt: null,
-                error: 'National Rail live departures are not configured on this server',
-              },
+              type: 'trains', data: null,
+              health: { id: 'trains', status: 'error', fetchedAt: null, error: 'National Rail live departures are not configured on this server' },
             });
           } else {
             request = runSource(
@@ -152,6 +152,48 @@ export class FrameService {
               this.deps.cache,
               runOptions,
             ).then((outcome) => ({ type: 'trains', data: outcome.data, health: outcome.health }));
+          }
+          break;
+        }
+        case 'bus': {
+          if (!widget.config.stopCode) {
+            request = Promise.resolve({ type: 'bus', data: null, health: null });
+          } else if (!this.deps.busSource) {
+            request = Promise.resolve({
+              type: 'bus', data: null,
+              health: { id: 'bus', status: 'error', fetchedAt: null, error: 'Bus live departures are not configured on this server' },
+            });
+          } else {
+            request = runSource(
+              this.deps.busSource,
+              {
+                stopCode: widget.config.stopCode,
+                stopLabel: widget.config.stopLabel,
+                routeFilter: widget.config.routeFilter,
+              },
+              this.deps.cache,
+              runOptions,
+            ).then((outcome) => ({ type: 'bus', data: outcome.data, health: outcome.health }));
+          }
+          break;
+        }
+        case 'traffic': {
+          const configured = Boolean(widget.config.origin.trim() && widget.config.destination.trim());
+          if (!configured) {
+            request = Promise.resolve({ type: 'traffic', data: null, health: null });
+          } else if (!this.deps.trafficSource) {
+            request = Promise.resolve({
+              type: 'traffic', data: null,
+              health: { id: 'traffic', status: 'error', fetchedAt: null, error: 'Google traffic is not configured on this server' },
+            });
+          } else {
+            // Deliberately bypass SourceCache: Google Maps Content must not be
+            // persisted through InkPanel's normal stale-data cache.
+            request = runLiveSource(
+              this.deps.trafficSource,
+              { origin: widget.config.origin, destination: widget.config.destination },
+              runOptions,
+            ).then((outcome) => ({ type: 'traffic', data: outcome.data, health: outcome.health }));
           }
           break;
         }
