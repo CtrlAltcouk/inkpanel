@@ -61,6 +61,73 @@ test('requests a filtered departure board using the current RDM x-apikey contrac
   assert.equal(result.data.departures[2]?.status, 'cancelled');
 });
 
+test('accepts the observed RDM v1.1 response shape and ignores unrelated fields', async () => {
+  const source = sourceWith((async () => jsonResponse({
+    trainServices: [
+      {
+        futureCancellation: false,
+        futureDelay: false,
+        origin: [{ locationName: 'Crewe', crs: 'CRE', assocIsCancelled: false }],
+        destination: [{ locationName: 'London Euston', crs: 'EUS', assocIsCancelled: false }],
+        std: '17:49',
+        etd: '17:54',
+        platform: '4',
+        operator: 'LNR & WMR',
+        operatorCode: 'LM',
+        isCircularRoute: false,
+        isCancelled: false,
+        filterLocationCancelled: false,
+        serviceType: 'train',
+        serviceID: 'sanitised-1',
+      },
+      {
+        futureCancellation: false,
+        futureDelay: false,
+        origin: [{ locationName: 'Milton Keynes Central', crs: 'MKC', assocIsCancelled: false }],
+        destination: [{ locationName: 'London Euston', crs: 'EUS', assocIsCancelled: false }],
+        currentOrigins: [{ locationName: 'Bletchley', crs: 'BLY', assocIsCancelled: false }],
+        std: '17:58',
+        etd: 'Cancelled',
+        operator: 'LNR & WMR',
+        operatorCode: 'LM',
+        isCancelled: true,
+        cancelReason: 'sanitised cancellation reason',
+        serviceType: 'train',
+        serviceID: 'sanitised-2',
+      },
+      {
+        origin: [{ locationName: 'London Euston', crs: 'EUS', assocIsCancelled: false }],
+        destination: [{ locationName: 'Northampton', crs: 'NMP', assocIsCancelled: false }],
+        std: '17:59',
+        etd: 'On time',
+        platform: '5',
+        operator: 'LNR & WMR',
+        isCancelled: false,
+        serviceType: 'train',
+        serviceID: 'sanitised-3',
+      },
+    ],
+    Xmlns: { Count: 8 },
+    generatedAt: '2026-08-10T17:48:52.4905645+01:00',
+    locationName: 'Milton Keynes Central',
+    crs: 'MKC',
+    filterType: 'to',
+    nrccMessages: [{ Value: 'sanitised disruption message' }],
+    platformAvailable: true,
+    areServicesAvailable: true,
+  })) as typeof fetch);
+
+  const result = await source.fetch(ROUTE, new AbortController().signal);
+  assert.equal(result.status, 'ok');
+  if (result.status !== 'ok') return;
+
+  assert.deepEqual(result.data.departures, [
+    { scheduled: '17:49', expected: '17:54', status: 'delayed', delayMinutes: 5, platform: '4' },
+    { scheduled: '17:58', expected: null, status: 'cancelled', delayMinutes: 0, platform: null },
+    { scheduled: '17:59', expected: null, status: 'on-time', delayMinutes: 0, platform: '5' },
+  ]);
+});
+
 test('normalises lowercase route codes before the request', async () => {
   let seen = '';
   const source = sourceWith((async (input) => {
