@@ -42,13 +42,13 @@ function data(): DashboardData {
   };
 }
 
-test('Bus and Traffic cells render independent content and required source attribution', () => {
+test('Bus and Traffic cells render independent content and provider attribution', () => {
   const html = renderHtml(data(), WFT0583, '');
   assert.match(html, /Bus &middot; Central Station/);
   assert.match(html, />6</);
   assert.match(html, />20:28</);
   assert.match(html, /Lakes Estate/);
-  assert.match(html, /source: http:\/\/transportapi\.com\//);
+  assert.match(html, /source: TransportAPI/);
   assert.match(html, /36 min/);
   assert.match(html, /\+12 min traffic/);
   assert.match(html, /A5 and M1/);
