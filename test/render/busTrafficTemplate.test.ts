@@ -31,7 +31,7 @@ function data(): DashboardData {
         health: ok('traffic'),
         data: {
           origin: 'MK9 1EA', destination: 'London Euston',
-          durationMinutes: 36, staticDurationMinutes: 24, delayMinutes: 12,
+          durationMinutes: 36, staticDurationMinutes: 24,
           distanceMiles: 50.2, description: 'A5 and M1', warning: null,
         },
       },
@@ -48,11 +48,13 @@ test('Bus and Traffic cells render independent content and provider attribution'
   assert.match(html, />6</);
   assert.match(html, />20:28</);
   assert.match(html, /Lakes Estate/);
-  assert.match(html, /source: TransportAPI/);
+  assert.match(html, /source: http:\/\/transportapi\.com\//);
   assert.match(html, /36 min/);
-  assert.match(html, /\+12 min traffic/);
+  assert.match(html, /Traffic-aware/);
+  assert.match(html, /No live traffic: 24 min/);
+  assert.doesNotMatch(html, /\+12 min traffic/);
   assert.match(html, /A5 and M1/);
-  assert.match(html, /Google Maps/);
+  assert.match(html, /translate="no">Google Maps/);
 });
 
 test('Traffic warns rather than silently dropping a provider warning', () => {
