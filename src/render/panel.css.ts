@@ -56,11 +56,14 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .bus-time{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;}
 .bus-dest{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .provider{position:absolute;left:24px;bottom:8px;font-size:8px;font-weight:700;letter-spacing:0.04em;}
-.provider--google{font-size:9px;letter-spacing:0;}
+/* Google permits text attribution where space is limited. Keep its spelling,
+   capitalization, weight and 12px minimum intact. */
+.provider--google{font-size:12px;font-weight:400;letter-spacing:normal;white-space:nowrap;bottom:6px;}
 
-.traffic-time{font-size:43px;line-height:0.95;margin-top:2px;}
-.traffic-delay{font-size:17px;font-weight:800;margin-top:8px;}
-.traffic-route{font-size:11px;line-height:1.2;margin-top:6px;max-height:27px;overflow:hidden;}
+.traffic-time{font-size:36px;line-height:0.95;margin-top:0;}
+.traffic-delay{font-size:13px;font-weight:800;margin-top:5px;}
+.traffic-static{font-size:11px;margin-top:2px;}
+.traffic-route{font-size:9px;line-height:1.15;margin-top:3px;max-height:21px;overflow:hidden;}
 
 /* Dimmed appearance without greys: a 45-degree hatch of pure black on white. */
 .slot--empty{
