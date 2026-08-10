@@ -21,9 +21,13 @@ export function contentHash(data: DashboardData): string {
     return {
       type: section.type,
       data: section.data,
-      // Bins and Trains render "not set up" when health is absent and
-      // "unavailable" when a configured source has no data.
-      ...(section.type === 'bins' || section.type === 'trains'
+      // These widgets visibly distinguish an absent configuration ("not set
+      // up") from a configured source whose first/live fetch failed
+      // ("unavailable"). Health details themselves remain diagnostic-only.
+      ...(section.type === 'bins'
+        || section.type === 'trains'
+        || section.type === 'bus'
+        || section.type === 'traffic'
         ? { configured: section.health !== null }
         : {}),
       displayedStaleTime: displayedStaleTime(section.health),

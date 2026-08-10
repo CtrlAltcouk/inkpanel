@@ -8,6 +8,11 @@ import { geocode } from '../sources/geocode.ts';
 import { findStation, searchStations } from '../sources/stations.ts';
 import type { NationalRailCredentialStore } from '../sources/nationalRailCredentials.ts';
 import { validateNationalRailApiKey } from '../sources/nationalRailCredentials.ts';
+import type { TransportApiCredentialStore } from '../sources/transportApiCredentials.ts';
+import { validateTransportApiCredentials } from '../sources/transportApiCredentials.ts';
+import type { GoogleMapsCredentialStore } from '../sources/googleMapsCredentials.ts';
+import { validateGoogleMapsApiKey } from '../sources/googleMapsCredentials.ts';
+import { searchTransportApiBusStops } from '../sources/transportApiBus.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
@@ -16,6 +21,14 @@ const stationCodeInputSchema = z
   .string()
   .transform((value) => value.trim().toUpperCase())
   .refine((value) => value === '' || findStation(value) !== null, 'unknown station code');
+
+const busStopCodeInputSchema = z
+  .string()
+  .transform((value) => value.trim())
+  .refine(
+    (value) => value === '' || /^\d{3}0[A-Za-z0-9]{1,8}$/.test(value),
+    'invalid NaPTAN ATCO stop code',
+  );
 
 const dashboardSectionInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
@@ -26,6 +39,21 @@ const dashboardSectionInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('trains'), version: z.literal(1),
     config: z.strictObject({ originCrs: stationCodeInputSchema, destinationCrs: stationCodeInputSchema }),
+  }),
+  z.strictObject({
+    type: z.literal('bus'), version: z.literal(1),
+    config: z.strictObject({
+      stopCode: busStopCodeInputSchema,
+      stopLabel: z.string().trim().max(80),
+      routeFilter: z.string().trim().max(32),
+    }),
+  }),
+  z.strictObject({
+    type: z.literal('traffic'), version: z.literal(1),
+    config: z.strictObject({
+      origin: z.string().trim().max(200),
+      destination: z.string().trim().max(200),
+    }),
   }),
   z.strictObject({
     type: z.literal('bins'), version: z.literal(1),
@@ -62,10 +90,30 @@ const nationalRailKeySchema = z.strictObject({
     try {
       return validateNationalRailApiKey(value);
     } catch (err) {
-      ctx.addIssue({
-        code: 'custom',
-        message: err instanceof Error ? err.message : 'invalid National Rail API key',
-      });
+      ctx.addIssue({ code: 'custom', message: err instanceof Error ? err.message : 'invalid National Rail API key' });
+      return z.NEVER;
+    }
+  }),
+});
+
+const transportApiCredentialSchema = z.strictObject({
+  appId: z.string(),
+  appKey: z.string(),
+}).transform((value, ctx) => {
+  try {
+    return validateTransportApiCredentials(value);
+  } catch (err) {
+    ctx.addIssue({ code: 'custom', message: err instanceof Error ? err.message : 'invalid TransportAPI credentials' });
+    return z.NEVER;
+  }
+});
+
+const googleMapsKeySchema = z.strictObject({
+  apiKey: z.string().transform((value, ctx) => {
+    try {
+      return validateGoogleMapsApiKey(value);
+    } catch (err) {
+      ctx.addIssue({ code: 'custom', message: err instanceof Error ? err.message : 'invalid Google Maps API key' });
       return z.NEVER;
     }
   }),
@@ -76,12 +124,13 @@ export function manageRoutes(
   frames: FrameService,
   publicBaseUrl: string,
   trainCredentials?: NationalRailCredentialStore,
+  busCredentials?: TransportApiCredentialStore,
+  googleMapsCredentials?: GoogleMapsCredentialStore,
+  transportApiBaseUrl?: string,
 ): Router {
   const router = Router();
 
-  // The secret itself is write-only from the browser. The GET exposes only a
-  // boolean so reopening the editor can say "configured" without ever
-  // sending the stored Consumer key back across HTTP.
+  // Secrets are write-only from the browser. GET endpoints expose status only.
   router.get('/national-rail', (_req, res) => {
     res.set('cache-control', 'no-store');
     res.json(trainCredentials?.status() ?? { configured: false, managed: false });
@@ -100,6 +149,73 @@ export function manageRoutes(
     await trainCredentials.set(parsed.data.apiKey);
     res.set('cache-control', 'no-store');
     res.json(trainCredentials.status());
+  });
+
+  router.get('/transportapi', (_req, res) => {
+    res.set('cache-control', 'no-store');
+    res.json(busCredentials?.status() ?? { configured: false, managed: false });
+  });
+
+  router.put('/transportapi', async (req, res) => {
+    if (!busCredentials) {
+      res.status(503).json({ error: 'TransportAPI credential storage is unavailable' });
+      return;
+    }
+    const parsed = transportApiCredentialSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid TransportAPI credentials', issues: parsed.error.issues });
+      return;
+    }
+    await busCredentials.set(parsed.data);
+    res.set('cache-control', 'no-store');
+    res.json(busCredentials.status());
+  });
+
+  router.get('/google-maps', (_req, res) => {
+    res.set('cache-control', 'no-store');
+    res.json(googleMapsCredentials?.status() ?? { configured: false, managed: false });
+  });
+
+  router.put('/google-maps', async (req, res) => {
+    if (!googleMapsCredentials) {
+      res.status(503).json({ error: 'Google Maps credential storage is unavailable' });
+      return;
+    }
+    const parsed = googleMapsKeySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid Google Maps API key', issues: parsed.error.issues });
+      return;
+    }
+    await googleMapsCredentials.set(parsed.data.apiKey);
+    res.set('cache-control', 'no-store');
+    res.json(googleMapsCredentials.status());
+  });
+
+  router.get('/bus-stops', async (req, res) => {
+    if (!busCredentials?.status().configured) {
+      res.status(503).json({ error: 'TransportAPI credentials are not configured' });
+      return;
+    }
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (query.length < 2 || query.length > 80) {
+      res.status(400).json({ error: 'query must be 2-80 characters' });
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const results = await searchTransportApiBusStops(
+        busCredentials,
+        query,
+        controller.signal,
+        transportApiBaseUrl ? { baseUrl: transportApiBaseUrl } : {},
+      );
+      res.json({ results });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'bus stop lookup failed' });
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   router.get('/devices', async (_req, res) => {

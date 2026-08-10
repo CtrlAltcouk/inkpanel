@@ -1,5 +1,7 @@
 import type { TrainData } from '../sources/train.ts';
 import type { BinsData } from '../sources/bins.ts';
+import type { BusData } from '../sources/transportApiBus.ts';
+import type { TrafficData } from '../sources/googleTraffic.ts';
 
 export interface CalendarEvent {
   uid: string;
@@ -63,6 +65,8 @@ export type DashboardSectionData =
   | { type: 'calendar'; data: CalendarData | null; health: SourceHealth }
   | { type: 'weather'; data: WeatherData | null; health: SourceHealth }
   | { type: 'trains'; data: TrainData | null; health: SourceHealth | null }
+  | { type: 'bus'; data: BusData | null; health: SourceHealth | null }
+  | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 
@@ -88,3 +92,5 @@ export interface DashboardData {
 
 export type { TrainData, TrainDeparture, DepartureStatus } from '../sources/train.ts';
 export type { BinsData, BinCollection, BinType } from '../sources/bins.ts';
+export type { BusData, BusDeparture, BusDepartureStatus } from '../sources/transportApiBus.ts';
+export type { TrafficData } from '../sources/googleTraffic.ts';

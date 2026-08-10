@@ -30,7 +30,7 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .cell--tr{border-bottom:2px solid #000;}
 .cell--bl{border-right:2px solid #000;}
 
-.label{font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;}
+.label{font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .stale{font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;border:1px solid #000;padding:1px 4px;margin-left:6px;}
 
 .subhead{font-size:13px;font-weight:700;margin-bottom:10px;}
@@ -49,6 +49,21 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .dep-status{font-size:12px;}
 .dep-platform{font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums;}
 .dep-was{text-decoration:line-through;}
+
+.bus-rows{display:flex;flex-direction:column;gap:6px;padding-bottom:17px;}
+.bus-row{display:grid;grid-template-columns:42px 55px minmax(0,1fr);gap:8px;align-items:baseline;}
+.bus-line{font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bus-time{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;}
+.bus-dest{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.provider{position:absolute;left:24px;bottom:8px;font-size:8px;font-weight:700;letter-spacing:0.04em;}
+/* Google permits text attribution where space is limited. Keep its spelling,
+   capitalization, weight and 12px minimum intact. */
+.provider--google{font-size:12px;font-weight:400;letter-spacing:normal;white-space:nowrap;bottom:6px;}
+
+.traffic-time{font-size:36px;line-height:0.95;margin-top:0;}
+.traffic-delay{font-size:13px;font-weight:800;margin-top:5px;}
+.traffic-static{font-size:11px;margin-top:2px;}
+.traffic-route{font-size:9px;line-height:1.15;margin-top:3px;max-height:21px;overflow:hidden;}
 
 /* Dimmed appearance without greys: a 45-degree hatch of pure black on white. */
 .slot--empty{

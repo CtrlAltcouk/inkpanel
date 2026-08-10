@@ -14,6 +14,24 @@ export const trainsWidgetConfigV1Schema = z.strictObject({
   destinationCrs: crsSchema,
 });
 
+// DfT NaPTAN: first three authority digits, fourth character 0, followed by
+// one to eight locally allocated alphanumeric characters (maximum size 12).
+const busStopCodeSchema = z.string().regex(
+  /^(?:|\d{3}0[A-Za-z0-9]{1,8})$/,
+  'ATCO stop code must be empty or use the NaPTAN ATCO format',
+);
+
+export const busWidgetConfigV1Schema = z.strictObject({
+  stopCode: busStopCodeSchema,
+  stopLabel: z.string().max(80),
+  routeFilter: z.string().max(32),
+});
+
+export const trafficWidgetConfigV1Schema = z.strictObject({
+  origin: z.string().max(200),
+  destination: z.string().max(200),
+});
+
 export const binsWidgetConfigV1Schema = z.strictObject({
   uprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits'),
 });
@@ -35,6 +53,16 @@ export const trainsWidgetV1Schema = z.strictObject({
   version: z.literal(1),
   config: trainsWidgetConfigV1Schema,
 });
+export const busWidgetV1Schema = z.strictObject({
+  type: z.literal('bus'),
+  version: z.literal(1),
+  config: busWidgetConfigV1Schema,
+});
+export const trafficWidgetV1Schema = z.strictObject({
+  type: z.literal('traffic'),
+  version: z.literal(1),
+  config: trafficWidgetConfigV1Schema,
+});
 export const binsWidgetV1Schema = z.strictObject({
   type: z.literal('bins'),
   version: z.literal(1),
@@ -50,6 +78,8 @@ export type DashboardWidget =
   | z.infer<typeof calendarWidgetV1Schema>
   | z.infer<typeof weatherWidgetV1Schema>
   | z.infer<typeof trainsWidgetV1Schema>
+  | z.infer<typeof busWidgetV1Schema>
+  | z.infer<typeof trafficWidgetV1Schema>
   | z.infer<typeof binsWidgetV1Schema>
   | z.infer<typeof emptyWidgetV1Schema>;
 
@@ -58,6 +88,8 @@ export const widgetRegistry = {
   calendar: { 1: calendarWidgetV1Schema },
   weather: { 1: weatherWidgetV1Schema },
   trains: { 1: trainsWidgetV1Schema },
+  bus: { 1: busWidgetV1Schema },
+  traffic: { 1: trafficWidgetV1Schema },
   bins: { 1: binsWidgetV1Schema },
   empty: { 1: emptyWidgetV1Schema },
 } as const;
