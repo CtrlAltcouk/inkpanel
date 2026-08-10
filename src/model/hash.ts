@@ -16,13 +16,24 @@ export function contentHash(data: DashboardData): string {
           timeZone: data.timezone, hour: '2-digit', minute: '2-digit', hour12: false,
         }).format(new Date(source.fetchedAt))
       : null;
+  const visibleSection = (section: DashboardData['sections'][number]) => {
+    if (section.type === 'empty') return section;
+    return {
+      type: section.type,
+      data: section.data,
+      // Bins and Trains render "not set up" when health is absent and
+      // "unavailable" when a configured source has no data.
+      ...(section.type === 'bins' || section.type === 'trains'
+        ? { configured: section.health !== null }
+        : {}),
+      displayedStaleTime: displayedStaleTime(section.health),
+    };
+  };
   const visible = {
     timezone: data.timezone,
     today: data.today,
     headerWeather: data.headerWeather,
-    sections: data.sections.map((section) => section.type === 'empty'
-      ? section
-      : { type: section.type, data: section.data, displayedStaleTime: displayedStaleTime(section.health) }),
+    sections: data.sections.map(visibleSection),
     batteryPercent: data.battery.percent,
   };
   return createHash('sha256').update(JSON.stringify(visible)).digest('hex').slice(0, 32);

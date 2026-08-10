@@ -161,6 +161,27 @@ test('hidden health changes reuse the frame while diagnostics still refresh', as
   });
 });
 
+test('configured source failure rerasterises not-set-up copy as unavailable', async () => {
+  let configured = false;
+  await withService(async () => {
+    const next = bundle();
+    if (configured) {
+      next.sections[3] = {
+        type: 'bins', data: null,
+        health: { id: 'bins', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+      };
+    }
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-bins-availability'), claimed: true };
+    const notSetUp = await service.frameFor(device, 4);
+    configured = true;
+    const unavailable = await service.frameFor(device, 4);
+    assert.notEqual(unavailable.etag, notSetUp.etag);
+    assert.equal(count(), 2, 'visible not-set-up/unavailable copy must be rerasterised');
+  });
+});
+
 test('a changed displayed stale minute invalidates the frame', async () => {
   let minute = '10';
   await withService(async () => {

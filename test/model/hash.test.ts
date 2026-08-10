@@ -38,6 +38,41 @@ test('hidden health ids, statuses, and errors do not change the visible hash', (
   assert.equal(contentHash(base), contentHash(hiddenChanges), 'identical pixels keep their hash');
 });
 
+test('bins not-set-up and unavailable states have different visible hashes', () => {
+  const notSetUp = dashboardData();
+  const unavailable = structuredClone(notSetUp);
+  unavailable.sections[3] = {
+    type: 'bins', data: null,
+    health: { id: 'bins', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+  };
+  assert.notEqual(contentHash(notSetUp), contentHash(unavailable));
+});
+
+test('trains not-set-up and unavailable states have different visible hashes', () => {
+  const notSetUp = dashboardData();
+  const unavailable = structuredClone(notSetUp);
+  unavailable.sections[2] = {
+    type: 'trains', data: null,
+    health: { id: 'trains', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+  };
+  assert.notEqual(contentHash(notSetUp), contentHash(unavailable));
+});
+
+test('configured widget diagnostic details do not affect its visible hash', () => {
+  const first = dashboardData();
+  first.sections[3] = {
+    type: 'bins', data: null,
+    health: { id: 'bins-a', status: 'error', fetchedAt: null, error: 'first hidden error' },
+  };
+  const second = structuredClone(first);
+  if (second.sections[3].type === 'bins' && second.sections[3].health) {
+    second.sections[3].health = {
+      id: 'bins-b', status: 'error', fetchedAt: null, error: 'different hidden detail',
+    };
+  }
+  assert.equal(contentHash(first), contentHash(second));
+});
+
 test('hash follows ordered section content and visible stale health', () => {
   const base = dashboardData();
   const reordered = structuredClone(base);
