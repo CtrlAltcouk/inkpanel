@@ -44,8 +44,8 @@ export interface Frame {
    * When the visible content last genuinely changed, ISO instant. Set on
    * frames produced by frameFor/renderNow; absent on enrolment frames, which
    * have no such concept. Exposed on the frame (rather than only internally)
-   * so callers — and tests — can observe it directly instead of parsing the
-   * rendered "Updated HH:MM" footer.
+   * so callers — and tests — can observe when useful content last changed
+   * even though that metadata is not printed on the dashboard.
    */
   contentChangedAt?: string;
 }
@@ -216,10 +216,10 @@ export class FrameService {
    * is exactly right for devices and exactly wrong for a user who has pressed
    * Push and expects to see something happen. Push therefore always
    * re-rasterises through Chromium — but when content has not genuinely
-   * changed it keeps the existing contentChangedAt (the "Updated HH:MM"
-   * footer), since that timestamp is deliberately excluded from the content
-   * hash and must only move when content actually changed, not merely
-   * because someone pressed a button.
+   * changed it keeps the existing internal contentChangedAt metadata, since
+   * that timestamp is deliberately excluded from the content hash and must
+   * only move when content actually changed, not merely because someone
+   * pressed a button.
    */
   async renderNow(device: DeviceRecord, batteryVolts: number | null): Promise<Frame> {
     return this.renderInternal(device, batteryVolts, true);
