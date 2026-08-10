@@ -123,7 +123,7 @@ test('accepts the observed RDM v1.1 response shape and ignores unrelated fields'
 
   assert.deepEqual(result.data.departures, [
     { scheduled: '17:49', expected: '17:54', status: 'delayed', delayMinutes: 5, platform: '4' },
-    { scheduled: '17:58', expected: null, status: 'cancelled', delayMinutes: 0, platform: null },
+    { scheduled: '17:58', expected: null, status: 'cancelled', delayMinutes: null, platform: null },
     { scheduled: '17:59', expected: null, status: 'on-time', delayMinutes: 0, platform: '5' },
   ]);
 });
