@@ -42,6 +42,7 @@ test('cell HTML exposes the correct controls for every widget type and position'
   assert.match(html, /Uses panel location: Milton Keynes/);
   assert.match(html, /data-station="origin"/);
   assert.match(html, /data-bins-uprn/);
+  assert.match(html, /<input type="text" data-bins-uprn/);
   assert.match(html, /dashboard section will be blank/);
   assert.equal((dashboardCellHtml('panel-a', 0, { type: 'empty', drafts: { empty: {} } }).match(/data-widget-type/g) ?? []).length, 1);
 });

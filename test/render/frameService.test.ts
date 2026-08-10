@@ -43,7 +43,10 @@ async function withService(fetchData: () => Promise<SourceBundle>, fn: (service:
 test('maps battery volts to a percentage', () => {
   assert.equal(batteryPercent(4.2), 100);
   assert.equal(batteryPercent(3.3), 0);
+  assert.equal(batteryPercent(5), 100, 'over-voltage readings are clamped');
+  assert.equal(batteryPercent(2), 0, 'under-voltage readings are clamped');
   assert.equal(batteryPercent(null), null);
+  assert.equal(batteryPercent(0), null, 'zero means no battery reading');
 });
 
 test('renders 48000 bytes and memoises unchanged visible content', async () => {
@@ -84,6 +87,17 @@ test('device and enrolment memos remain isolated by device and server URL', asyn
   });
 });
 
+test('rendered-device coverage distinguishes unchecked from healthy devices', async () => {
+  await withService(async () => bundle(), async (service) => {
+    assert.equal(service.renderedDeviceCount(), 0);
+    assert.deepEqual(service.sourceIssues(), [], 'no issues before checking means unknown coverage');
+    await service.frameFor({ ...defaultDevice('healthy-a'), claimed: true }, 4);
+    await service.frameFor({ ...defaultDevice('healthy-b'), claimed: true }, 4);
+    assert.equal(service.renderedDeviceCount(), 2);
+    assert.deepEqual(service.sourceIssues(), [], 'checked healthy devices have no issues');
+  });
+});
+
 test('forced rendering moves contentChangedAt only for a real visible change', async () => {
   let title = 'First';
   await withService(async () => bundle({ ...CALENDAR, today: [{ ...CALENDAR.today[0]!, title }] }), async (service) => {
@@ -108,7 +122,7 @@ test('partial source data reaches its own section even when aggregate health is 
     assert.match(html, /Healthy feed event/);
     assert.match(html, /Collect Recycling Red/);
     await service.frameFor(device, 4.0);
-    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'esp32-partial', sourceId: 'ical', status: 'error', error: '1 of 3 feeds unavailable' }]);
+    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'esp32-partial', sourceId: 'section-0:ical', status: 'error', error: '1 of 3 feeds unavailable' }]);
   });
 });
 
@@ -117,8 +131,65 @@ test('section health remains independently reportable', async () => {
   failing.sections[0] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'timed out' } };
   await withService(async () => failing, async (service) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
-    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'panel-a', sourceId: 'ical', status: 'error', error: 'timed out' }]);
+    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'panel-a', sourceId: 'section-0:ical', status: 'error', error: 'timed out' }]);
     assert.equal(service.renderedDeviceCount(), 1);
+  });
+});
+
+test('hidden health changes reuse the frame while diagnostics still refresh', async () => {
+  let failed = false;
+  await withService(async () => {
+    const next = bundle();
+    if (failed) {
+      next.headerWeather = {
+        data: WEATHER,
+        health: { id: 'weather', status: 'error', fetchedAt: null, error: 'new hidden diagnostic' },
+      };
+    }
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-hidden-health'), claimed: true };
+    const first = await service.frameFor(device, 4);
+    failed = true;
+    const second = await service.frameFor(device, 4);
+    assert.equal(second.etag, first.etag);
+    assert.equal(count(), 1, 'identical pixels do not launch Chromium again');
+    assert.deepEqual(service.sourceIssues(), [{
+      deviceId: 'panel-hidden-health', sourceId: 'header:weather',
+      status: 'error', error: 'new hidden diagnostic',
+    }]);
+  });
+});
+
+test('a changed displayed stale minute invalidates the frame', async () => {
+  let minute = '10';
+  await withService(async () => {
+    const next = bundle();
+    next.sections[0] = {
+      type: 'calendar', data: CALENDAR,
+      health: { id: 'ical', status: 'stale', fetchedAt: `2026-08-03T03:${minute}:00.000Z`, error: 'timeout' },
+    };
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-stale-minute'), claimed: true };
+    const first = await service.frameFor(device, 4);
+    minute = '11';
+    const second = await service.frameFor(device, 4);
+    assert.notEqual(second.etag, first.etag);
+    assert.equal(count(), 2);
+  });
+});
+
+test('duplicate widget diagnostics retain section identity', async () => {
+  const duplicateFailures = bundle();
+  duplicateFailures.sections[0] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'work failed' } };
+  duplicateFailures.sections[1] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'personal failed' } };
+  await withService(async () => duplicateFailures, async (service) => {
+    await service.frameFor({ ...defaultDevice('panel-duplicates'), claimed: true }, 4);
+    assert.deepEqual(service.sourceIssues(), [
+      { deviceId: 'panel-duplicates', sourceId: 'section-0:ical', status: 'error', error: 'work failed' },
+      { deviceId: 'panel-duplicates', sourceId: 'section-1:ical', status: 'error', error: 'personal failed' },
+    ]);
   });
 });
 
@@ -161,6 +232,26 @@ test('header weather is always fetched; Empty and unselected sources do no work'
     const empty = { type: 'empty' as const, version: 1 as const, config: {} };
     await service.previewHtml({ ...defaultDevice('esp32-empty'), dashboardSections: [empty, structuredClone(empty), structuredClone(empty), structuredClone(empty)] });
     assert.deepEqual(calls, { weather: 1, calendar: 0, bins: 0 });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('real fetchAll does not call the bins source for an empty configured UPRN', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-no-uprn-'));
+  let binsCalls = 0;
+  const weatherSource: Source<{ latitude: number; longitude: number; timezone: string }, WeatherData> = {
+    id: 'weather', async fetch() { return { status: 'ok', data: WEATHER, fetchedAt: new Date().toISOString() }; },
+  };
+  const binsTestSource: Source<{ uprn: string }, BinsData> = {
+    id: 'bins', async fetch() { binsCalls += 1; throw new Error('empty UPRN must not reach bins'); },
+  };
+  try {
+    const service = new FrameService({
+      renderer: {} as Renderer, cache: new SourceCache(dir), weatherSource, binsSource: binsTestSource,
+    });
+    const html = await service.previewHtml(defaultDevice('panel-no-uprn'));
+    assert.equal(binsCalls, 0);
+    assert.match(html, /Bins — not set up/);
+    assert.doesNotMatch(html, /Bins unavailable/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

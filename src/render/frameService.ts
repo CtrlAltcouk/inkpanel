@@ -60,7 +60,13 @@ interface Memo {
   hash: string;
   frame: Frame;
   contentChangedAt: string;
-  health: SourceHealth[];
+  health: DiagnosticHealth[];
+}
+
+interface DiagnosticHealth {
+  sourceId: string;
+  status: SourceHealth['status'];
+  error: string | null;
 }
 
 export class FrameService {
@@ -183,6 +189,23 @@ export class FrameService {
     };
   }
 
+  private diagnosticHealth(bundle: SourceBundle): DiagnosticHealth[] {
+    return [
+      {
+        sourceId: `header:${bundle.headerWeather.health.id}`,
+        status: bundle.headerWeather.health.status,
+        error: bundle.headerWeather.health.error,
+      },
+      ...bundle.sections.flatMap((section, index) => section.type !== 'empty' && section.health
+        ? [{
+            sourceId: `section-${index}:${section.health.id}`,
+            status: section.health.status,
+            error: section.health.error,
+          }]
+        : []),
+    ];
+  }
+
   private async rasterise(html: string, profile: PanelProfile): Promise<Frame> {
     const png = await this.deps.renderer.screenshot(html, profile);
     const buffer = await quantisePng(png, profile);
@@ -217,8 +240,14 @@ export class FrameService {
     );
     const hash = contentHash(provisional);
     const unchanged = previous !== undefined && previous.hash === hash;
+    const health = this.diagnosticHealth(bundle);
 
-    if (unchanged && !force) return previous.frame;
+    if (unchanged && !force) {
+      // Diagnostics are not part of the visible hash. Keep them current even
+      // when identical pixels let us reuse the previous framebuffer.
+      this.memo.set(device.id, { ...previous, health });
+      return previous.frame;
+    }
 
     const contentChangedAt = unchanged ? previous.contentChangedAt : new Date().toISOString();
     const data = { ...provisional, contentChangedAt };
@@ -226,12 +255,6 @@ export class FrameService {
     const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
     const frame: Frame = { ...rendered, contentChangedAt };
 
-    const health = [
-      bundle.headerWeather.health,
-      ...bundle.sections.flatMap((section) => section.type !== 'empty' && section.health
-        ? [section.health]
-        : []),
-    ];
     this.memo.set(device.id, { hash, frame, contentChangedAt, health });
     return frame;
   }
@@ -260,15 +283,16 @@ export class FrameService {
   /**
    * Sources not currently reporting ok, across every device rendered so far.
    *
-   * Safe to read from the memo: source status is part of the content hash, so
-   * a status change always forces a re-render and therefore a fresh entry.
+   * Safe to read from the memo: diagnostics are refreshed after every source
+   * load, including when visible content is unchanged and rasterisation is
+   * skipped.
    */
   sourceIssues(): Array<{ deviceId: string; sourceId: string; status: string; error: string | null }> {
     const issues = [];
     for (const [deviceId, memo] of this.memo) {
       for (const source of memo.health) {
         if (source.status !== 'ok') {
-          issues.push({ deviceId, sourceId: source.id, status: source.status, error: source.error });
+          issues.push({ deviceId, sourceId: source.sourceId, status: source.status, error: source.error });
         }
       }
     }

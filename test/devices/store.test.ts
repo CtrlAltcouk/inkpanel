@@ -199,6 +199,19 @@ test('new devices start with the migrated four-section dashboard', async () => {
   });
 });
 
+test('current V2 defaults are explicit and return independent section configs', () => {
+  const first = defaultDevice('default-a');
+  const second = defaultDevice('default-b');
+  assert.equal('calendarUrls' in first, false, 'runtime defaults are V2-shaped, not historical V1');
+  assert.deepEqual(first.dashboardSections.map((section) => section.type), ['calendar', 'weather', 'trains', 'bins']);
+  if (first.dashboardSections[0].type === 'calendar') {
+    first.dashboardSections[0].config.calendarUrls.push('https://example.com/a.ics');
+  }
+  assert.deepEqual(second.dashboardSections[0], {
+    type: 'calendar', version: 1, config: { calendarUrls: [] },
+  }, 'one device cannot mutate the shared default layout for another');
+});
+
 test('a minimal legacy config migrates in memory to a complete current record', async () => {
   await withStore(async (_store, path) => {
     // A record with none of the new fields, as Spec 1 would have written it.

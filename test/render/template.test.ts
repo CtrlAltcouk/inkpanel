@@ -166,10 +166,17 @@ test('page remains exactly 800x480 pure black and white', () => {
   assert.match(css, /width:800px;height:480px/);
   assert.equal(132 + 3 + 345, 480);
   assert.doesNotMatch(css, /rgba?\(|opacity\s*:/i);
+  const allowed = new Set(['#000', '#fff', '#000000', '#ffffff']);
+  for (const hex of css.match(/#[0-9a-f]{3,8}\b/gi) ?? []) {
+    assert.ok(allowed.has(hex.toLowerCase()), `${hex} is not pure black or white`);
+  }
 });
 
 test('loads all embedded font faces', async () => {
   const css = await loadFontCss();
   assert.equal((css.match(/@font-face/g) ?? []).length, 4);
   assert.equal((css.match(/data:font\/woff2;base64,/g) ?? []).length, 4);
+  assert.match(css, /font-family:"Dela Gothic One"/);
+  assert.match(css, /font-family:"Inter"/);
+  assert.doesNotMatch(css, /url\(\.|https?:/, 'rendering cannot depend on external font references');
 });

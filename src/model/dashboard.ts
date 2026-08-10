@@ -76,7 +76,7 @@ export type DashboardSectionDataTuple = [
 export interface DashboardData {
   /** When this object was built. Excluded from the content hash. */
   generatedAt: string;
-  /** When the rendered content last actually changed. Shown in the footer. */
+  /** When the rendered content last actually changed. Not rendered. */
   contentChangedAt: string;
   timezone: string;
   today: TodayInfo;

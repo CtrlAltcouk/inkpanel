@@ -24,7 +24,21 @@ test('hash includes the displayed minute of a stale badge, but not raw seconds',
   assert.notEqual(contentHash(base), contentHash(nextMinute));
 });
 
-test('hash follows ordered section content and independently-owned health', () => {
+test('hidden health ids, statuses, and errors do not change the visible hash', () => {
+  const base = dashboardData();
+  const hiddenChanges = structuredClone(base);
+  hiddenChanges.headerWeatherHealth = {
+    id: 'renamed-weather', status: 'error', fetchedAt: null, error: 'cache exploded differently',
+  };
+  if (hiddenChanges.sections[0].type === 'calendar') {
+    hiddenChanges.sections[0].health = {
+      id: 'renamed-calendar', status: 'error', fetchedAt: null, error: 'another hidden error',
+    };
+  }
+  assert.equal(contentHash(base), contentHash(hiddenChanges), 'identical pixels keep their hash');
+});
+
+test('hash follows ordered section content and visible stale health', () => {
   const base = dashboardData();
   const reordered = structuredClone(base);
   [reordered.sections[0], reordered.sections[1]] = [reordered.sections[1], reordered.sections[0]];

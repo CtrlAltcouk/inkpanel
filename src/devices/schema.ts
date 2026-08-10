@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dashboardSectionsSchema } from '../widgets/registry.ts';
+import { DEFAULT_DASHBOARD_SECTIONS, dashboardSectionsSchema } from '../widgets/registry.ts';
 
 export const CURRENT_DEVICE_STORE_SCHEMA_VERSION = 2 as const;
 
@@ -186,6 +186,32 @@ export const deviceStoreV2Schema = z
   .strictObject({ schemaVersion: z.literal(2), devices: z.array(deviceRecordV2Schema) })
   .superRefine(rejectDuplicateDeviceIds);
 export type DeviceStoreV2 = z.infer<typeof deviceStoreV2Schema>;
+
+/** Current runtime defaults. Historical migrations never call this. */
+export function defaultDeviceV2(id: string): DeviceRecordV2 {
+  return {
+    id,
+    name: 'Unnamed panel',
+    claimed: false,
+    timezone: 'Europe/London',
+    latitude: 52.04,
+    longitude: -0.76,
+    dashboardSections: structuredClone(DEFAULT_DASHBOARD_SECTIONS),
+    panelProfileId: 'wft0583-800x480-mono',
+    quietHoursStart: 23,
+    quietHoursEnd: 6,
+    activeIntervalSeconds: 900,
+    lowBatteryIntervalSeconds: 21_600,
+    lowBatteryVolts: 3.5,
+    unclaimedIntervalSeconds: 60,
+    lastSeenAt: null,
+    lastBatteryVolts: null,
+    lastEtag: null,
+    lastFirmwareVersion: null,
+    locationLabel: '',
+    lastWakeSeconds: null,
+  };
+}
 
 /**
  * Frozen unversioned V0 input. Fields accumulated over V0's lifetime, so all

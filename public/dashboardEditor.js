@@ -53,7 +53,7 @@ function rememberCell(cell, slot, type = slot.type) {
 
 function controlsHtml(type, config, locationLabel) {
   if (type === 'calendar') return `<label>Secret iCal URLs, one per line</label><textarea data-calendar-urls rows="3" placeholder="https://calendar.example/private.ics">${esc((config.calendarUrls ?? []).join('\n'))}</textarea>`;
-  if (type === 'bins') return `<label>UPRN</label><input data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>. Leave blank when not configured.</p>`;
+  if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>. Leave blank when not configured.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
   if (type === 'empty') return '<p class="meta">This dashboard section will be blank.</p>';
   return '<div class="station-picker" data-station="origin"></div><div class="station-picker" data-station="destination"></div>';
