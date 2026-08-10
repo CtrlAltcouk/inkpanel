@@ -13,7 +13,9 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .disp{font-family:"Dela Gothic One",sans-serif;letter-spacing:-0.02em;}
 .tnum{font-variant-numeric:tabular-nums;}
 
-.banner{height:132px;padding:18px 26px;display:flex;justify-content:space-between;align-items:flex-start;}
+.banner{height:132px;padding:18px 26px;display:flex;justify-content:space-between;align-items:flex-start;position:relative;}
+.battery{position:absolute;top:7px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:800;
+  letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;}
 .banner-date .d1{font-size:66px;line-height:0.92;}
 .banner-date .d2{font-size:30px;line-height:1;}
 .banner-wx{display:flex;gap:18px;align-items:flex-start;}
@@ -22,7 +24,7 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .banner-wx .cond{font-size:15px;font-weight:700;text-align:right;}
 
 .rule{background:#000;height:3px;}
-.grid{height:311px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;}
+.grid{height:345px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;}
 .cell{padding:16px 24px;position:relative;}
 .cell--tl{border-right:2px solid #000;border-bottom:2px solid #000;}
 .cell--tr{border-bottom:2px solid #000;}
@@ -69,7 +71,5 @@ body{font-family:"Inter",sans-serif;-webkit-font-smoothing:none;text-rendering:g
 .bin--food{background-image:radial-gradient(#000 40%,#fff 40%);background-size:4px 4px;}
 .bin--garden{background-image:repeating-linear-gradient(45deg,#000 0 2px,#fff 2px 5px);}
 
-.footer{height:34px;border-top:2px solid #000;padding:9px 26px;display:flex;justify-content:space-between;
-  font-size:11px;letter-spacing:0.08em;text-transform:uppercase;}
 `.trim();
 }

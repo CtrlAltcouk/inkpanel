@@ -67,7 +67,7 @@ test('changes when a source degrades to stale', () => {
 test('changes when the battery percent changes', () => {
   const a = contentHash(sample());
   const b = contentHash(sample({ battery: { volts: 3.6, percent: 42 } }));
-  assert.notEqual(a, b, 'battery is rendered in the footer');
+  assert.notEqual(a, b, 'battery is visible in the panel header');
 });
 
 test('ignores battery volts when percent is unchanged', () => {

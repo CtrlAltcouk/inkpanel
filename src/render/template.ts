@@ -69,6 +69,7 @@ function forecastCell(data: DashboardData): string {
 
 function banner(data: DashboardData): string {
   const weather = data.weather;
+  const battery = data.battery.percent === null ? 'Battery --' : `Battery ${data.battery.percent}%`;
   const wx = weather
     ? `<div class="banner-wx">
          <div class="detail tnum">H ${weather.highC}&deg; &nbsp; L ${weather.lowC}&deg;<br>Rain ${weather.precipProbability}%<br>${esc(weather.windDirection)} ${weather.windKph}kph</div>
@@ -77,6 +78,7 @@ function banner(data: DashboardData): string {
     : `<div class="banner-wx"><div class="cond">Weather unavailable</div></div>`;
 
   return `<div class="banner">
+    <div class="battery">${esc(battery)}</div>
     <div class="banner-date">
       <div class="d1 disp">${esc(data.today.weekdayLong.slice(0, 3).toUpperCase())} ${data.today.dayOfMonth}</div>
       <div class="d2 disp">${esc(data.today.monthLong.toUpperCase())}</div>
@@ -164,9 +166,6 @@ function binsCell(data: DashboardData): string {
 }
 
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
-  const battery = data.battery.percent === null ? 'Battery --' : `Battery ${data.battery.percent}%`;
-  const changed = hhmm(data.contentChangedAt, data.timezone);
-
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <style>${fontCss}${panelCss(profile)}</style></head><body>
 ${banner(data)}
@@ -189,6 +188,5 @@ ${banner(data)}
     ${binsCell(data)}
   </div>
 </div>
-<div class="footer"><span class="tnum">Updated ${esc(changed)}</span><span>${esc(battery)}</span></div>
 </body></html>`;
 }

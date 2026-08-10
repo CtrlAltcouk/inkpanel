@@ -108,6 +108,17 @@ test('handles an unknown battery without printing null', () => {
   assert.doesNotMatch(html, /null/);
 });
 
+test('renders battery status inside the banner and no footer timestamp', () => {
+  const html = renderHtml(data, WFT0583, '');
+  assert.match(
+    html,
+    /<div class="banner">[\s\S]*?<div class="battery">Battery 87%<\/div>/,
+    'battery is independently positioned inside the header',
+  );
+  assert.doesNotMatch(html, /Updated\s+\d{2}:\d{2}/, 'contentChangedAt is no longer visible');
+  assert.doesNotMatch(html, /class="footer"/, 'footer markup is removed');
+});
+
 test('the stylesheet contains no greys', () => {
   const css = panelCss(WFT0583);
   assert.doesNotMatch(css, /rgba?\(/i, 'no rgb/rgba colours');
@@ -134,6 +145,11 @@ test('the page is locked to the profile size', () => {
   const css = panelCss(WFT0583);
   assert.match(css, /width:\s*800px/);
   assert.match(css, /height:\s*480px/);
+  assert.match(css, /\.banner\{height:132px/);
+  assert.match(css, /\.rule\{background:#000;height:3px/);
+  assert.match(css, /\.grid\{height:345px/);
+  assert.doesNotMatch(css, /\.footer\{/);
+  assert.equal(132 + 3 + 345, 480, 'banner, rule, and grid fill the panel exactly');
 });
 
 test('loads all four faces as embedded woff2, not latin-ext', async () => {
