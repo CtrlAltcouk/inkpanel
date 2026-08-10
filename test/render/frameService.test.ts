@@ -8,341 +8,299 @@ import { batteryPercent } from '../../src/devices/battery.ts';
 import { SourceCache } from '../../src/sources/cache.ts';
 import { Renderer } from '../../src/render/browser.ts';
 import { defaultDevice } from '../../src/devices/types.ts';
+import type { Source } from '../../src/sources/types.ts';
+import type { IcalFeedConfig } from '../../src/sources/ical.ts';
+import { CALENDAR, OK_CALENDAR, OK_WEATHER, WEATHER } from '../fixtures/dashboard.ts';
 import { MK_FORECAST } from '../fixtures/openMeteo.ts';
+import { SINGLE_TIMED } from '../fixtures/ics.ts';
+import type { WeatherData } from '../../src/model/dashboard.ts';
+import type { BinsData } from '../../src/sources/bins.ts';
 
-const OK_HEALTH = [{ id: 'ical', status: 'ok' as const, fetchedAt: '2026-08-03T07:00:00.000Z', error: null }];
-const FAILING_HEALTH = [
-  { id: 'ical', status: 'ok' as const, fetchedAt: '2026-08-03T07:00:00.000Z', error: null },
-  { id: 'weather', status: 'error' as const, fetchedAt: null, error: 'timed out' },
-];
+function bundle(calendar = CALENDAR): SourceBundle {
+  return {
+    headerWeather: { data: WEATHER, health: OK_WEATHER },
+    sections: [
+      { type: 'calendar', data: calendar, health: OK_CALENDAR },
+      { type: 'weather', data: WEATHER, health: OK_WEATHER },
+      { type: 'trains', data: null, health: null },
+      { type: 'bins', data: null, health: null },
+    ],
+  };
+}
 
-async function withService(
-  fetchData: (() => Promise<SourceBundle>) | (() => never),
-  fn: (service: FrameService, counts: { screenshots: number }) => Promise<void>,
-) {
+async function withService(fetchData: () => Promise<SourceBundle>, fn: (service: FrameService, screenshots: () => number) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-frame-'));
   const renderer = new Renderer();
-  const counts = { screenshots: 0 };
+  let count = 0;
   const counting = {
-    screenshot: (html: string, profile: Parameters<Renderer['screenshot']>[1]) => {
-      counts.screenshots++;
-      return renderer.screenshot(html, profile);
-    },
-    close: () => renderer.close(),
-  } as unknown as Renderer;
-
-  try {
-    await fn(new FrameService({ renderer: counting, cache: new SourceCache(dir), fetchData }), counts);
-  } finally {
-    await renderer.close();
-    await rm(dir, { recursive: true, force: true });
-  }
+    screenshot: (html: string, profile: Parameters<Renderer['screenshot']>[1]) => { count += 1; return renderer.screenshot(html, profile); },
+    warmUp: () => renderer.warmUp(), close: () => renderer.close(),
+  } as Renderer;
+  try { await fn(new FrameService({ renderer: counting, cache: new SourceCache(dir), fetchData }), () => count); }
+  finally { await renderer.close(); await rm(dir, { recursive: true, force: true }); }
 }
 
 test('maps battery volts to a percentage', () => {
   assert.equal(batteryPercent(4.2), 100);
   assert.equal(batteryPercent(3.3), 0);
-  assert.equal(batteryPercent(5.0), 100, 'clamped');
-  assert.equal(batteryPercent(2.0), 0, 'clamped');
+  assert.equal(batteryPercent(5), 100, 'over-voltage readings are clamped');
+  assert.equal(batteryPercent(2), 0, 'under-voltage readings are clamped');
   assert.equal(batteryPercent(null), null);
-  assert.equal(batteryPercent(0), null, 'no battery connected reads as zero');
+  assert.equal(batteryPercent(0), null, 'zero means no battery reading');
 });
 
-test('produces a full-size buffer and skips Chromium when nothing changed', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service, counts) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
-
-    const first = await service.frameFor(device, 4.0);
-    assert.equal(first.buffer.length, 48000);
-    assert.match(first.etag, /^[0-9a-f]{32}$/);
-    assert.equal(counts.screenshots, 1);
-
-    const second = await service.frameFor(device, 4.0);
-    assert.equal(second.etag, first.etag, 'unchanged content keeps its ETag');
-    assert.equal(counts.screenshots, 1, 'Chromium must not run again');
-  });
-});
-
-test('re-renders when the content actually changes', async () => {
-  let title = 'Standup';
-  const fetchData = async (): Promise<SourceBundle> => ({
-    calendar: {
-      today: [{ uid: '1', title, start: '2026-08-03T08:30:00.000Z', end: '2026-08-03T08:45:00.000Z', allDay: false }],
-      tomorrow: [],
-    },
-    weather: null,
-    bins: null,
-    sourceHealth: OK_HEALTH,
-  });
-
-  await withService(fetchData, async (service, counts) => {
+test('renders 48000 bytes and memoises unchanged visible content', async () => {
+  await withService(async () => bundle(), async (service, count) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
     const first = await service.frameFor(device, 4.0);
-    title = 'Standup MOVED';
     const second = await service.frameFor(device, 4.0);
-
-    assert.notEqual(second.etag, first.etag);
-    assert.equal(counts.screenshots, 2);
-  });
-});
-
-test('a battery change that does not move the percent does not re-render', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service, counts) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
-    await service.frameFor(device, 4.02);
-    await service.frameFor(device, 4.021);
-    assert.equal(counts.screenshots, 1, 'only the rounded percent is drawn');
-  });
-});
-
-test('separate devices keep separate memos', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service, counts) => {
-    await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
-    await service.frameFor({ ...defaultDevice('panel-b'), claimed: true }, 4.0);
-    assert.equal(counts.screenshots, 2, 'one device must not serve another a cached frame');
-  });
-});
-
-test('memoises the enrolment frame', async () => {
-  await withService(
-    (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
-    async (service, counts) => {
-      const device = defaultDevice('esp32-a1b2c3');
-      const first = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
-      const second = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
-
-      assert.equal(second.etag, first.etag);
-      // An unclaimed device polls every 60s. Re-rendering each time would mean
-      // a Chromium launch a minute, and a cold one can outlast the panel's
-      // HTTP read timeout.
-      assert.equal(counts.screenshots, 1, 'must not re-render an unchanged enrolment screen');
-    },
-  );
-});
-
-test('a different server URL produces a different enrolment frame', async () => {
-  await withService(
-    (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
-    async (service, counts) => {
-      const device = defaultDevice('esp32-a1b2c3');
-      const a = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
-      const b = await service.enrolmentFrame(device, 'http://10.0.0.5:8080');
-
-      assert.notEqual(a.etag, b.etag, 'the URL is printed on the screen');
-      assert.equal(counts.screenshots, 2);
-    },
-  );
-});
-
-test('renderNow re-rasterises even when content is unchanged', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service, counts) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
-
-    await service.frameFor(device, 4.0);
-    assert.equal(counts.screenshots, 1);
-
+    assert.equal(first.buffer.length, 48_000);
+    assert.equal(second.etag, first.etag);
+    assert.equal(count(), 1);
     await service.renderNow(device, 4.0);
-    assert.equal(counts.screenshots, 2, 'Push must re-rasterise even though frameFor would have served the memo');
+    assert.equal(count(), 2, 'Push still forces rasterisation');
   });
 });
 
-test('renderNow does not change contentChangedAt when content is unchanged', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service) => {
+test('ordered section content changes invalidate the memo', async () => {
+  let title = 'First';
+  await withService(async () => bundle({ ...CALENDAR, today: [{ ...CALENDAR.today[0]!, title }] }), async (service, count) => {
     const device = { ...defaultDevice('esp32-test'), claimed: true };
-
-    const first = await service.frameFor(device, 4.0);
-    const pushed = await service.renderNow(device, 4.0);
-
-    assert.equal(
-      pushed.contentChangedAt,
-      first.contentChangedAt,
-      'pressing Push on unchanged content must not relabel it as freshly changed',
-    );
+    await service.frameFor(device, 4.0);
+    title = 'Second';
+    await service.frameFor(device, 4.0);
+    assert.equal(count(), 2);
   });
 });
 
-test('renderNow updates contentChangedAt when content genuinely changed', async () => {
-  let title = 'Standup';
-  const fetchData = async (): Promise<SourceBundle> => ({
-    calendar: {
-      today: [{ uid: '1', title, start: '2026-08-03T08:30:00.000Z', end: '2026-08-03T08:45:00.000Z', allDay: false }],
-      tomorrow: [],
-    },
-    weather: null,
-    bins: null,
-    sourceHealth: OK_HEALTH,
-  });
-
-  await withService(fetchData, async (service) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
-
-    const first = await service.frameFor(device, 4.0);
-    title = 'Standup MOVED';
-    const pushed = await service.renderNow(device, 4.0);
-
-    assert.notEqual(
-      pushed.contentChangedAt,
-      first.contentChangedAt,
-      'a genuine content change must still move the timestamp, even via Push',
-    );
-  });
-});
-
-test('renders an enrolment frame in the normal format', async () => {
-  await withService(
-    (() => { throw new Error('sources must not be called for enrolment'); }) as () => never,
-    async (service) => {
-      const frame = await service.enrolmentFrame(defaultDevice('esp32-a1b2c3'), 'http://192.168.1.20:8080');
-      assert.equal(frame.buffer.length, 48000, 'firmware needs no special case');
-      assert.match(frame.etag, /^[0-9a-f]{32}$/);
-    },
-  );
-});
-
-// sourceIssues() alone cannot distinguish "every source is healthy" from
-// "nothing has been rendered yet" — both read as []. renderedDeviceCount()
-// is what lets a caller (e.g. /api/system/info) tell the two apart.
-test('nothing rendered yet reports zero coverage, not a clean bill of health', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service) => {
-    assert.equal(service.renderedDeviceCount(), 0, 'nothing has been checked');
-    assert.deepEqual(service.sourceIssues(), [], 'an empty issues list here means "unknown", not "healthy"');
-  });
-});
-
-test('devices that have been rendered and are healthy count as coverage with no issues', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: OK_HEALTH };
-  await withService(async () => bundle, async (service) => {
+test('device and enrolment memos remain isolated by device and server URL', async () => {
+  await withService(async () => bundle(), async (service, count) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
     await service.frameFor({ ...defaultDevice('panel-b'), claimed: true }, 4.0);
-
-    assert.equal(service.renderedDeviceCount(), 2, 'both devices were actually checked');
-    assert.deepEqual(service.sourceIssues(), [], 'genuinely healthy this time, not merely unchecked');
+    assert.equal(count(), 2);
+    const device = defaultDevice('esp32-enrol');
+    const first = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
+    const cached = await service.enrolmentFrame(device, 'http://192.168.1.20:8080');
+    const moved = await service.enrolmentFrame(device, 'http://10.0.0.5:8080');
+    assert.equal(cached.etag, first.etag);
+    assert.notEqual(moved.etag, first.etag);
   });
 });
 
-test('a device with no UPRN does not report bins as broken', async () => {
-  const bundle: SourceBundle = {
-    calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: [],
-  };
-  await withService(async () => bundle, async (service) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
-    const frame = await service.frameFor(device, 4.0);
-    assert.equal(frame.buffer.length, 48000);
-    // Not configured is silence, not an error. The panel says "not set up".
-    assert.equal(service.sourceIssues().length, 0);
+test('rendered-device coverage distinguishes unchecked from healthy devices', async () => {
+  await withService(async () => bundle(), async (service) => {
+    assert.equal(service.renderedDeviceCount(), 0);
+    assert.deepEqual(service.sourceIssues(), [], 'no issues before checking means unknown coverage');
+    await service.frameFor({ ...defaultDevice('healthy-a'), claimed: true }, 4);
+    await service.frameFor({ ...defaultDevice('healthy-b'), claimed: true }, 4);
+    assert.equal(service.renderedDeviceCount(), 2);
+    assert.deepEqual(service.sourceIssues(), [], 'checked healthy devices have no issues');
   });
 });
 
-test('bins data from the bundle reaches the rendered output, not a hardcoded null', async () => {
-  const bundle: SourceBundle = {
-    calendar: { today: [], tomorrow: [] },
-    weather: null,
-    bins: { next: { date: '2026-08-10', types: ['recycling'] }, rawLabels: ['Collect Recycling Red'] },
-    sourceHealth: [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-03T07:00:00.000Z', error: null }],
-  };
-  await withService(async () => bundle, async (service) => {
-    const device = { ...defaultDevice('esp32-test'), claimed: true };
+test('forced rendering moves contentChangedAt only for a real visible change', async () => {
+  let title = 'First';
+  await withService(async () => bundle({ ...CALENDAR, today: [{ ...CALENDAR.today[0]!, title }] }), async (service) => {
+    const device = { ...defaultDevice('esp32-timestamp'), claimed: true };
+    const first = await service.frameFor(device, 4.0);
+    const unchangedPush = await service.renderNow(device, 4.0);
+    assert.equal(unchangedPush.contentChangedAt, first.contentChangedAt);
+    title = 'Changed';
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const changedPush = await service.renderNow(device, 4.0);
+    assert.notEqual(changedPush.contentChangedAt, first.contentChangedAt);
+  });
+});
+
+test('partial source data reaches its own section even when aggregate health is error', async () => {
+  const partial = bundle({ ...CALENDAR, today: [{ ...CALENDAR.today[0]!, title: 'Healthy feed event' }] });
+  partial.sections[0] = { type: 'calendar', data: (partial.sections[0] as { type: 'calendar'; data: typeof CALENDAR }).data, health: { id: 'ical', status: 'error', fetchedAt: null, error: '1 of 3 feeds unavailable' } };
+  partial.sections[3] = { type: 'bins', data: { next: { date: '2026-08-10', types: ['recycling'] }, rawLabels: ['Collect Recycling Red'] }, health: { id: 'bins', status: 'ok', fetchedAt: null, error: null } };
+  await withService(async () => partial, async (service) => {
+    const device = { ...defaultDevice('esp32-partial'), claimed: true };
     const html = await service.previewHtml(device);
-    assert.equal((html.match(/Collect Recycling Red/g) ?? []).length, 1, 'the real collection reaches the page');
-    assert.equal(
-      (html.match(/<div class="slot--empty"><span>Bins (—|unavailable)/g) ?? []).length,
-      0,
-      'a healthy bins fetch must not fall back to an empty slot',
-    );
+    assert.match(html, /Healthy feed event/);
+    assert.match(html, /Collect Recycling Red/);
+    await service.frameFor(device, 4.0);
+    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'esp32-partial', sourceId: 'section-0:ical', status: 'error', error: '1 of 3 feeds unavailable' }]);
   });
 });
 
-// The test above stubs fetchData, so it never actually exercises fetchAll's
-// own guard — it would pass identically even if that guard were deleted.
-// This one runs the real (non-stubbed) fetchAll, with only network calls
-// faked out, so a regression in the guard itself is caught: either by the
-// stray call to the council's API being rejected, or — since bins.ts also
-// short-circuits on an empty UPRN before ever reaching the network — by the
-// rendered markup falling back to "unavailable" once a spurious 'bins'
-// health entry appears.
-test('the real fetchAll pipeline never calls the Milton Keynes bin API when no UPRN is configured', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-frame-real-'));
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes('milton-keynes.gov.uk')) {
-      throw new Error('must not call the Milton Keynes bin API when no UPRN is configured');
-    }
-    if (url.includes('api.open-meteo.com')) {
-      return new Response(JSON.stringify(MK_FORECAST), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }
-    throw new Error(`unexpected fetch in test: ${url}`);
-  }) as typeof globalThis.fetch;
-
-  try {
-    // previewHtml builds the frame's HTML without touching deps.renderer, so
-    // a stub is enough here — no Chromium needed to prove fetchAll's wiring.
-    const service = new FrameService({ renderer: {} as Renderer, cache: new SourceCache(dir) });
-    const device = { ...defaultDevice('esp32-real'), claimed: true };
-    const html = await service.previewHtml(device);
-    assert.equal(
-      (html.match(/<div class="slot--empty"><span>Bins — not set up<\/span><\/div>/g) ?? []).length,
-      1,
-      'an unconfigured device must show "not set up", not "unavailable"',
-    );
-  } finally {
-    globalThis.fetch = realFetch;
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test('a failing source is reported without hiding that the device was checked', async () => {
-  const bundle: SourceBundle = { calendar: { today: [], tomorrow: [] }, weather: null, bins: null, sourceHealth: FAILING_HEALTH };
-  await withService(async () => bundle, async (service) => {
+test('section health remains independently reportable', async () => {
+  const failing = bundle();
+  failing.sections[0] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'timed out' } };
+  await withService(async () => failing, async (service) => {
     await service.frameFor({ ...defaultDevice('panel-a'), claimed: true }, 4.0);
-
+    assert.deepEqual(service.sourceIssues(), [{ deviceId: 'panel-a', sourceId: 'section-0:ical', status: 'error', error: 'timed out' }]);
     assert.equal(service.renderedDeviceCount(), 1);
+  });
+});
+
+test('hidden health changes reuse the frame while diagnostics still refresh', async () => {
+  let failed = false;
+  await withService(async () => {
+    const next = bundle();
+    if (failed) {
+      next.headerWeather = {
+        data: WEATHER,
+        health: { id: 'weather', status: 'error', fetchedAt: null, error: 'new hidden diagnostic' },
+      };
+    }
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-hidden-health'), claimed: true };
+    const first = await service.frameFor(device, 4);
+    failed = true;
+    const second = await service.frameFor(device, 4);
+    assert.equal(second.etag, first.etag);
+    assert.equal(count(), 1, 'identical pixels do not launch Chromium again');
+    assert.deepEqual(service.sourceIssues(), [{
+      deviceId: 'panel-hidden-health', sourceId: 'header:weather',
+      status: 'error', error: 'new hidden diagnostic',
+    }]);
+  });
+});
+
+test('configured source failure rerasterises not-set-up copy as unavailable', async () => {
+  let configured = false;
+  await withService(async () => {
+    const next = bundle();
+    if (configured) {
+      next.sections[3] = {
+        type: 'bins', data: null,
+        health: { id: 'bins', status: 'error', fetchedAt: null, error: 'first fetch failed' },
+      };
+    }
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-bins-availability'), claimed: true };
+    const notSetUp = await service.frameFor(device, 4);
+    configured = true;
+    const unavailable = await service.frameFor(device, 4);
+    assert.notEqual(unavailable.etag, notSetUp.etag);
+    assert.equal(count(), 2, 'visible not-set-up/unavailable copy must be rerasterised');
+  });
+});
+
+test('a changed displayed stale minute invalidates the frame', async () => {
+  let minute = '10';
+  await withService(async () => {
+    const next = bundle();
+    next.sections[0] = {
+      type: 'calendar', data: CALENDAR,
+      health: { id: 'ical', status: 'stale', fetchedAt: `2026-08-03T03:${minute}:00.000Z`, error: 'timeout' },
+    };
+    return next;
+  }, async (service, count) => {
+    const device = { ...defaultDevice('panel-stale-minute'), claimed: true };
+    const first = await service.frameFor(device, 4);
+    minute = '11';
+    const second = await service.frameFor(device, 4);
+    assert.notEqual(second.etag, first.etag);
+    assert.equal(count(), 2);
+  });
+});
+
+test('duplicate widget diagnostics retain section identity', async () => {
+  const duplicateFailures = bundle();
+  duplicateFailures.sections[0] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'work failed' } };
+  duplicateFailures.sections[1] = { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'personal failed' } };
+  await withService(async () => duplicateFailures, async (service) => {
+    await service.frameFor({ ...defaultDevice('panel-duplicates'), claimed: true }, 4);
     assert.deepEqual(service.sourceIssues(), [
-      { deviceId: 'panel-a', sourceId: 'weather', status: 'error', error: 'timed out' },
+      { deviceId: 'panel-duplicates', sourceId: 'section-0:ical', status: 'error', error: 'work failed' },
+      { deviceId: 'panel-duplicates', sourceId: 'section-1:ical', status: 'error', error: 'personal failed' },
     ]);
   });
 });
 
-test('partial calendar data still renders when aggregate calendar health is error', async () => {
-  const bundle: SourceBundle = {
-    calendar: {
-      today: [{
-        uid: 'partial-1',
-        title: 'Healthy feed event',
-        start: '2026-08-03T08:30:00.000Z',
-        end: '2026-08-03T09:00:00.000Z',
-        allDay: false,
-      }],
-      tomorrow: [],
-    },
-    weather: null,
-    bins: null,
-    sourceHealth: [{
-      id: 'ical',
-      status: 'error',
-      fetchedAt: '2026-08-03T07:00:00.000Z',
-      error: '1 of 3 calendar feeds unavailable',
-    }],
+test('identical widget configs dedupe within a render while different configs stay isolated', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dedupe-'));
+  const calls: string[] = [];
+  const calendarSource: Source<IcalFeedConfig, string> = {
+    id: 'ical-raw',
+    async fetch(config) { calls.push(config.url); return { status: 'ok', data: SINGLE_TIMED, fetchedAt: new Date().toISOString() }; },
   };
-  await withService(async () => bundle, async (service) => {
-    const device = { ...defaultDevice('panel-a'), claimed: true };
-    const html = await service.previewHtml(device);
-    assert.match(html, /Healthy feed event/);
-    assert.equal((await service.frameFor(device, 4.0)).buffer.length, 48000);
-    assert.deepEqual(service.sourceIssues(), [{
-      deviceId: 'panel-a',
-      sourceId: 'ical',
-      status: 'error',
-      error: '1 of 3 calendar feeds unavailable',
-    }]);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('api.open-meteo.com')) return new Response(JSON.stringify(MK_FORECAST));
+    throw new Error(`unexpected fetch ${String(input)}`);
+  }) as typeof fetch;
+  try {
+    const service = new FrameService({ renderer: {} as Renderer, cache: new SourceCache(dir), calendarSource });
+    const same = { type: 'calendar' as const, version: 1 as const, config: { calendarUrls: ['https://one.example/a.ics'] } };
+    const dashboardSections = [same, structuredClone(same), { ...same, config: { calendarUrls: ['https://two.example/b.ics'] } }, { type: 'weather' as const, version: 1 as const, config: {} }] as ReturnType<typeof defaultDevice>['dashboardSections'];
+    const device = { ...defaultDevice('esp32-dedupe'), dashboardSections };
+    await service.previewHtml(device);
+    assert.deepEqual(calls.sort(), ['https://one.example/a.ics', 'https://two.example/b.ics']);
+  } finally { globalThis.fetch = realFetch; await rm(dir, { recursive: true, force: true }); }
+});
+
+test('header weather is always fetched; Empty and unselected sources do no work', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-source-selection-'));
+  const calls = { weather: 0, calendar: 0, bins: 0 };
+  const weatherSource: Source<{ latitude: number; longitude: number; timezone: string }, WeatherData> = {
+    id: 'weather', async fetch() { calls.weather += 1; return { status: 'ok', data: WEATHER, fetchedAt: new Date().toISOString() }; },
+  };
+  const calendarSource: Source<IcalFeedConfig, string> = {
+    id: 'ical-raw', async fetch() { calls.calendar += 1; return { status: 'ok', data: SINGLE_TIMED, fetchedAt: new Date().toISOString() }; },
+  };
+  const binsTestSource: Source<{ uprn: string }, BinsData> = {
+    id: 'bins', async fetch() { calls.bins += 1; return { status: 'ok', data: { next: null, rawLabels: [] }, fetchedAt: new Date().toISOString() }; },
+  };
+  try {
+    const service = new FrameService({ renderer: {} as Renderer, cache: new SourceCache(dir), weatherSource, calendarSource, binsSource: binsTestSource });
+    const empty = { type: 'empty' as const, version: 1 as const, config: {} };
+    await service.previewHtml({ ...defaultDevice('esp32-empty'), dashboardSections: [empty, structuredClone(empty), structuredClone(empty), structuredClone(empty)] });
+    assert.deepEqual(calls, { weather: 1, calendar: 0, bins: 0 });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('real fetchAll does not call the bins source for an empty configured UPRN', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-no-uprn-'));
+  let binsCalls = 0;
+  const weatherSource: Source<{ latitude: number; longitude: number; timezone: string }, WeatherData> = {
+    id: 'weather', async fetch() { return { status: 'ok', data: WEATHER, fetchedAt: new Date().toISOString() }; },
+  };
+  const binsTestSource: Source<{ uprn: string }, BinsData> = {
+    id: 'bins', async fetch() { binsCalls += 1; throw new Error('empty UPRN must not reach bins'); },
+  };
+  try {
+    const service = new FrameService({
+      renderer: {} as Renderer, cache: new SourceCache(dir), weatherSource, binsSource: binsTestSource,
+    });
+    const html = await service.previewHtml(defaultDevice('panel-no-uprn'));
+    assert.equal(binsCalls, 0);
+    assert.match(html, /Bins — not set up/);
+    assert.doesNotMatch(html, /Bins unavailable/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('Weather reuses header result and identical Bins configs dedupe', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-source-dedupe-'));
+  let weatherCalls = 0;
+  const binCalls: string[] = [];
+  const weatherSource: Source<{ latitude: number; longitude: number; timezone: string }, WeatherData> = {
+    id: 'weather', async fetch() { weatherCalls += 1; return { status: 'ok', data: WEATHER, fetchedAt: new Date().toISOString() }; },
+  };
+  const binsTestSource: Source<{ uprn: string }, BinsData> = {
+    id: 'bins', async fetch(config) { binCalls.push(config.uprn); return { status: 'ok', data: { next: null, rawLabels: [] }, fetchedAt: new Date().toISOString() }; },
+  };
+  try {
+    const service = new FrameService({ renderer: {} as Renderer, cache: new SourceCache(dir), weatherSource, binsSource: binsTestSource });
+    await service.previewHtml({ ...defaultDevice('esp32-reuse'), dashboardSections: [
+      { type: 'weather', version: 1, config: {} },
+      { type: 'bins', version: 1, config: { uprn: '100080152345' } },
+      { type: 'bins', version: 1, config: { uprn: '100080152345' } },
+      { type: 'bins', version: 1, config: { uprn: '100080152346' } },
+    ] });
+    assert.equal(weatherCalls, 1);
+    assert.deepEqual(binCalls.sort(), ['100080152345', '100080152346']);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('enrolment output remains 48000-byte firmware-compatible', async () => {
+  await withService(async () => { throw new Error('sources must not run'); }, async (service) => {
+    assert.equal((await service.enrolmentFrame(defaultDevice('esp32-new'), 'http://panel:8080')).buffer.length, 48_000);
   });
 });

@@ -59,18 +59,30 @@ export interface BatteryInfo {
   percent: number | null;
 }
 
+export type DashboardSectionData =
+  | { type: 'calendar'; data: CalendarData | null; health: SourceHealth }
+  | { type: 'weather'; data: WeatherData | null; health: SourceHealth }
+  | { type: 'trains'; data: TrainData | null; health: SourceHealth | null }
+  | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
+  | { type: 'empty' };
+
+export type DashboardSectionDataTuple = [
+  DashboardSectionData,
+  DashboardSectionData,
+  DashboardSectionData,
+  DashboardSectionData,
+];
+
 export interface DashboardData {
   /** When this object was built. Excluded from the content hash. */
   generatedAt: string;
-  /** When the rendered content last actually changed. Shown in the footer. */
+  /** When the rendered content last actually changed. Not rendered. */
   contentChangedAt: string;
   timezone: string;
   today: TodayInfo;
-  calendar: CalendarData | null;
-  weather: WeatherData | null;
-  bins: BinsData | null;
-  train: TrainData | null;
-  sourceHealth: SourceHealth[];
+  headerWeather: WeatherData | null;
+  headerWeatherHealth: SourceHealth;
+  sections: DashboardSectionDataTuple;
   battery: BatteryInfo;
 }
 

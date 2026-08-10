@@ -9,7 +9,7 @@ import {
   DeviceStoreError,
   type DeviceStoreErrorCode,
 } from '../../src/devices/store.ts';
-import { currentDeviceRecordSchema } from '../../src/devices/schema.ts';
+import { currentDeviceRecordSchema, defaultDeviceV1 } from '../../src/devices/schema.ts';
 
 async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dev-'));
@@ -69,7 +69,7 @@ test('writes valid JSON atomically', async () => {
   await withStore(async (store, path) => {
     await store.getOrCreate('esp32-a1b2c3');
     const parsed = JSON.parse(await readFile(path, 'utf8'));
-    assert.equal(parsed.schemaVersion, 1);
+    assert.equal(parsed.schemaVersion, 2);
     assert.ok(Array.isArray(parsed.devices));
   });
 });
@@ -190,18 +190,26 @@ test('new devices carry the Spec 2a fields with safe defaults', async () => {
   });
 });
 
-test('new devices start with no route configured', async () => {
+test('new devices start with the migrated four-section dashboard', async () => {
   await withStore(async (store) => {
     const device = await store.getOrCreate('esp32-new');
-    assert.equal(device.trainOriginCrs, '');
-    assert.equal(device.trainDestinationCrs, '');
+    assert.deepEqual(device.dashboardSections.map((section) => section.type), ['calendar', 'weather', 'trains', 'bins']);
+    assert.deepEqual(device.dashboardSections[2], { type: 'trains', version: 1, config: { originCrs: '', destinationCrs: '' } });
+    assert.deepEqual(device.dashboardSections[3], { type: 'bins', version: 1, config: { uprn: '' } });
   });
 });
 
-test('new devices start with no UPRN configured', async () => {
-  await withStore(async (store) => {
-    assert.equal((await store.getOrCreate('esp32-new')).binsUprn, '');
-  });
+test('current V2 defaults are explicit and return independent section configs', () => {
+  const first = defaultDevice('default-a');
+  const second = defaultDevice('default-b');
+  assert.equal('calendarUrls' in first, false, 'runtime defaults are V2-shaped, not historical V1');
+  assert.deepEqual(first.dashboardSections.map((section) => section.type), ['calendar', 'weather', 'trains', 'bins']);
+  if (first.dashboardSections[0].type === 'calendar') {
+    first.dashboardSections[0].config.calendarUrls.push('https://example.com/a.ics');
+  }
+  assert.deepEqual(second.dashboardSections[0], {
+    type: 'calendar', version: 1, config: { calendarUrls: [] },
+  }, 'one device cannot mutate the shared default layout for another');
 });
 
 test('a minimal legacy config migrates in memory to a complete current record', async () => {
@@ -226,10 +234,10 @@ test('a minimal legacy config migrates in memory to a complete current record', 
   });
 });
 
-test('a complete V1 store round-trips unchanged', async () => {
+test('a complete V1 store migrates in memory without rewriting the file', async () => {
   await withStore(async (_store, path) => {
     const device = {
-      ...defaultDevice('esp32-current'),
+      ...defaultDeviceV1('esp32-current'),
       name: 'Kitchen panel',
       claimed: true,
       latitude: 51.5074,
@@ -240,7 +248,9 @@ test('a complete V1 store round-trips unchanged', async () => {
     await writeFile(path, original, 'utf8');
 
     const reopened = new DeviceStore(path);
-    assert.deepEqual(await reopened.list(), [device]);
+    const [migrated] = await reopened.list();
+    assert.equal(migrated?.name, device.name);
+    assert.deepEqual(migrated?.dashboardSections[0], { type: 'calendar', version: 1, config: { calendarUrls: device.calendarUrls } });
     assert.equal(await readFile(path, 'utf8'), original, 'a read does not rewrite current config');
   });
 });
@@ -279,7 +289,7 @@ test('legacy migration preserves explicit user configuration and defaults only m
     assert.equal(device?.claimed, true);
     assert.equal(device?.latitude, 40.7128);
     assert.equal(device?.longitude, -74.006);
-    assert.deepEqual(device?.calendarUrls, ['https://example.com/home.ics']);
+    assert.deepEqual(device?.dashboardSections[0], { type: 'calendar', version: 1, config: { calendarUrls: ['https://example.com/home.ics'] } });
     assert.equal(device?.activeIntervalSeconds, 900);
     assert.equal(await readFile(path, 'utf8'), original, 'migration during reads is in memory');
 
@@ -288,7 +298,7 @@ test('legacy migration preserves explicit user configuration and defaults only m
       schemaVersion: number;
       devices: unknown[];
     };
-    assert.equal(persisted.schemaVersion, 1);
+    assert.equal(persisted.schemaVersion, 2);
     assert.equal(currentDeviceRecordSchema.safeParse(persisted.devices[0]).success, true);
   });
 });
@@ -324,7 +334,7 @@ test('duplicate device ids fail closed', async () => {
 test('invalid persisted IANA timezone fails closed', async () => {
   await withStore(async (_store, path) => {
     const original = JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       devices: [{ ...defaultDevice('esp32-timezone'), timezone: 'Not/A_Timezone' }],
     });
     await writeFile(path, original, 'utf8');
@@ -336,9 +346,27 @@ test('invalid persisted IANA timezone fails closed', async () => {
   });
 });
 
+for (const [description, sections] of [
+  ['fewer than four sections', defaultDevice('esp32-layout').dashboardSections.slice(0, 3)],
+  ['more than four sections', [...defaultDevice('esp32-layout').dashboardSections, { type: 'empty', version: 1, config: {} }]],
+  ['an unknown widget type', [{ type: 'future-widget', version: 1, config: {} }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
+  ['an unsupported widget version', [{ type: 'calendar', version: 2, config: { calendarUrls: [] } }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
+  ['a malformed strict widget config', [{ type: 'calendar', version: 1, config: { calendarUrls: [], extra: true } }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
+] as const) {
+  test(`${description} fails closed and preserves the original bytes`, async () => {
+    await withStore(async (_store, path) => {
+      const record = { ...defaultDevice('esp32-layout'), dashboardSections: sections };
+      const original = JSON.stringify({ schemaVersion: 2, devices: [record] });
+      await writeFile(path, original, 'utf8');
+      await expectStoreError(() => new DeviceStore(path).list(), 'config_corrupt');
+      assert.equal(await readFile(path, 'utf8'), original);
+    });
+  });
+}
+
 test('a future schema version is unsupported and remains byte-for-byte unchanged', async () => {
   await withStore(async (_store, path) => {
-    const original = '{"schemaVersion":2,"devices":[],"futureFeature":true}\n';
+    const original = '{"schemaVersion":3,"devices":[],"futureFeature":true}\n';
     await writeFile(path, original, 'utf8');
 
     const reopened = new DeviceStore(path);

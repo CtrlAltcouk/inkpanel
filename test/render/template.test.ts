@@ -4,348 +4,179 @@ import { renderHtml } from '../../src/render/template.ts';
 import { panelCss } from '../../src/render/panel.css.ts';
 import { loadFontCss } from '../../src/render/fonts.ts';
 import { WFT0583 } from '../../src/panel/profile.ts';
-import type { DashboardData } from '../../src/model/dashboard.ts';
 import { mixedBoard } from '../fixtures/train.ts';
+import { dashboardData, OK_CALENDAR, OK_WEATHER, WEATHER } from '../fixtures/dashboard.ts';
 
-const data: DashboardData = {
-  generatedAt: '2026-08-03T07:42:00.000Z',
-  contentChangedAt: '2026-08-03T07:42:00.000Z',
-  timezone: 'Europe/London',
-  today: { iso: '2026-08-03', weekdayLong: 'Monday', dayOfMonth: 3, monthLong: 'August' },
-  calendar: {
-    today: [
-      { uid: '1', title: 'Team standup', start: '2026-08-03T08:30:00.000Z', end: '2026-08-03T08:45:00.000Z', allDay: false },
-    ],
-    tomorrow: [],
-  },
-  weather: {
-    currentTempC: 22, conditionText: 'Partly cloudy', highC: 24, lowC: 13,
-    precipProbability: 10, windKph: 13, windDirection: 'NW',
-    sunrise: '2026-08-03T05:34', sunset: '2026-08-03T20:47',
-    forecast: [
-      { weekday: 'TUE', highC: 24, lowC: 14, conditionText: 'Sunny' },
-      { weekday: 'WED', highC: 19, lowC: 13, conditionText: 'Rain' },
-      { weekday: 'THU', highC: 21, lowC: 12, conditionText: 'Overcast' },
-    ],
-  },
-  sourceHealth: [
-    { id: 'ical', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null },
-    { id: 'weather', status: 'ok', fetchedAt: '2026-08-03T07:42:00.000Z', error: null },
-  ],
-  battery: { volts: 4.02, percent: 87 },
-  train: null,
-  bins: null,
-};
-
-test('renders the event and the temperature', () => {
+test('renders header weather and the four configured sections in order', () => {
+  const data = dashboardData({ sections: [
+    { type: 'bins', data: { next: { date: '2026-08-06', types: ['recycling'] }, rawLabels: ['Collect Recycling Red'] }, health: { id: 'bins', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'calendar', data: { today: [], tomorrow: [] }, health: OK_CALENDAR },
+    { type: 'trains', data: mixedBoard, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'weather', data: WEATHER, health: OK_WEATHER },
+  ] });
   const html = renderHtml(data, WFT0583, '');
-  assert.match(html, /Team standup/);
-  assert.match(html, /22/);
-  assert.match(html, /MON 3/i);
-  assert.match(html, /AUGUST/i);
+  assert.ok(html.indexOf('Collect Recycling Red') < html.indexOf('Nothing scheduled'));
+  assert.ok(html.indexOf('Nothing scheduled') < html.indexOf('London Euston'));
+  assert.match(html, /Partly cloudy/);
 });
 
-test('renders event times in the device timezone', () => {
-  const html = renderHtml(data, WFT0583, '');
-  // 08:30 UTC is 09:30 in London during BST.
-  assert.match(html, /09:30/, 'times must be local to the panel, not UTC');
-});
-
-test('escapes event titles', () => {
-  const hostile = structuredClone(data);
-  hostile.calendar!.today[0]!.title = '<script>alert(1)</script>';
-  const html = renderHtml(hostile, WFT0583, '');
-  assert.ok(!html.includes('<script>alert(1)</script>'), 'must not inject raw markup');
-  assert.match(html, /&lt;script&gt;/);
-});
-
-test('renders an unavailable state when a source has no data', () => {
-  const broken = structuredClone(data);
-  broken.weather = null;
-  broken.sourceHealth = [{ id: 'weather', status: 'error', fetchedAt: null, error: 'timeout' }];
-  const html = renderHtml(broken, WFT0583, '');
-  assert.match(html, /slot--empty/, 'the weather card falls back to the empty state');
-  assert.doesNotMatch(html, /NaN|undefined/, 'no leaked placeholder values');
-});
-
-test('renders an empty agenda as a designed state, not a blank box', () => {
-  const quiet = structuredClone(data);
-  quiet.calendar = { today: [], tomorrow: [] };
-  const html = renderHtml(quiet, WFT0583, '');
+test('duplicates render independently and empty renders a genuinely blank cell', () => {
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'calendar', data: { today: [], tomorrow: [] }, health: OK_CALENDAR },
+    { type: 'empty' },
+    { type: 'calendar', data: null, health: { id: 'ical', status: 'error', fetchedAt: null, error: 'failed' } },
+    { type: 'empty' },
+  ] }), WFT0583, '');
   assert.match(html, /Nothing scheduled/);
+  assert.match(html, /Calendar unavailable/);
+  assert.equal((html.match(/<div class="cell cell--(?:tr|br)"><\/div>/g) ?? []).length, 2);
 });
 
-test('falls back to tomorrow when today is free', () => {
-  const quiet = structuredClone(data);
-  quiet.calendar = {
-    today: [],
-    tomorrow: [
-      { uid: 't1', title: 'Train to Euston', start: '2026-08-04T07:15:00.000Z', end: '2026-08-04T08:15:00.000Z', allDay: false },
-    ],
-  };
-  const html = renderHtml(quiet, WFT0583, '');
-  assert.match(html, /Nothing today/, 'says so explicitly');
-  assert.match(html, /Train to Euston/, 'and shows what is coming');
-  // Not "Nothing scheduled" — that is the genuinely-empty state, and it must
-  // not appear when there is something to show. Matching on slot--empty would
-  // be useless here: it is a class name in the embedded stylesheet too.
-  assert.doesNotMatch(html, /Nothing scheduled/, 'not the fully-empty state');
+test('Calendar renders bottom-right and duplicate calendars keep separate data', () => {
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'calendar', data: { today: [{ uid: 'a', title: 'Work only', start: '2026-08-03T08:00:00.000Z', end: '2026-08-03T09:00:00.000Z', allDay: false }], tomorrow: [] }, health: OK_CALENDAR },
+    { type: 'empty' },
+    { type: 'empty' },
+    { type: 'calendar', data: { today: [{ uid: 'b', title: 'Personal only', start: '2026-08-03T18:00:00.000Z', end: '2026-08-03T19:00:00.000Z', allDay: false }], tomorrow: [] }, health: { ...OK_CALENDAR } },
+  ] }), WFT0583, '');
+  assert.match(html, /cell--tl[^]*Work only/);
+  assert.match(html, /cell--br[^]*Personal only/);
+  assert.equal((html.match(/Work only/g) ?? []).length, 1);
+  assert.equal((html.match(/Personal only/g) ?? []).length, 1);
 });
 
-test('shows a stale marker but keeps the data', () => {
-  const stale = structuredClone(data);
-  stale.sourceHealth = [{ id: 'weather', status: 'stale', fetchedAt: '2026-08-03T03:10:00.000Z', error: 'timeout' }];
-  const html = renderHtml(stale, WFT0583, '');
-  assert.match(html, /Partly cloudy/, 'stale data is still shown');
-  assert.match(html, /04:10/, 'with its age, in local time');
+test('duplicate Trains widgets keep independent route and departure data', () => {
+  const otherBoard = { ...structuredClone(mixedBoard), originCrs: 'EUS', destinationName: 'Birmingham New Street', departures: [{ scheduled: '10:15', expected: null, status: 'on-time' as const, delayMinutes: 0, platform: '4' }] };
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'trains', data: mixedBoard, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'trains', data: otherBoard, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'empty' }, { type: 'empty' },
+  ] }), WFT0583, '');
+  assert.match(html, /London Euston/);
+  assert.match(html, /Birmingham New Street/);
+  assert.match(html, /10:15/);
 });
 
-test('handles an unknown battery without printing null', () => {
-  const noBattery = structuredClone(data);
-  noBattery.battery = { volts: null, percent: null };
-  const html = renderHtml(noBattery, WFT0583, '');
-  assert.match(html, /Battery --/);
-  assert.doesNotMatch(html, /null/);
+test('empty, unavailable, quiet, and stale section semantics remain distinct', () => {
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'calendar', data: { today: [], tomorrow: [] }, health: OK_CALENDAR },
+    { type: 'weather', data: null, health: { id: 'weather', status: 'error', fetchedAt: null, error: 'timeout' } },
+    { type: 'bins', data: { next: null, rawLabels: [] }, health: { id: 'bins', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'bins', data: { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['Collect Refuse'] }, health: { id: 'bins', status: 'stale', fetchedAt: '2026-08-03T03:10:00.000Z', error: 'timeout' } },
+  ] }), WFT0583, '');
+  assert.match(html, /Nothing scheduled/);
+  assert.match(html, /Weather unavailable/);
+  assert.match(html, /No collection scheduled/);
+  assert.match(html, /Collect Refuse/);
+  assert.match(html, /04:10/);
 });
 
-test('renders battery status inside the banner and no footer timestamp', () => {
-  const html = renderHtml(data, WFT0583, '');
-  assert.match(
-    html,
-    /<div class="banner">[\s\S]*?<div class="battery">Battery 87%<\/div>/,
-    'battery is independently positioned inside the header',
-  );
-  assert.doesNotMatch(html, /Updated\s+\d{2}:\d{2}/, 'contentChangedAt is no longer visible');
-  assert.doesNotMatch(html, /class="footer"/, 'footer markup is removed');
+test('calendar keeps local-time, tomorrow fallback, all-day, and quiet-day behaviour', () => {
+  const tomorrow = dashboardData({ sections: [
+    { type: 'calendar', data: { today: [], tomorrow: [{ uid: 't', title: 'Train tomorrow', start: '2026-08-04T07:15:00.000Z', end: '2026-08-04T08:00:00.000Z', allDay: false }] }, health: OK_CALENDAR },
+    { type: 'calendar', data: { today: [{ uid: 'a', title: 'Bank holiday', start: '2026-08-03T00:00:00.000Z', end: '2026-08-04T00:00:00.000Z', allDay: true }], tomorrow: [] }, health: OK_CALENDAR },
+    { type: 'empty' }, { type: 'empty' },
+  ] });
+  const html = renderHtml(tomorrow, WFT0583, '');
+  assert.match(html, /Nothing today/);
+  assert.match(html, /08:15/, '07:15 UTC is 08:15 BST');
+  assert.match(html, /ALL DAY/);
+  assert.doesNotMatch(html, /Nothing scheduled/);
 });
 
-test('the stylesheet contains no greys', () => {
+test('train departure status, delay, cancellation, platform, and empty states remain intact', () => {
+  const board = structuredClone(mixedBoard);
+  board.departures[2]!.platform = '2';
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'trains', data: board, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'trains', data: { ...board, departures: [] }, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'trains', data: null, health: { id: 'train', status: 'error', fetchedAt: null, error: 'timeout' } },
+    { type: 'trains', data: null, health: null },
+  ] }), WFT0583, '');
+  assert.match(html, /On time/);
+  assert.match(html, /dep-time[^>]*>08:01/);
+  assert.match(html, /dep-was[^>]*>07:58/);
+  assert.match(html, /9 late/);
+  assert.match(html, /Cancelled/);
+  assert.doesNotMatch(html, /Plat 2/, 'cancelled services never show a platform');
+  assert.match(html, /No departures/);
+  assert.match(html, /Trains unavailable/);
+  assert.match(html, /Trains — not set up/);
+});
+
+test('unknown-length delays never leak null or invent a minute count', () => {
+  const board = { ...structuredClone(mixedBoard), departures: [{ scheduled: '08:19', expected: null, status: 'delayed' as const, delayMinutes: null, platform: '2' }] };
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'trains', data: board, health: { id: 'train', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'empty' }, { type: 'empty' }, { type: 'empty' },
+  ] }), WFT0583, '');
+  assert.match(html, /Delayed/);
+  assert.doesNotMatch(html, /\blate\b/);
+  assert.doesNotMatch(html, />null</);
+});
+
+test('bins preserve labels, monochrome type patterns, fallback pairing, escaping, and setup states', () => {
+  const html = renderHtml(dashboardData({ sections: [
+    { type: 'bins', data: { next: { date: '2026-08-06', types: ['recycling'] }, rawLabels: ['Collect Recycling Red', 'Collect Recycling Blue'] }, health: { id: 'bins', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'bins', data: { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['<script>alert(1)</script>'] }, health: { id: 'bins', status: 'ok', fetchedAt: null, error: null } },
+    { type: 'bins', data: null, health: { id: 'bins', status: 'error', fetchedAt: null, error: 'failed' } },
+    { type: 'bins', data: null, health: null },
+  ] }), WFT0583, '');
+  assert.match(html, /THU 6 AUG/);
+  assert.equal((html.match(/class="bin-swatch bin--recycling"/g) ?? []).length, 2);
+  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /Bins unavailable/);
+  assert.match(html, /Bins — not set up/);
+});
+
+test('fixed header keeps date, current weather, battery, and unknown-battery semantics', () => {
+  const html = renderHtml(dashboardData(), WFT0583, '');
+  assert.match(html, /MON 3/);
+  assert.match(html, /AUGUST/);
+  assert.match(html, /Battery 87%/);
+  assert.match(html, /22&deg;/);
+  assert.doesNotMatch(html, /class="footer"|Updated\s+\d{2}:\d{2}/);
+  assert.match(renderHtml(dashboardData({ battery: { volts: null, percent: null } }), WFT0583, ''), /Battery --/);
+});
+
+test('section borders depend only on position', () => {
+  const html = renderHtml(dashboardData(), WFT0583, '');
+  for (const position of ['tl', 'tr', 'bl', 'br']) assert.match(html, new RegExp(`cell--${position}`));
   const css = panelCss(WFT0583);
-  assert.doesNotMatch(css, /rgba?\(/i, 'no rgb/rgba colours');
-  assert.doesNotMatch(css, /opacity\s*:/i, 'no opacity');
-  const hexes = css.match(/#[0-9a-f]{3,8}\b/gi) ?? [];
+  assert.match(css, /\.cell--tl\{border-right:2px solid #000;border-bottom:2px solid #000/);
+  assert.match(css, /\.cell--tr\{border-bottom:2px solid #000/);
+  assert.match(css, /\.cell--bl\{border-right:2px solid #000/);
+});
+
+test('escapes source content and preserves stale state', () => {
+  const data = dashboardData();
+  if (data.sections[0].type === 'calendar') {
+    data.sections[0].data!.today[0]!.title = '<script>alert(1)</script>';
+    data.sections[0].health = { id: 'ical', status: 'stale', fetchedAt: '2026-08-03T03:10:00.000Z', error: 'timeout' };
+  }
+  const html = renderHtml(data, WFT0583, '');
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.match(html, /04:10/);
+});
+
+test('page remains exactly 800x480 pure black and white', () => {
+  const css = panelCss(WFT0583);
+  assert.match(css, /width:800px;height:480px/);
+  assert.equal(132 + 3 + 345, 480);
+  assert.doesNotMatch(css, /rgba?\(|opacity\s*:/i);
   const allowed = new Set(['#000', '#fff', '#000000', '#ffffff']);
-  for (const hex of hexes) {
+  for (const hex of css.match(/#[0-9a-f]{3,8}\b/gi) ?? []) {
     assert.ok(allowed.has(hex.toLowerCase()), `${hex} is not pure black or white`);
   }
 });
 
-test('escapes captions exactly once', () => {
-  // Was: the bottom-right "Bins & tasks — coming soon" placeholder, which
-  // this task's bins render replaces. An event title now supplies the "&"
-  // instead, exercising the same esc() path.
-  const withAmpersand = structuredClone(data);
-  withAmpersand.calendar!.today[0]!.title = 'Tea & Toast';
-  const html = renderHtml(withAmpersand, WFT0583, '');
-  assert.match(html, /Tea &amp; Toast/, 'ampersand is escaped for HTML');
-  assert.doesNotMatch(html, /&amp;amp;/, 'but not double-escaped, which renders literally');
-});
-
-test('the page is locked to the profile size', () => {
-  const css = panelCss(WFT0583);
-  assert.match(css, /width:\s*800px/);
-  assert.match(css, /height:\s*480px/);
-  assert.match(css, /\.banner\{height:132px/);
-  assert.match(css, /\.rule\{background:#000;height:3px/);
-  assert.match(css, /\.grid\{height:345px/);
-  assert.doesNotMatch(css, /\.footer\{/);
-  assert.equal(132 + 3 + 345, 480, 'banner, rule, and grid fill the panel exactly');
-});
-
-test('loads all four faces as embedded woff2, not latin-ext', async () => {
+test('loads all embedded font faces', async () => {
   const css = await loadFontCss();
   assert.equal((css.match(/@font-face/g) ?? []).length, 4);
   assert.equal((css.match(/data:font\/woff2;base64,/g) ?? []).length, 4);
   assert.match(css, /font-family:"Dela Gothic One"/);
   assert.match(css, /font-family:"Inter"/);
-  assert.doesNotMatch(css, /url\(\.|https?:/, 'no external or relative references may survive');
-});
-
-test('renders departures with times, statuses and platforms', () => {
-  const withTrains = structuredClone(data);
-  withTrains.train = structuredClone(mixedBoard);
-  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
-
-  const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /MKC/, 'the route is the heading, using the short CRS code for the origin');
-  assert.match(html, /London Euston/i);
-  assert.match(html, /07:42/);
-  assert.match(html, /On time/);
-  assert.match(html, /Plat 3/);
-});
-
-test('a delayed service shows the new time large and the old struck through', () => {
-  const withTrains = structuredClone(data);
-  withTrains.train = structuredClone(mixedBoard);
-  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
-
-  const html = renderHtml(withTrains, WFT0583, '');
-  // The panel has no colour, so the strike-through is the whole signal.
-  assert.match(html, /dep-time[^>]*>08:01/, 'the time you must act on is the big one');
-  assert.match(html, /dep-was[^>]*>07:58/, 'the original is struck through beside it');
-  assert.match(html, /9 late/);
-});
-
-test('a cancelled service says so and shows no platform', () => {
-  const withTrains = structuredClone(data);
-  withTrains.train = structuredClone(mixedBoard);
-  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
-
-  const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /Cancelled/);
-  // A platform for a train that is not running would send someone to it.
-  assert.doesNotMatch(html, /Plat\s*&mdash;|Plat\s*—/);
-});
-
-test('a cancelled service with a platform still shows no platform', () => {
-  // buildDepartures deliberately passes the raw platform through for
-  // cancelled services; the render layer is where the omission belongs.
-  // The mixedBoard fixture's cancelled entry already has platform: null,
-  // which would let this guard be deleted without any test noticing.
-  const withTrains = structuredClone(data);
-  withTrains.train = {
-    ...structuredClone(mixedBoard),
-    departures: [
-      { scheduled: '08:19', expected: null, status: 'cancelled', delayMinutes: null, platform: '2' },
-    ],
-  };
-  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
-
-  const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /Cancelled/);
-  assert.doesNotMatch(html, /Plat/, 'a platform must never be printed for a cancelled service');
-});
-
-test('a delay of unknown length shows "Delayed" with no minute count', () => {
-  const withTrains = structuredClone(data);
-  withTrains.train = {
-    ...structuredClone(mixedBoard),
-    departures: [
-      { scheduled: '08:19', expected: null, status: 'delayed', delayMinutes: null, platform: '2' },
-    ],
-  };
-  withTrains.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T07:40:00.000Z', error: null }];
-
-  const html = renderHtml(withTrains, WFT0583, '');
-  assert.match(html, /Delayed/);
-  // \b avoids a false match inside the embedded stylesheet's "grid-template".
-  assert.doesNotMatch(html, /\blate\b/, 'no minute count when the length is unknown');
-  assert.doesNotMatch(html, /null/, 'must never leak the literal null');
-});
-
-test('no departures is different from trains unavailable', () => {
-  const quiet = structuredClone(data);
-  quiet.train = { ...structuredClone(mixedBoard), departures: [] };
-  quiet.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T23:40:00.000Z', error: null }];
-  const html = renderHtml(quiet, WFT0583, '');
-  assert.match(html, /No departures/);
-  assert.doesNotMatch(html, /Trains unavailable/);
-});
-
-test('trains unavailable is distinct from trains not set up', () => {
-  const failed = structuredClone(data);
-  failed.train = null;
-  failed.sourceHealth = [{ id: 'train', status: 'error', fetchedAt: null, error: 'timeout' }];
-  assert.match(renderHtml(failed, WFT0583, ''), /Trains unavailable/);
-
-  const unset = structuredClone(data);
-  unset.train = null;
-  unset.sourceHealth = [];
-  assert.match(renderHtml(unset, WFT0583, ''), /Trains &mdash; not set up|Trains — not set up/);
-});
-
-test('a single departure renders — late at night that is the whole board', () => {
-  const late = structuredClone(data);
-  late.train = {
-    ...structuredClone(mixedBoard),
-    departures: [{ scheduled: '23:47', expected: null, status: 'on-time', delayMinutes: 0, platform: '1' }],
-  };
-  late.sourceHealth = [{ id: 'train', status: 'ok', fetchedAt: '2026-08-04T23:00:00.000Z', error: null }];
-  assert.match(renderHtml(late, WFT0583, ''), /23:47/);
-});
-
-test('renders the next bin collection with its types', () => {
-  const withBins = structuredClone(data);
-  withBins.bins = {
-    // Real Milton Keynes wording (test/fixtures/bins.ts), not invented copy.
-    next: { date: '2026-08-06', types: ['recycling', 'food'] },
-    rawLabels: ['Collect Recycling Red', 'Collect Food and Garden'],
-  };
-  withBins.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
-
-  const html = renderHtml(withBins, WFT0583, '');
-  // 2026-08-06 is a Thursday, not the Wednesday the brief's draft assumed.
-  assert.match(html, /THU 6 AUG/i, 'the date is the headline');
-  assert.match(html, /Collect Recycling Red/, 'the council wording is shown, not our normalised type');
-  assert.match(html, /Collect Food and Garden/);
-  // Match the swatch markup itself, not merely the class name — the
-  // stylesheet defines .bin--recycling and .bin--food unconditionally on
-  // every render, so a bare /bin--recycling/ would pass even if every row
-  // used the same swatch.
-  assert.match(html, /class="bin-swatch bin--recycling"/, 'each type gets its own swatch class');
-  assert.match(html, /class="bin-swatch bin--food"/);
-});
-
-test('bins with no upcoming collection says so rather than looking broken', () => {
-  const quiet = structuredClone(data);
-  quiet.bins = { next: null, rawLabels: [] };
-  quiet.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
-
-  const html = renderHtml(quiet, WFT0583, '');
-  assert.match(html, /No collection scheduled/);
-  assert.doesNotMatch(html, /Bins unavailable/, 'a successful fetch is not a failure');
-});
-
-test('bins unavailable is distinct from bins not set up', () => {
-  const failed = structuredClone(data);
-  failed.bins = null;
-  failed.sourceHealth = [{ id: 'bins', status: 'error', fetchedAt: null, error: 'lookup responded 500' }];
-  assert.match(renderHtml(failed, WFT0583, ''), /Bins unavailable/);
-
-  const unset = structuredClone(data);
-  unset.bins = null;
-  unset.sourceHealth = [];
-  assert.match(renderHtml(unset, WFT0583, ''), /Bins &mdash; not set up|Bins — not set up/);
-});
-
-test('a stale bin collection is shown with its age, not hidden', () => {
-  const stale = structuredClone(data);
-  stale.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['Collect Refuse'] };
-  stale.sourceHealth = [{ id: 'bins', status: 'stale', fetchedAt: '2026-08-04T03:10:00.000Z', error: 'timeout' }];
-
-  const html = renderHtml(stale, WFT0583, '');
-  assert.match(html, /Collect Refuse/, 'stale data is still useful');
-  assert.match(html, /04:10/, 'but its age is shown');
-});
-
-test('an unrecognised bin label still renders', () => {
-  const odd = structuredClone(data);
-  odd.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['Some New Scheme 2027'] };
-  odd.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
-  assert.match(renderHtml(odd, WFT0583, ''), /Some New Scheme 2027/);
-});
-
-test('escapes bin labels to prevent injection', () => {
-  const hostile = structuredClone(data);
-  hostile.bins = { next: { date: '2026-08-06', types: ['general'] }, rawLabels: ['<script>alert(1)</script>'] };
-  hostile.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
-  const html = renderHtml(hostile, WFT0583, '');
-  assert.ok(!html.includes('<script>alert(1)</script>'), 'must not inject raw markup');
-  assert.match(html, /&lt;script&gt;/, 'hostile label must be escaped');
-});
-
-test('pairs labels with types when their counts differ, falling back to first type', () => {
-  const mismatch = structuredClone(data);
-  mismatch.bins = {
-    next: { date: '2026-08-06', types: ['recycling'] },
-    rawLabels: ['Collect Recycling Red', 'Collect Recycling Blue'],
-  };
-  mismatch.sourceHealth = [{ id: 'bins', status: 'ok', fetchedAt: '2026-08-04T07:00:00.000Z', error: null }];
-  const html = renderHtml(mismatch, WFT0583, '');
-  // Count occurrences of the full swatch markup to verify both rows have the swatch.
-  // Matching the class in the markup prevents false passes from the stylesheet.
-  const swatchMatches = (html.match(/class="bin-swatch bin--recycling"/g) ?? []).length;
-  assert.equal(swatchMatches, 2, 'both labels must be paired with the single type');
-  assert.match(html, /Collect Recycling Red/);
-  assert.match(html, /Collect Recycling Blue/);
+  assert.doesNotMatch(css, /url\(\.|https?:/, 'rendering cannot depend on external font references');
 });

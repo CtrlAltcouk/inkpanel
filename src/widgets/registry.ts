@@ -1,0 +1,115 @@
+import { z } from 'zod';
+
+/** Persisted calendar URLs stay broad so existing private feeds remain readable. */
+export const calendarWidgetConfigV1Schema = z.strictObject({
+  calendarUrls: z.array(z.string().url()).max(10),
+});
+
+export const weatherWidgetConfigV1Schema = z.strictObject({});
+
+const crsSchema = z.string().regex(/^(?:|[A-Z]{3})$/, 'CRS must be empty or three uppercase letters');
+
+export const trainsWidgetConfigV1Schema = z.strictObject({
+  originCrs: crsSchema,
+  destinationCrs: crsSchema,
+});
+
+export const binsWidgetConfigV1Schema = z.strictObject({
+  uprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits'),
+});
+
+export const emptyWidgetConfigV1Schema = z.strictObject({});
+
+export const calendarWidgetV1Schema = z.strictObject({
+  type: z.literal('calendar'),
+  version: z.literal(1),
+  config: calendarWidgetConfigV1Schema,
+});
+export const weatherWidgetV1Schema = z.strictObject({
+  type: z.literal('weather'),
+  version: z.literal(1),
+  config: weatherWidgetConfigV1Schema,
+});
+export const trainsWidgetV1Schema = z.strictObject({
+  type: z.literal('trains'),
+  version: z.literal(1),
+  config: trainsWidgetConfigV1Schema,
+});
+export const binsWidgetV1Schema = z.strictObject({
+  type: z.literal('bins'),
+  version: z.literal(1),
+  config: binsWidgetConfigV1Schema,
+});
+export const emptyWidgetV1Schema = z.strictObject({
+  type: z.literal('empty'),
+  version: z.literal(1),
+  config: emptyWidgetConfigV1Schema,
+});
+
+export type DashboardWidget =
+  | z.infer<typeof calendarWidgetV1Schema>
+  | z.infer<typeof weatherWidgetV1Schema>
+  | z.infer<typeof trainsWidgetV1Schema>
+  | z.infer<typeof binsWidgetV1Schema>
+  | z.infer<typeof emptyWidgetV1Schema>;
+
+/** Current runtime registry, explicitly keyed by widget type and version. */
+export const widgetRegistry = {
+  calendar: { 1: calendarWidgetV1Schema },
+  weather: { 1: weatherWidgetV1Schema },
+  trains: { 1: trainsWidgetV1Schema },
+  bins: { 1: binsWidgetV1Schema },
+  empty: { 1: emptyWidgetV1Schema },
+} as const;
+
+const widgetEnvelopeSchema = z.strictObject({
+  type: z.string().min(1),
+  version: z.number().int().positive(),
+  config: z.unknown(),
+});
+
+/**
+ * Parse through the registry so a future calendar v2 is just another entry
+ * under calendar, without changing DeviceStore V2.
+ */
+export const dashboardWidgetSchema: z.ZodType<DashboardWidget> = widgetEnvelopeSchema.transform(
+  (widget, ctx) => {
+    const versions = widgetRegistry[widget.type as keyof typeof widgetRegistry];
+    if (!versions) {
+      ctx.addIssue({ code: 'custom', path: ['type'], message: `unknown widget type: ${widget.type}` });
+      return z.NEVER;
+    }
+    const parser = (versions as unknown as Record<number, z.ZodType<DashboardWidget>>)[widget.version];
+    if (!parser) {
+      ctx.addIssue({
+        code: 'custom', path: ['version'],
+        message: `unsupported ${widget.type} widget version: ${widget.version}`,
+      });
+      return z.NEVER;
+    }
+    const parsed = parser.safeParse(widget);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+      }
+      return z.NEVER;
+    }
+    return parsed.data;
+  },
+);
+
+export const dashboardSectionsSchema = z.tuple([
+  dashboardWidgetSchema,
+  dashboardWidgetSchema,
+  dashboardWidgetSchema,
+  dashboardWidgetSchema,
+]);
+
+export type DashboardSections = z.infer<typeof dashboardSectionsSchema>;
+
+export const DEFAULT_DASHBOARD_SECTIONS: DashboardSections = [
+  { type: 'calendar', version: 1, config: { calendarUrls: [] } },
+  { type: 'weather', version: 1, config: {} },
+  { type: 'trains', version: 1, config: { originCrs: '', destinationCrs: '' } },
+  { type: 'bins', version: 1, config: { uprn: '' } },
+];

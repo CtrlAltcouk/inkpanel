@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import type { CalendarData, DashboardData, SourceHealth, WeatherData } from '../model/dashboard.ts';
+import type {
+  DashboardData,
+  DashboardSectionData,
+  DashboardSectionDataTuple,
+  SourceHealth,
+  WeatherData,
+} from '../model/dashboard.ts';
 import { contentHash } from '../model/hash.ts';
 import { PROFILES, WFT0583, type PanelProfile } from '../panel/profile.ts';
 import { quantisePng } from '../panel/quantise.ts';
@@ -9,8 +15,8 @@ import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
-import type { BinsData } from '../sources/bins.ts';
 import { runSource } from '../sources/runner.ts';
+import type { RunOutcome } from '../sources/runner.ts';
 import type { SourceCache } from '../sources/cache.ts';
 import type { Source } from '../sources/types.ts';
 import type { Renderer } from './browser.ts';
@@ -21,10 +27,8 @@ import { loadFontCss } from './fonts.ts';
 const SOURCE_TIMEOUT_MS = 8000;
 
 export interface SourceBundle {
-  calendar: CalendarData | null;
-  weather: WeatherData | null;
-  bins: BinsData | null;
-  sourceHealth: SourceHealth[];
+  headerWeather: RunOutcome<WeatherData>;
+  sections: DashboardSectionDataTuple;
 }
 
 export interface FrameDeps {
@@ -34,6 +38,8 @@ export interface FrameDeps {
   fetchData?: (device: DeviceRecord) => Promise<SourceBundle>;
   /** Injected once at startup so calendar network policy is explicit/testable. */
   calendarSource?: Source<IcalFeedConfig, string>;
+  weatherSource?: typeof openMeteoSource;
+  binsSource?: typeof binsSource;
 }
 
 export interface Frame {
@@ -54,7 +60,13 @@ interface Memo {
   hash: string;
   frame: Frame;
   contentChangedAt: string;
-  health: SourceHealth[];
+  health: DiagnosticHealth[];
+}
+
+interface DiagnosticHealth {
+  sourceId: string;
+  status: SourceHealth['status'];
+  error: string | null;
 }
 
 export class FrameService {
@@ -82,32 +94,56 @@ export class FrameService {
     if (this.deps.fetchData) return this.deps.fetchData(device);
 
     const runOptions = { deviceId: device.id, timeoutMs: SOURCE_TIMEOUT_MS };
-    const [calendar, weather, bins] = await Promise.all([
-      runCalendars(
-        device.calendarUrls,
-        device.timezone,
-        this.deps.cache,
-        { ...runOptions, source: this.deps.calendarSource },
-      ),
-      runSource(
-        openMeteoSource,
-        { latitude: device.latitude, longitude: device.longitude, timezone: device.timezone },
-        this.deps.cache,
-        runOptions,
-      ),
-      device.binsUprn
-        ? runSource(binsSource, { uprn: device.binsUprn }, this.deps.cache, runOptions)
-        : Promise.resolve(null),
-    ]);
+    const headerWeatherPromise = runSource(
+      this.deps.weatherSource ?? openMeteoSource,
+      { latitude: device.latitude, longitude: device.longitude, timezone: device.timezone },
+      this.deps.cache,
+      runOptions,
+    );
+    const requests = new Map<string, Promise<DashboardSectionData>>();
 
-    return {
-      calendar: calendar.data,
-      weather: weather.data,
-      bins: bins?.data ?? null,
-      // An unconfigured source contributes no health entry at all, so the
-      // template can tell "not set up" from "failed".
-      sourceHealth: [calendar.health, weather.health, ...(bins ? [bins.health] : [])],
+    const sectionRequest = (widget: DeviceRecord['dashboardSections'][number]): Promise<DashboardSectionData> => {
+      const key = `${widget.type}:${JSON.stringify(widget.config)}`;
+      const existing = requests.get(key);
+      if (existing) return existing;
+
+      let request: Promise<DashboardSectionData>;
+      switch (widget.type) {
+        case 'calendar':
+          request = runCalendars(
+            widget.config.calendarUrls,
+            device.timezone,
+            this.deps.cache,
+            { ...runOptions, source: this.deps.calendarSource },
+          ).then((outcome) => ({ type: 'calendar', data: outcome.data, health: outcome.health }));
+          break;
+        case 'weather':
+          request = headerWeatherPromise.then((outcome) => ({
+            type: 'weather', data: outcome.data, health: outcome.health,
+          }));
+          break;
+        case 'bins':
+          request = widget.config.uprn
+            ? runSource(this.deps.binsSource ?? binsSource, { uprn: widget.config.uprn }, this.deps.cache, runOptions)
+              .then((outcome) => ({ type: 'bins', data: outcome.data, health: outcome.health }))
+            : Promise.resolve({ type: 'bins', data: null, health: null });
+          break;
+        case 'trains':
+          request = Promise.resolve({ type: 'trains', data: null, health: null });
+          break;
+        case 'empty':
+          request = Promise.resolve({ type: 'empty' });
+          break;
+      }
+      requests.set(key, request);
+      return request;
     };
+
+    const [headerWeather, sections] = await Promise.all([
+      headerWeatherPromise,
+      Promise.all(device.dashboardSections.map(sectionRequest)),
+    ]);
+    return { headerWeather, sections: sections as DashboardSectionDataTuple };
   }
 
   private buildData(
@@ -146,15 +182,28 @@ export class FrameService {
         dayOfMonth: Number(part('day')),
         monthLong: part('month'),
       },
-      calendar: bundle.calendar,
-      weather: bundle.weather,
-      // No transport yet — Task 7 wires a fetcher into SourceBundle and this
-      // becomes `bundle.train`.
-      train: null,
-      bins: bundle.bins,
-      sourceHealth: bundle.sourceHealth,
+      headerWeather: bundle.headerWeather.data,
+      headerWeatherHealth: bundle.headerWeather.health,
+      sections: bundle.sections,
       battery: { volts: batteryVolts, percent: batteryPercent(batteryVolts) },
     };
+  }
+
+  private diagnosticHealth(bundle: SourceBundle): DiagnosticHealth[] {
+    return [
+      {
+        sourceId: `header:${bundle.headerWeather.health.id}`,
+        status: bundle.headerWeather.health.status,
+        error: bundle.headerWeather.health.error,
+      },
+      ...bundle.sections.flatMap((section, index) => section.type !== 'empty' && section.health
+        ? [{
+            sourceId: `section-${index}:${section.health.id}`,
+            status: section.health.status,
+            error: section.health.error,
+          }]
+        : []),
+    ];
   }
 
   private async rasterise(html: string, profile: PanelProfile): Promise<Frame> {
@@ -191,8 +240,14 @@ export class FrameService {
     );
     const hash = contentHash(provisional);
     const unchanged = previous !== undefined && previous.hash === hash;
+    const health = this.diagnosticHealth(bundle);
 
-    if (unchanged && !force) return previous.frame;
+    if (unchanged && !force) {
+      // Diagnostics are not part of the visible hash. Keep them current even
+      // when identical pixels let us reuse the previous framebuffer.
+      this.memo.set(device.id, { ...previous, health });
+      return previous.frame;
+    }
 
     const contentChangedAt = unchanged ? previous.contentChangedAt : new Date().toISOString();
     const data = { ...provisional, contentChangedAt };
@@ -200,7 +255,7 @@ export class FrameService {
     const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
     const frame: Frame = { ...rendered, contentChangedAt };
 
-    this.memo.set(device.id, { hash, frame, contentChangedAt, health: bundle.sourceHealth });
+    this.memo.set(device.id, { hash, frame, contentChangedAt, health });
     return frame;
   }
 
@@ -228,15 +283,16 @@ export class FrameService {
   /**
    * Sources not currently reporting ok, across every device rendered so far.
    *
-   * Safe to read from the memo: source status is part of the content hash, so
-   * a status change always forces a re-render and therefore a fresh entry.
+   * Safe to read from the memo: diagnostics are refreshed after every source
+   * load, including when visible content is unchanged and rasterisation is
+   * skipped.
    */
   sourceIssues(): Array<{ deviceId: string; sourceId: string; status: string; error: string | null }> {
     const issues = [];
     for (const [deviceId, memo] of this.memo) {
       for (const source of memo.health) {
         if (source.status !== 'ok') {
-          issues.push({ deviceId, sourceId: source.id, status: source.status, error: source.error });
+          issues.push({ deviceId, sourceId: source.sourceId, status: source.status, error: source.error });
         }
       }
     }

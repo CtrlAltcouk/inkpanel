@@ -1,13 +1,19 @@
-import type { CalendarEvent, DashboardData, TrainDeparture } from '../model/dashboard.ts';
+import type {
+  CalendarData,
+  CalendarEvent,
+  DashboardData,
+  DashboardSectionData,
+  SourceHealth,
+  TrainData,
+  TrainDeparture,
+  WeatherData,
+} from '../model/dashboard.ts';
+import type { BinsData } from '../sources/bins.ts';
 import type { PanelProfile } from '../panel/profile.ts';
 import { panelCss } from './panel.css.ts';
 
 function esc(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function hhmm(iso: string, timezone: string): string {
@@ -16,15 +22,13 @@ function hhmm(iso: string, timezone: string): string {
   }).format(new Date(iso));
 }
 
-/** Open-Meteo returns naive local times like "2026-08-03T20:47". */
 function clockOnly(value: string): string {
   return value.includes('T') ? value.slice(11, 16) : value;
 }
 
-function staleBadge(data: DashboardData, id: string): string {
-  const health = data.sourceHealth.find((s) => s.id === id);
+function staleBadge(health: SourceHealth | null, timezone: string): string {
   if (health?.status !== 'stale' || !health.fetchedAt) return '';
-  return `<span class="stale">from ${hhmm(health.fetchedAt, data.timezone)}</span>`;
+  return `<span class="stale">from ${hhmm(health.fetchedAt, timezone)}</span>`;
 }
 
 function emptySlot(caption: string): string {
@@ -37,156 +41,105 @@ function eventRow(event: CalendarEvent, timezone: string): string {
 }
 
 function eventList(events: CalendarEvent[], timezone: string, limit: number): string {
-  return `<div class="events">${events.slice(0, limit).map((e) => eventRow(e, timezone)).join('')}</div>`;
+  return `<div class="events">${events.slice(0, limit).map((event) => eventRow(event, timezone)).join('')}</div>`;
 }
 
-function agendaCell(data: DashboardData): string {
-  if (!data.calendar) return emptySlot('Calendar unavailable');
-
-  const { today, tomorrow } = data.calendar;
-  if (today.length > 0) return eventList(today, data.timezone, 6);
-
-  // A free day is far more useful showing what is coming than showing a box
-  // that says nothing. It also distinguishes "working, quiet day" from
-  // "calendar broken", which an empty panel alone does not.
-  if (tomorrow.length > 0) {
-    return `<div class="subhead">Nothing today &mdash; tomorrow</div>
-      ${eventList(tomorrow, data.timezone, 5)}`;
+function agendaCell(calendar: CalendarData | null, timezone: string): string {
+  if (!calendar) return emptySlot('Calendar unavailable');
+  if (calendar.today.length > 0) return eventList(calendar.today, timezone, 6);
+  if (calendar.tomorrow.length > 0) {
+    return `<div class="subhead">Nothing today &mdash; tomorrow</div>${eventList(calendar.tomorrow, timezone, 5)}`;
   }
-
   return emptySlot('Nothing scheduled');
 }
 
-function forecastCell(data: DashboardData): string {
-  const weather = data.weather;
+function forecastCell(weather: WeatherData | null): string {
   if (!weather) return emptySlot('Weather unavailable');
-  const days = weather.forecast
-    .map((d) => `<div><div class="w">${esc(d.weekday)}</div><div class="t disp">${d.highC}&deg;</div><div>${esc(d.conditionText)}</div></div>`)
-    .join('');
-  return `<div class="days">${days}</div>
-    <div class="sun tnum">Sunrise ${esc(clockOnly(weather.sunrise))} &middot; Sunset ${esc(clockOnly(weather.sunset))}</div>`;
+  const days = weather.forecast.map((day) => `<div><div class="w">${esc(day.weekday)}</div><div class="t disp">${day.highC}&deg;</div><div>${esc(day.conditionText)}</div></div>`).join('');
+  return `<div class="days">${days}</div><div class="sun tnum">Sunrise ${esc(clockOnly(weather.sunrise))} &middot; Sunset ${esc(clockOnly(weather.sunset))}</div>`;
 }
 
 function banner(data: DashboardData): string {
-  const weather = data.weather;
+  const weather = data.headerWeather;
   const battery = data.battery.percent === null ? 'Battery --' : `Battery ${data.battery.percent}%`;
-  const wx = weather
-    ? `<div class="banner-wx">
-         <div class="detail tnum">H ${weather.highC}&deg; &nbsp; L ${weather.lowC}&deg;<br>Rain ${weather.precipProbability}%<br>${esc(weather.windDirection)} ${weather.windKph}kph</div>
-         <div><div class="temp disp">${weather.currentTempC}&deg;</div><div class="cond">${esc(weather.conditionText)}</div></div>
-       </div>`
-    : `<div class="banner-wx"><div class="cond">Weather unavailable</div></div>`;
-
-  return `<div class="banner">
-    <div class="battery">${esc(battery)}</div>
-    <div class="banner-date">
-      <div class="d1 disp">${esc(data.today.weekdayLong.slice(0, 3).toUpperCase())} ${data.today.dayOfMonth}</div>
-      <div class="d2 disp">${esc(data.today.monthLong.toUpperCase())}</div>
-    </div>
-    ${wx}
-  </div>`;
+  const weatherHtml = weather
+    ? `<div class="banner-wx"><div class="detail tnum">H ${weather.highC}&deg; &nbsp; L ${weather.lowC}&deg;<br>Rain ${weather.precipProbability}%<br>${esc(weather.windDirection)} ${weather.windKph}kph</div><div><div class="temp disp">${weather.currentTempC}&deg;</div><div class="cond">${esc(weather.conditionText)}</div></div></div>`
+    : '<div class="banner-wx"><div class="cond">Weather unavailable</div></div>';
+  return `<div class="banner"><div class="battery">${esc(battery)}</div><div class="banner-date"><div class="d1 disp">${esc(data.today.weekdayLong.slice(0, 3).toUpperCase())} ${data.today.dayOfMonth}</div><div class="d2 disp">${esc(data.today.monthLong.toUpperCase())}</div></div>${weatherHtml}</div>`;
 }
 
 function departureRow(departure: TrainDeparture): string {
-  // For a delay the revised time is the one to act on, so it takes the large
-  // slot and the original is struck through in the status beside it.
-  const headline = departure.status === 'delayed' && departure.expected
-    ? departure.expected
-    : departure.scheduled;
-
+  const headline = departure.status === 'delayed' && departure.expected ? departure.expected : departure.scheduled;
   let status: string;
-  if (departure.status === 'cancelled') {
-    status = 'Cancelled';
-  } else if (departure.status === 'delayed') {
+  if (departure.status === 'cancelled') status = 'Cancelled';
+  else if (departure.status === 'delayed') {
     status = departure.expected
       ? `<span class="dep-was">${esc(departure.scheduled)}</span> ${departure.delayMinutes} late`
       : 'Delayed';
-  } else {
-    status = 'On time';
-  }
-
+  } else status = 'On time';
   const timeClass = departure.status === 'cancelled' ? 'dep-time dep-was' : 'dep-time';
-
-  // No platform for a cancelled service — printing one sends someone to it.
-  // An absent platform omits the column rather than rendering an empty one.
   const platform = departure.status !== 'cancelled' && departure.platform
-    ? `<span class="dep-platform">Plat ${esc(departure.platform)}</span>`
-    : '';
-
+    ? `<span class="dep-platform">Plat ${esc(departure.platform)}</span>` : '';
   return `<div class="dep"><span class="${timeClass}">${esc(headline)}</span><span class="dep-status">${status}</span>${platform}</div>`;
 }
 
-function trainLabel(data: DashboardData): string {
-  if (!data.train) return 'Trains';
-  return `${esc(data.train.originCrs)} &rarr; ${esc(data.train.destinationName)}`;
+function trainLabel(train: TrainData | null): string {
+  return train ? `${esc(train.originCrs)} &rarr; ${esc(train.destinationName)}` : 'Trains';
 }
 
-function trainCell(data: DashboardData): string {
-  const health = data.sourceHealth.find((s) => s.id === 'train');
-
+function trainCell(train: TrainData | null, health: SourceHealth | null): string {
   if (!health) return emptySlot('Trains — not set up');
-  if (!data.train) return emptySlot('Trains unavailable');
-  // A successful fetch that found nothing is not a failure. It happens every
-  // night, and "No departures" is the true answer.
-  if (data.train.departures.length === 0) return emptySlot('No departures');
-
-  return data.train.departures.map(departureRow).join('');
+  if (!train) return emptySlot('Trains unavailable');
+  if (train.departures.length === 0) return emptySlot('No departures');
+  return train.departures.map(departureRow).join('');
 }
 
 const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
 };
 
-function binsCell(data: DashboardData): string {
-  const health = data.sourceHealth.find((s) => s.id === 'bins');
-
-  // Not configured and broken are different things and must read differently.
+function binsCell(bins: BinsData | null, health: SourceHealth | null): string {
   if (!health) return emptySlot('Bins — not set up');
-  if (!data.bins) return emptySlot('Bins unavailable');
-  if (!data.bins.next) return emptySlot('No collection scheduled');
-
+  if (!bins) return emptySlot('Bins unavailable');
+  if (!bins.next) return emptySlot('No collection scheduled');
   const when = new Intl.DateTimeFormat('en-GB', BIN_DATE_FORMAT)
-    .format(new Date(`${data.bins.next.date}T12:00:00.000Z`))
-    .toUpperCase();
-
-  // Pair each council label with a swatch, falling back to the collection's
-  // own types when labels and types disagree in length.
-  const rows = data.bins.rawLabels.length > 0
-    ? data.bins.rawLabels.map((label, i) => ({
+    .format(new Date(`${bins.next.date}T12:00:00.000Z`)).toUpperCase();
+  const rows = bins.rawLabels.length > 0
+    ? bins.rawLabels.map((label, index) => ({
         label,
-        type: data.bins!.next!.types[i] ?? data.bins!.next!.types[0] ?? 'general',
+        type: bins.next!.types[index] ?? bins.next!.types[0] ?? 'general',
       }))
-    : data.bins.next.types.map((type) => ({ label: type, type }));
-
-  const list = rows
-    .map((r) => `<div class="bin-row"><span class="bin-swatch bin--${esc(r.type)}"></span><span>${esc(r.label)}</span></div>`)
-    .join('');
-
+    : bins.next.types.map((type) => ({ label: type, type }));
+  const list = rows.map((row) => `<div class="bin-row"><span class="bin-swatch bin--${esc(row.type)}"></span><span>${esc(row.label)}</span></div>`).join('');
   return `<div class="bin-date disp">${esc(when)}</div>${list}`;
 }
 
+function renderSection(section: DashboardSectionData, data: DashboardData, position: string): string {
+  if (section.type === 'empty') return `<div class="cell cell--${position}"></div>`;
+  let label: string;
+  let content: string;
+  switch (section.type) {
+    case 'calendar':
+      label = 'Today';
+      content = agendaCell(section.data, data.timezone);
+      break;
+    case 'weather':
+      label = 'Next 3 days';
+      content = forecastCell(section.data);
+      break;
+    case 'trains':
+      label = trainLabel(section.data);
+      content = trainCell(section.data, section.health);
+      break;
+    case 'bins':
+      label = 'Bins';
+      content = binsCell(section.data, section.health);
+      break;
+  }
+  return `<div class="cell cell--${position}"><div class="label">${label}${staleBadge(section.health, data.timezone)}</div>${content}</div>`;
+}
+
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<style>${fontCss}${panelCss(profile)}</style></head><body>
-${banner(data)}
-<div class="rule"></div>
-<div class="grid">
-  <div class="cell cell--tl">
-    <div class="label">Today${staleBadge(data, 'ical')}</div>
-    ${agendaCell(data)}
-  </div>
-  <div class="cell cell--tr">
-    <div class="label">Next 3 days${staleBadge(data, 'weather')}</div>
-    ${forecastCell(data)}
-  </div>
-  <div class="cell cell--bl">
-    <div class="label">${trainLabel(data)}${staleBadge(data, 'train')}</div>
-    ${trainCell(data)}
-  </div>
-  <div class="cell cell--br">
-    <div class="label">Bins${staleBadge(data, 'bins')}</div>
-    ${binsCell(data)}
-  </div>
-</div>
-</body></html>`;
+  const positions = ['tl', 'tr', 'bl', 'br'];
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
 }

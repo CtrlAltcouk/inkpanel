@@ -10,18 +10,30 @@ import type { DashboardData } from './dashboard.ts';
  * wake. Battery volts are excluded because only the rounded percent is drawn.
  */
 export function contentHash(data: DashboardData): string {
+  const displayedStaleTime = (source: DashboardData['headerWeatherHealth'] | null) =>
+    source?.status === 'stale' && source.fetchedAt
+      ? new Intl.DateTimeFormat('en-GB', {
+          timeZone: data.timezone, hour: '2-digit', minute: '2-digit', hour12: false,
+        }).format(new Date(source.fetchedAt))
+      : null;
+  const visibleSection = (section: DashboardData['sections'][number]) => {
+    if (section.type === 'empty') return section;
+    return {
+      type: section.type,
+      data: section.data,
+      // Bins and Trains render "not set up" when health is absent and
+      // "unavailable" when a configured source has no data.
+      ...(section.type === 'bins' || section.type === 'trains'
+        ? { configured: section.health !== null }
+        : {}),
+      displayedStaleTime: displayedStaleTime(section.health),
+    };
+  };
   const visible = {
     timezone: data.timezone,
     today: data.today,
-    calendar: data.calendar,
-    weather: data.weather,
-    bins: data.bins,
-    train: data.train,
-    sourceHealth: data.sourceHealth.map((s) => ({
-      id: s.id,
-      status: s.status,
-      error: s.error,
-    })),
+    headerWeather: data.headerWeather,
+    sections: data.sections.map(visibleSection),
     batteryPercent: data.battery.percent,
   };
   return createHash('sha256').update(JSON.stringify(visible)).digest('hex').slice(0, 32);
