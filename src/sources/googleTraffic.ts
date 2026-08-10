@@ -13,11 +13,10 @@ export interface TrafficSourceConfig {
 export interface TrafficData {
   origin: string;
   destination: string;
-  /** Google Routes `duration`, rounded to display minutes. */
-  durationMinutes: number;
-  /** Google Routes `staticDuration`, rounded to display minutes. */
-  staticDurationMinutes: number;
-  distanceMiles: number | null;
+  /** Localized Google Routes traffic-aware duration text. */
+  durationText: string;
+  /** Localized Google Routes duration text without traffic conditions. */
+  staticDurationText: string;
   description: string | null;
   warning: string | null;
 }
@@ -29,10 +28,12 @@ export interface GoogleTrafficSourceOptions {
   maxResponseBytes?: number;
 }
 
+const localizedTextSchema = z.object({ text: z.string().min(1).max(80) });
 const rawRouteSchema = z.object({
-  duration: z.string(),
-  staticDuration: z.string(),
-  distanceMeters: z.number().nonnegative().optional(),
+  localizedValues: z.object({
+    duration: localizedTextSchema,
+    staticDuration: localizedTextSchema,
+  }),
   description: z.string().nullable().optional(),
   warnings: z.array(z.string()).optional(),
 });
@@ -43,14 +44,6 @@ function endpointUrl(value: string): URL {
   if (url.protocol !== 'https:') throw new Error('Google Routes endpoint must use HTTPS');
   if (url.username || url.password) throw new Error('Google Routes endpoint must not contain credentials');
   return url;
-}
-
-function durationSeconds(value: string): number {
-  const match = /^(\d+(?:\.\d+)?)s$/.exec(value);
-  if (!match) throw new Error('Google Routes returned an invalid duration');
-  const seconds = Number(match[1]);
-  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('Google Routes returned an invalid duration');
-  return seconds;
 }
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -109,7 +102,9 @@ export function createGoogleTrafficSource(options: GoogleTrafficSourceOptions): 
           Accept: 'application/json',
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'routes.duration,routes.staticDuration,routes.distanceMeters,routes.description,routes.warnings',
+          // LocalizedValues lets the panel display Google's own formatted text
+          // directly rather than manufacturing a derived duration/delay value.
+          'X-Goog-FieldMask': 'routes.localizedValues,routes.description,routes.warnings',
         },
         body: JSON.stringify({
           origin: { address: origin },
@@ -140,24 +135,13 @@ export function createGoogleTrafficSource(options: GoogleTrafficSourceOptions): 
       const route = rawRouteSchema.safeParse(parsed.data.routes[0]);
       if (!route.success) return { status: 'error', error: 'Google Routes returned an invalid route' };
 
-      let duration: number;
-      let staticDuration: number;
-      try {
-        duration = durationSeconds(route.data.duration);
-        staticDuration = durationSeconds(route.data.staticDuration);
-      } catch (err) {
-        return { status: 'error', error: err instanceof Error ? err.message : 'Google Routes returned an invalid duration' };
-      }
       return {
         status: 'ok',
         data: {
           origin,
           destination,
-          durationMinutes: Math.max(0, Math.round(duration / 60)),
-          staticDurationMinutes: Math.max(0, Math.round(staticDuration / 60)),
-          distanceMiles: route.data.distanceMeters === undefined
-            ? null
-            : Math.round((route.data.distanceMeters / 1609.344) * 10) / 10,
+          durationText: route.data.localizedValues.duration.text.trim(),
+          staticDurationText: route.data.localizedValues.staticDuration.text.trim(),
           description: route.data.description?.trim() || null,
           warning: route.data.warnings?.[0]?.trim() || null,
         },
