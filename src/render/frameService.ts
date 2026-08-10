@@ -23,6 +23,12 @@ import type { TrainSourceConfig } from '../sources/nationalRailTrain.ts';
 import type { TrainData } from '../sources/train.ts';
 import type { BusData, BusSourceConfig } from '../sources/transportApiBus.ts';
 import type { TrafficData, TrafficSourceConfig } from '../sources/googleTraffic.ts';
+import {
+  cheapestUpcomingOctopus,
+  octopusAgileSource,
+  type OctopusAgileConfig,
+  type OctopusRateWindow,
+} from '../sources/octopusAgile.ts';
 import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderHtml } from './template.ts';
@@ -48,6 +54,7 @@ export interface FrameDeps {
   busSource?: Source<BusSourceConfig, BusData>;
   /** Google Routes data is live-only and never persisted to SourceCache. */
   trafficSource?: Source<TrafficSourceConfig, TrafficData>;
+  octopusSource?: Source<OctopusAgileConfig, OctopusRateWindow>;
 }
 
 export interface Frame {
@@ -194,6 +201,23 @@ export class FrameService {
               { origin: widget.config.origin, destination: widget.config.destination },
               runOptions,
             ).then((outcome) => ({ type: 'traffic', data: outcome.data, health: outcome.health }));
+          }
+          break;
+        }
+        case 'octopus': {
+          if (!widget.config.tariffCode) {
+            request = Promise.resolve({ type: 'octopus', data: null, health: null });
+          } else {
+            request = runSource(
+              this.deps.octopusSource ?? octopusAgileSource,
+              { tariffCode: widget.config.tariffCode },
+              this.deps.cache,
+              runOptions,
+            ).then((outcome) => ({
+              type: 'octopus',
+              data: outcome.data ? cheapestUpcomingOctopus(outcome.data) : null,
+              health: outcome.health,
+            }));
           }
           break;
         }
