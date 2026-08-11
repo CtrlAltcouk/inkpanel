@@ -25,8 +25,27 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function createDashboardDraftState(sections) {
-  return sections.map((widget) => ({ type: widget.type, drafts: { [widget.type]: clone(widget.config) } }));
+function widgetsByType(widgets = []) {
+  return Object.fromEntries(widgets.map((widget) => [widget.type, clone(widget.config)]));
+}
+
+/**
+ * Draft precedence is deliberate:
+ *   shared last-useful config -> this panel/slot's remembered config -> active config.
+ * The live DeviceStore config therefore always wins, while a brand-new slot can
+ * still inherit a useful setup from another panel.
+ */
+export function createDashboardDraftState(sections, remembered = {}) {
+  const shared = widgetsByType(remembered.shared ?? []);
+  const rememberedSlots = remembered.slots ?? [[], [], [], []];
+  return sections.map((widget, index) => ({
+    type: widget.type,
+    drafts: {
+      ...clone(shared),
+      ...widgetsByType(rememberedSlots[index] ?? []),
+      [widget.type]: clone(widget.config),
+    },
+  }));
 }
 
 export function switchDashboardDraft(slots, index, nextType, currentConfig) {
@@ -81,25 +100,25 @@ function trainControlsHtml(trainApiConfigured, trainApiKeyDraft) {
   const status = trainApiConfigured
     ? 'API key configured. Leave blank to keep it, or enter a new key to replace it.'
     : 'Required for live departures. This key is shared by every Trains section on this InkPanel server.';
-  return `<label>National Rail API key</label><input type="password" data-train-api-key value="${esc(trainApiKeyDraft)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)}</p><div class="station-picker" data-station="origin"></div><div class="station-picker" data-station="destination"></div>`;
+  return `<label>National Rail API key</label><input type="password" data-train-api-key value="${esc(trainApiKeyDraft)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)} Get a Consumer key from <a href="https://raildata.org.uk/" target="_blank" rel="noreferrer">Rail Data Marketplace</a>.</p><div class="station-picker" data-station="origin"></div><div class="station-picker" data-station="destination"></div>`;
 }
 
 function busControlsHtml(config, busApiConfigured, busAppIdDraft, busAppKeyDraft) {
   const status = busApiConfigured
     ? 'TransportAPI configured. Leave both fields blank to keep the saved credentials.'
     : 'TransportAPI app ID and app key are required for live UK bus departures.';
-  return `<label>TransportAPI app ID</label><input type="password" data-bus-app-id value="${esc(busAppIdDraft)}" placeholder="${busApiConfigured ? 'Configured — leave blank to keep' : 'TransportAPI app ID'}" autocomplete="off" spellcheck="false"><label>TransportAPI app key</label><input type="password" data-bus-app-key value="${esc(busAppKeyDraft)}" placeholder="${busApiConfigured ? 'Configured — leave blank to keep' : 'TransportAPI app key'}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)}</p><div class="station-picker" data-bus-stop></div><label>Route filter <span class="meta">(optional)</span></label><input type="text" data-bus-route-filter value="${esc(config.routeFilter ?? '')}" placeholder="e.g. 6 or X5" autocomplete="off" spellcheck="false"><p class="meta">Bus data source: TransportAPI. A free account is limited to 30 requests/day.</p>`;
+  return `<label>TransportAPI app ID</label><input type="password" data-bus-app-id value="${esc(busAppIdDraft)}" placeholder="${busApiConfigured ? 'Configured — leave blank to keep' : 'TransportAPI app ID'}" autocomplete="off" spellcheck="false"><label>TransportAPI app key</label><input type="password" data-bus-app-key value="${esc(busAppKeyDraft)}" placeholder="${busApiConfigured ? 'Configured — leave blank to keep' : 'TransportAPI app key'}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)} <a href="https://developer.transportapi.com/" target="_blank" rel="noreferrer">Create or view TransportAPI credentials</a>.</p><div class="station-picker" data-bus-stop></div><label>Route filter <span class="meta">(optional)</span></label><input type="text" data-bus-route-filter value="${esc(config.routeFilter ?? '')}" placeholder="e.g. 6 or X5" autocomplete="off" spellcheck="false"><p class="meta">Bus data source: TransportAPI. A free account is limited to 30 requests/day.</p>`;
 }
 
 function trafficControlsHtml(config, trafficApiConfigured, trafficApiKeyDraft) {
   const status = trafficApiConfigured
     ? 'Google Maps Routes API configured. Leave blank to keep the saved key.'
     : 'Enable the Google Maps Routes API with billing, then paste its API key here.';
-  return `<label>Google Maps API key</label><input type="password" data-traffic-api-key value="${esc(trafficApiKeyDraft)}" placeholder="${trafficApiConfigured ? 'Configured — leave blank to keep' : 'Google Maps API key'}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)}</p><label>From</label><input type="text" data-traffic-origin value="${esc(config.origin ?? '')}" placeholder="Home address or postcode" autocomplete="street-address"><label>To</label><input type="text" data-traffic-destination value="${esc(config.destination ?? '')}" placeholder="Work address or postcode" autocomplete="street-address"><p class="meta">Uses Google traffic-aware driving time. Google Maps attribution is shown on the panel.</p>`;
+  return `<label>Google Maps API key</label><input type="password" data-traffic-api-key value="${esc(trafficApiKeyDraft)}" placeholder="${trafficApiConfigured ? 'Configured — leave blank to keep' : 'Google Maps API key'}" autocomplete="off" spellcheck="false"><p class="meta train-api-status">${esc(status)} <a href="https://developers.google.com/maps/documentation/routes/get-api-key" target="_blank" rel="noreferrer">Set up Routes API and create a key</a>.</p><label>From</label><input type="text" data-traffic-origin value="${esc(config.origin ?? '')}" placeholder="Home address or postcode" autocomplete="street-address"><label>To</label><input type="text" data-traffic-destination value="${esc(config.destination ?? '')}" placeholder="Work address or postcode" autocomplete="street-address"><p class="meta">Uses Google traffic-aware driving time. Google Maps attribution is shown on the panel.</p>`;
 }
 
 function octopusControlsHtml(config) {
-  return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C" autocomplete="off" spellcheck="false"><p class="meta">Paste the full electricity tariff code from Octopus. InkPanel derives the product automatically; no Octopus API key is required for public Agile prices.</p>`;
+  return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C" autocomplete="off" spellcheck="false"><p class="meta">Paste the full electricity tariff code from Octopus. InkPanel derives the product automatically; no Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
 function controlsHtml(
@@ -114,7 +133,7 @@ function controlsHtml(
   trafficApiConfigured,
   trafficApiKeyDraft,
 ) {
-  if (type === 'calendar') return `<label>Secret iCal URLs, one per line</label><textarea data-calendar-urls rows="3" placeholder="https://calendar.example/private.ics">${esc((config.calendarUrls ?? []).join('\n'))}</textarea>`;
+  if (type === 'calendar') return `<label>Secret iCal URLs, one per line</label><textarea data-calendar-urls rows="3" placeholder="https://calendar.example/private.ics">${esc((config.calendarUrls ?? []).join('\n'))}</textarea><p class="meta">For Google Calendar, <a href="https://support.google.com/calendar/answer/37648?hl=en-GB" target="_blank" rel="noreferrer">find your Secret address in iCal format</a>. Treat that URL like a password.</p>`;
   if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>. Leave blank when not configured.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
   if (type === 'empty') return '<p class="meta">This dashboard section will be blank.</p>';
@@ -196,8 +215,9 @@ export function renderDashboardEditor(
   trainApi = { configured: false },
   busApi = { configured: false },
   trafficApi = { configured: false },
+  remembered = { shared: [], slots: [[], [], [], []] },
 ) {
-  const slots = createDashboardDraftState(device.dashboardSections);
+  const slots = createDashboardDraftState(device.dashboardSections, remembered);
   stateByRoot.set(root, {
     deviceId: device.id,
     locationLabel: device.locationLabel,
@@ -214,11 +234,31 @@ export function renderDashboardEditor(
   slots.forEach((_slot, index) => renderCell(root, index));
 }
 
+function syncAllDrafts(root, state) {
+  state.slots.forEach((slot, index) => {
+    rememberCell(root.querySelector(`[data-dashboard-slot="${index}"]`), slot);
+  });
+}
+
 export function collectDashboardSections(root) {
   const state = stateByRoot.get(root);
   if (!state) throw new Error('dashboard editor is not initialised');
-  state.slots.forEach((slot, index) => rememberCell(root.querySelector(`[data-dashboard-slot="${index}"]`), slot));
+  syncAllDrafts(root, state);
   return serialiseDashboardDraftState(state.slots);
+}
+
+/** Persist every per-type draft, not just the type currently visible in a slot. */
+export function collectRememberedDashboardSettings(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  syncAllDrafts(root, state);
+  return {
+    slots: state.slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({
+      type,
+      version: 1,
+      config: clone(config),
+    }))),
+  };
 }
 
 /** Returns only newly-entered secrets. Stored values are never readable in the browser. */
