@@ -1,6 +1,6 @@
 import { getJson } from './api.js';
 import { renderPanels, setSelectedPanel } from './panels.js';
-import { renderSettings } from './settings.js';
+import { renderSettings, renderUpdates } from './settings.js';
 import { renderFlash } from './flash.js';
 import { esc } from './components.js';
 import { resolveRouteName } from './router.js';
@@ -14,6 +14,7 @@ const mobileBackdrop = document.getElementById('mobile-sidebar-backdrop');
 const ROUTES = {
   panels: renderPanels,
   settings: renderSettings,
+  updates: renderUpdates,
   flash: renderFlash,
 };
 const FALLBACK_ROUTE = 'panels';
