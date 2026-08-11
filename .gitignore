@@ -24,8 +24,9 @@ npm-debug.log*
 /frame.png.etag
 test/fixtures/golden/actual.png
 
-# Brainstorming mockups
+# Brainstorming / generated planning material
 .superpowers/
+docs/superpowers/
 
 # Editor / OS
 .vscode/

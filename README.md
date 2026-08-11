@@ -2,179 +2,188 @@
 
 [![CI](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml)
 
-A self-hosted, day-at-a-glance dashboard for e-paper displays.
+A self-hosted, day-at-a-glance dashboard for 7.5-inch e-paper displays.
 
-A small server renders your calendar and weather into a single 1-bit image. A
-battery-powered ESP32 panel wakes up, fetches that image, displays it, and goes
-back to sleep. The panel does almost nothing; the server does almost everything.
+InkPanel keeps the ESP32 deliberately simple: the server collects data, builds the dashboard, renders an 800×480 1-bit frame, and tells the panel when to wake again. The battery-powered panel wakes, checks for a new frame, refreshes only when the content changed, then returns to deep sleep.
 
-Firmware can be flashed to a board from the **Flash tab** in the web UI, over
-USB, without the Arduino IDE. It needs Chrome or Edge and the HTTPS address
-(`https://<server>:8443`), because the browser API it uses only works in a
-secure context — see [docs/flashing.md](docs/flashing.md). Wi-Fi setup is
-unchanged and still happens from a phone.
+## Current features
 
-> **Status: server working, one panel deployed.** The server renders, serves
-> and caches frames, and the whole protocol is exercised by a `fake-device` CLI.
-> The Proxmox LXC installer is tested and working. The firmware is flashed to
-> a real panel and running, reporting battery and firmware version back to the
-> server. The Docker image is written but has never been built.
+The web UI provides a Studio-style workspace for each panel with a live preview, dashboard configuration, device settings, scheduling, flashing and server updates.
 
-## Why this shape
+Each panel has four independently configurable dashboard positions. Current widget types are:
 
-E-paper holds its image with the power disconnected, so the only energy cost is
-the refresh itself. That makes "wake rarely, draw once, sleep" the natural
-design — and it means all the interesting work can happen somewhere with a real
-CPU.
+- **Calendar** — one or more iCal feeds
+- **Weather** — Open-Meteo using the panel location
+- **Trains** — live National Rail departures
+- **Bus** — live TransportAPI departures with optional route filtering
+- **Traffic** — Google Maps Routes traffic-aware journey time
+- **Octopus Agile** — cheapest still-valid Agile electricity slot
+- **Bins** — Milton Keynes collection dates by UPRN
+- **Empty** — intentionally blank section
 
-Rendering server-side buys a lot:
+Provider credentials are stored server-side and are not written into panel firmware or normal device configuration. The browser is told only whether a managed credential is configured; saved secrets are not returned to the UI.
 
-- Layout is HTML and CSS you iterate on in a browser, not bitmap fonts on a
-  microcontroller.
-- No API credentials ever reach the device.
-- Redesign the page without reflashing anything.
+## How it works
 
-And one detail matters more than it sounds: when the rendered image is
-byte-identical to what a panel is already showing, the server returns `304` and
-**the panel does not refresh at all**. A 7.5" e-paper refresh is a five-second
-black-and-white flash. On a desk, one every fifteen minutes for no reason gets
-old fast.
+```text
+Data providers ──> InkPanel server ──> 800×480 monochrome frame ──> ESP32/e-paper
+                       │
+                       ├─ Web admin / Studio UI
+                       ├─ source cache + health
+                       ├─ device configuration
+                       └─ transactional self-update
+```
+
+A rendered frame has a content identity. If a panel already has the current image, the server returns `304` and the e-paper display is not refreshed. This avoids unnecessary flashing and saves battery power.
+
+The physical e-paper renderer is intentionally separate from the browser/admin UI. Changes to the admin interface should not change the e-paper design or framebuffer pipeline unless that is an explicit renderer task. See [docs/ui-redesign-constraint.md](docs/ui-redesign-constraint.md).
 
 ## Quick start
 
-**On Proxmox**, one command on the host creates an LXC and installs everything:
+### Proxmox LXC
+
+Run this on the Proxmox host:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/inkpanel-lxc.sh)"
 ```
 
-**Anywhere else:**
+The installer creates the LXC, installs the server dependencies and firmware toolchain, configures the service, and prepares the browser-flash package.
+
+### Local / other Linux host
+
+Requires Node.js 22 or newer:
 
 ```bash
 git clone https://github.com/CtrlAltcouk/inkpanel.git
 cd inkpanel
-npm install
+npm ci
 npx playwright install chromium
 npm start
 ```
 
-Open `http://localhost:8080`. With no hardware to hand, you can drive the whole
-protocol from a terminal:
+The normal HTTP UI is available on port `8080` by default. InkPanel can also provide an HTTPS management listener, normally on `8443`, which is required for browser WebSerial flashing.
+
+With no physical panel connected, the protocol can be exercised with:
 
 ```bash
 npm run fake-device -- --once
 ```
 
-That writes `frame.png` — pixel-for-pixel what a panel would display. Run it
-again and it returns `304`, exactly as the firmware will.
+That writes `frame.png`, representing the frame a real panel would receive.
 
-## Configuration
+## Flashing and provisioning
 
-Everything is configured in the web UI: name, timezone, location, calendar URLs
-and refresh schedule. Calendars use Google's per-calendar **secret iCal
-address**, so there is no OAuth and no Google Cloud project. Be aware that
-Google refreshes that feed lazily — a newly created event can take a few hours
-to appear.
+The recommended new-board path is entirely browser based and does not require the Arduino IDE or the `192.168.4.1` recovery portal:
 
-Calendar URLs are fetched by the server, never by the ESP32. Only HTTP and
-HTTPS feeds without embedded credentials are accepted for new configuration.
-Each feed is fetched and cached independently, so one unavailable calendar does
-not force healthy calendars onto stale data. Redirect destinations are checked
-again, response bodies are limited to 2 MiB, and non-public network destinations
-are blocked by default. Set `CALENDAR_ALLOW_PRIVATE_NETWORKS=1` only to allow a
-deliberately LAN-hosted calendar; loopback and link-local addresses remain
-blocked even with that opt-in.
+1. Open **Flash** over the InkPanel HTTPS address in Chrome or Edge.
+2. Choose **Set up a new board**.
+3. Enter Wi-Fi details and confirm the InkPanel server address.
+4. Select the XIAO once in the browser device picker.
+5. InkPanel flashes the firmware and a one-time provisioning record in the same transaction.
+6. On first boot the firmware imports the settings into NVS, erases the temporary record, joins Wi-Fi and contacts InkPanel.
 
-Weather comes from Open-Meteo, which needs no account and no API key.
+Routine **Update existing board** flashing preserves NVS, so Wi-Fi and server settings survive firmware updates. USB configuration and the temporary `inkpanel-setup` / `192.168.4.1` portal remain recovery paths.
+
+See [docs/flashing.md](docs/flashing.md) for the complete flow and recovery options.
+
+## Configuration and data providers
+
+Panel name, timezone, location, schedule and dashboard layout are configured from the web UI.
+
+Some widgets require provider setup:
+
+- Calendar: secret/private iCal URL
+- National Rail: Rail Data Marketplace Consumer key
+- Bus: TransportAPI app ID and app key
+- Traffic: Google Maps Routes API key with the required Google project/billing setup
+- Octopus Agile: tariff code only; no Octopus account API key is required for the public tariff data used here
+- Bins: Milton Keynes UPRN
+
+Weather uses Open-Meteo and needs no account.
+
+Additional provider notes:
+
+- [National Rail](docs/national-rail.md)
+- [Bus and Traffic](docs/bus-traffic.md)
+- [Octopus Agile](docs/octopus-agile.md)
+- [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
 
 ## Hardware
 
-The reference build, and the only configuration that will be tested:
+The reference hardware, and the configuration tested by this project, is:
 
 | Part | Detail |
 |---|---|
 | MCU | Seeed XIAO ESP32-S3 Plus |
 | Carrier | Seeed XIAO ePaper Display Board (EE04), 24-pin jumper |
-| Panel | 7.5" 800x480 monochrome (Good Display GDEW075T7 / flex `WFT0583CZ61`) |
-| Driver | Waveshare "old V2" full-refresh sequence |
+| Panel | 7.5-inch 800×480 monochrome Good Display GDEW075T7 / flex `WFT0583CZ61` |
+| Driver | Waveshare old-V2 full-refresh sequence |
 
-**Panel revision matters.** This panel needs the *old* V2 initialisation
-sequence. Waveshare's current V2 driver and GxEPD2's `GxEPD2_750_T7` will not
-drive it correctly. If your panel stays blank, confirm which revision you have
-before changing anything else.
+Panel revision matters. This display requires the old-V2 initialisation sequence; changing the renderer or driver to a similarly named newer Waveshare/GxEPD2 profile can leave this hardware blank.
 
-Other panels should work with a new panel profile, but only this one is
-verified against real hardware.
+Hardware notes and verification material are under [docs/hardware](docs/hardware/).
 
-## Development
+## Updates
+
+The Proxmox/LXC installation includes a transactional self-updater exposed in **Updates** in the web UI. It pulls `main` fast-forward-only, validates the candidate, rebuilds firmware when tracked firmware inputs changed, health-checks the new service and rolls back to the previous working commit if deployment fails.
+
+For that reason, **`main` is the deployable branch** and should stay green.
+
+## Development and repository policy
+
+Useful checks:
 
 ```bash
-npm test          # unit and contract tests
-npm run test:tz   # the same suite under four server timezones
-npm run check     # typecheck
+npm run check     # TypeScript typecheck
+npm test          # full Node/Chromium test suite
+npm run test:tz   # repeat tests under multiple server timezones
 ```
 
-`npm run test:tz` exists because date bugs here are invisible on a single
-machine: an all-day calendar event materialises at local midnight, so a dev box
-in London and a container running UTC disagree about which day it falls on.
+GitHub Actions also compiles the production `XIAO_ESP32S3_Plus` firmware on every push to `main` and on pull requests.
+
+Repository policy:
+
+- `main` should always represent the current deployable state.
+- CI must pass before feature work is considered complete.
+- Feature/fix branches are temporary and should be deleted after merge.
+- Generated build output, runtime data and local credentials do not belong in Git.
+- Tests, deployment scripts and maintenance tools are part of the project even when the running Node process does not import them directly.
 
 ## Security
 
-By default there is **no authentication** — anyone who can reach the server can
-read your calendar as a rendered image and change any panel's configuration.
+Set `INKPANEL_PASSWORD` to require a login for the management UI. Firmware frame requests and `/health` remain unauthenticated by design because the ESP32 does not perform an interactive login.
 
-Set `INKPANEL_PASSWORD` to require a login. Two endpoints stay open regardless:
-`/api/devices/:id/frame`, because firmware cannot log in, and `/health`, so
-monitoring does not need credentials. Sign in at `/login.html`.
+The panel-facing HTTP service is intended for a trusted LAN. Do not expose it directly to the public internet. Use a VPN or an appropriately configured reverse proxy for remote access, and set `TRUST_PROXY` correctly when a proxy is in front of InkPanel.
 
-Frame check-ins remain unauthenticated by design. An unknown ID can create a
-device record only when it exactly matches the current firmware form
-`esp32-` followed by six lowercase hexadecimal digits; creation is limited per
-client address and across the whole server. Already-known manual or legacy IDs
-continue to work. These MAC-derived device IDs are identifiers, not secrets or
-proof of device identity.
+Calendar fetching includes destination validation and blocks private/non-public destinations by default. `CALENDAR_ALLOW_PRIVATE_NETWORKS=1` is an explicit opt-in for deliberately LAN-hosted calendars; loopback and link-local targets remain blocked.
 
-**The password travels in clear text.** This is plain HTTP, so the password and
-the session cookie are readable by anyone able to capture packets on your
-network. It is protection against casual access — a guest on your WiFi, someone
-idly poking at the address — and **not** against a hostile network.
+See [.env.example](.env.example) and [docs/deployment.md](docs/deployment.md) for deployment settings.
 
-**Do not expose this to the internet.** If you need remote access, put it behind
-a VPN or a reverse proxy that terminates TLS and does its own authentication.
-**Behind a reverse proxy you must set `TRUST_PROXY`, or the rate limiter
-buckets every client together** — `req.ip` otherwise resolves to the proxy's
-own address for every request, so five bad logins from anyone locks out
-everyone for 15 minutes. Set it to the number of proxy hops in front of the
-server (usually `1`), or to a comma-separated list of trusted addresses/
-subnets — see [Express's `trust proxy` docs](https://expressjs.com/en/guide/behind-proxies.html)
-for the accepted values.
+## Repository layout
 
-### HTTPS (`HTTPS_PORT`, default `8443`)
-
-The server also listens on a second, HTTPS port, purely so the browser will
-expose [WebSerial](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API)
-for the firmware Flash tab — WebSerial refuses to run outside a secure
-context. The certificate is **self-signed** and generated once on first boot
-into the data directory, so your browser will show a trust warning the first
-time you open the HTTPS port; accept it once and it will not reappear
-(the certificate is reused, not regenerated, on every restart).
-
-Panels are unaffected: firmware has no way to trust a self-signed certificate,
-so it keeps checking in over the plain-HTTP port exactly as before. If no
-certificate can be generated (for example, `openssl` is not installed), the
-server logs that HTTPS is disabled and continues serving everything else over
-HTTP — only the Flash tab is unavailable.
+```text
+public/       browser/admin UI
+src/          InkPanel server, data sources, renderer and device logic
+firmware/     production ESP32 firmware plus hardware diagnostic sketches
+scripts/      build, deployment and maintenance tooling
+test/         unit, integration, browser, firmware-contract and updater tests
+docs/         current deployment, flashing, provider and hardware documentation
+.github/      CI workflow
+```
 
 ## Documentation
 
-- [Spec](docs/superpowers/specs/2026-08-03-inkpanel-spec1-design.md) — the design and why it is shaped this way
-- [Implementation plan](docs/superpowers/plans/2026-08-03-inkpanel-spec1.md) — task by task
-- [Deployment](docs/deployment.md) — Proxmox, TrueNAS, and what to check when it fails
-- [Flashing](docs/flashing.md) — writing firmware to a board from the browser
+- [Deployment](docs/deployment.md)
+- [Flashing and provisioning](docs/flashing.md)
+- [National Rail](docs/national-rail.md)
+- [Bus and Traffic](docs/bus-traffic.md)
+- [Octopus Agile](docs/octopus-agile.md)
+- [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
+- [Hardware verification](docs/hardware/verification.md)
 
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
 
-The e-paper driver sequence is adapted from Waveshare's `epd7in5_V2_old.py` and
-retains its original permission notice.
+The e-paper driver sequence is adapted from Waveshare's `epd7in5_V2_old.py` and retains its original permission notice.
