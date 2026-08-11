@@ -123,11 +123,12 @@ export class DashboardEditorPreferencesStore {
 
   async set(deviceId: string, slots: DashboardEditorSlots): Promise<void> {
     const parsed = dashboardEditorSlotsSchema.parse(slots);
-    this.writeChain = this.writeChain.then(async () => {
+    const next = this.writeChain.catch(() => undefined).then(async () => {
       this.state.devices[deviceId] = clone(parsed);
       this.state.shared = mergeShared(this.state.shared, parsed);
       await writeSecretFile(this.path, `${JSON.stringify(this.state, null, 2)}\n`);
     });
-    await this.writeChain;
+    this.writeChain = next;
+    await next;
   }
 }
