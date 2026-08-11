@@ -6,6 +6,25 @@ A self-hosted, day-at-a-glance dashboard for 7.5-inch e-paper displays.
 
 InkPanel keeps the ESP32 deliberately simple: the server collects data, builds the dashboard, renders an 800×480 1-bit frame, and tells the panel when to wake again. The battery-powered panel wakes, checks for a new frame, refreshes only when the content changed, then returns to deep sleep.
 
+## Web UI
+
+InkPanel's browser UI provides a Studio workspace for configuring each panel, arranging dashboard widgets, previewing the exact e-ink output, flashing boards and managing server updates. The screenshots below use demo data only.
+
+<p align="center">
+  <img src="docs/screenshots/studio.jpg" alt="InkPanel Studio dashboard with live e-ink preview and widget editor" width="900">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/device.jpg" alt="InkPanel device settings"></td>
+    <td width="50%"><img src="docs/screenshots/updates.jpg" alt="InkPanel transactional updater"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Device settings</strong></td>
+    <td align="center"><strong>Transactional updates</strong></td>
+  </tr>
+</table>
+
 ## Current features
 
 The web UI provides a Studio-style workspace for each panel with a live preview, dashboard configuration, device settings, scheduling, flashing and server updates.
