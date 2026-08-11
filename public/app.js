@@ -1,10 +1,15 @@
-import { renderPanels } from './panels.js';
+import { getJson } from './api.js';
+import { renderPanels, setSelectedPanel } from './panels.js';
 import { renderSettings } from './settings.js';
 import { renderFlash } from './flash.js';
 import { esc } from './components.js';
 import { resolveRouteName } from './router.js';
 
 const view = document.getElementById('view');
+const sidebarPanels = document.getElementById('sidebar-panels');
+const sidebar = document.getElementById('app-sidebar');
+const mobileButton = document.getElementById('mobile-sidebar-button');
+const mobileBackdrop = document.getElementById('mobile-sidebar-backdrop');
 
 const ROUTES = {
   panels: renderPanels,
@@ -13,16 +18,73 @@ const ROUTES = {
 };
 const FALLBACK_ROUTE = 'panels';
 
-// Bumped on every route() entry so a slow, stale render can recognise it has
-// been superseded and discard its result instead of overwriting a newer
-// render's DOM. Both tabs make real getJson() calls on this exact path, so a
-// fast reload during a slow fetch would otherwise let the stale response win
-// the race.
 let generation = 0;
+let shellSelectedPanelId = null;
+
+function panelButton(device) {
+  const selected = device.id === shellSelectedPanelId ? ' on' : '';
+  const sleeping = device.lastSeenAt ? '' : ' sidebar-panel-dot--sleeping';
+  return `<button class="sidebar-panel${selected}" type="button" data-sidebar-panel="${esc(device.id)}">
+    <span class="sidebar-panel-dot${sleeping}" aria-hidden="true"></span>
+    <span class="sidebar-panel-name">${esc(device.name)}</span>
+  </button>`;
+}
+
+function updateSidebarPanelSelection() {
+  sidebarPanels.querySelectorAll('[data-sidebar-panel]').forEach((button) => {
+    button.classList.toggle('on', button.dataset.sidebarPanel === shellSelectedPanelId);
+  });
+}
+
+async function refreshSidebarPanels() {
+  const { devices } = await getJson('/api/devices');
+  if (!devices.some((device) => device.id === shellSelectedPanelId)) {
+    shellSelectedPanelId = devices[0]?.id ?? null;
+    if (shellSelectedPanelId) setSelectedPanel(shellSelectedPanelId);
+  }
+
+  sidebarPanels.innerHTML = devices.length
+    ? devices.map(panelButton).join('')
+    : '<span class="meta">No panels yet</span>';
+
+  sidebarPanels.querySelectorAll('[data-sidebar-panel]').forEach((button) => {
+    button.addEventListener('click', () => {
+      shellSelectedPanelId = button.dataset.sidebarPanel;
+      setSelectedPanel(shellSelectedPanelId);
+      updateSidebarPanelSelection();
+      closeMobileSidebar();
+      if (location.hash !== '#panels') {
+        location.hash = '#panels';
+      } else {
+        void route();
+      }
+    });
+  });
+}
+
+function setMobileSidebar(open) {
+  sidebar.classList.toggle('open', open);
+  mobileBackdrop.classList.toggle('on', open);
+  mobileButton.setAttribute('aria-expanded', String(open));
+}
+function closeMobileSidebar() { setMobileSidebar(false); }
+
+mobileButton.addEventListener('click', () => setMobileSidebar(!sidebar.classList.contains('open')));
+mobileBackdrop.addEventListener('click', closeMobileSidebar);
+document.querySelectorAll('.sidebar-link, .sidebar-brand').forEach((link) => {
+  link.addEventListener('click', closeMobileSidebar);
+});
+
+window.addEventListener('inkpanel:panel-selected', (event) => {
+  shellSelectedPanelId = event.detail?.id ?? null;
+  updateSidebarPanelSelection();
+});
+window.addEventListener('inkpanel:devices-changed', () => {
+  void refreshSidebarPanels().catch(() => undefined);
+});
 
 async function route() {
   const myGeneration = ++generation;
-
   const name = resolveRouteName(location.hash, ROUTES, FALLBACK_ROUTE);
   const render = ROUTES[name];
 
@@ -32,37 +94,29 @@ async function route() {
 
   view.innerHTML = '<p class="empty">Loading…</p>';
 
-  // Render into a detached element rather than `view` directly. render()
-  // implementations set `root.innerHTML` themselves, so without this
-  // indirection a stale render would already have written to the live DOM
-  // before there was any chance to check whether it was still current.
   const scratch = document.createElement('div');
   try {
     await render(scratch);
   } catch (err) {
-    if (myGeneration !== generation) return; // superseded — discard
-    // ApiError with status 401 already redirected; anything else is worth showing.
+    if (myGeneration !== generation) return;
     if (err?.status !== 401) {
       view.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
     }
     return;
   }
 
-  if (myGeneration !== generation) return; // superseded — discard
-  // Adopt `scratch` itself into `view`, rather than round-tripping through
-  // `scratch.innerHTML` (a string round-trip re-parses fresh elements and
-  // silently drops every addEventListener a render attached — e.g.
-  // panels.js's card-select, save and push handlers — leaving the live DOM
-  // inert) and rather than moving just its children (render() closures such
-  // as panels.js's push handler re-query `root` — i.e. `scratch` — *after*
-  // this point, e.g. when the push response comes back; if only the
-  // children were relocated, `scratch` would be left empty and those
-  // lookups would silently return null). Moving `scratch` itself preserves
-  // both the live listeners and `root` as the queryable container. #view
-  // has no styling that depends on its children being unwrapped, so the
-  // added layer costs nothing.
+  if (myGeneration !== generation) return;
   view.replaceChildren(scratch);
 }
 
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => {
+  closeMobileSidebar();
+  void route();
+});
+
+try {
+  await refreshSidebarPanels();
+} catch (err) {
+  if (err?.status !== 401) sidebarPanels.innerHTML = '<span class="meta">Panels unavailable</span>';
+}
 await route();
