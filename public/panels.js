@@ -10,250 +10,183 @@ import {
 } from './dashboardEditor.js';
 
 let selectedId = null;
+let selectedPanelTab = 'dashboard';
 
-function thumbnail(device) {
-  const claimedPill = device.claimed
-    ? pill('Claimed', 'status--claimed')
-    : pill('Unclaimed', 'status--unclaimed');
+export function setSelectedPanel(id) { selectedId = id; }
 
-  return `<button class="panel-card ${device.id === selectedId ? 'on' : ''}" data-select="${esc(device.id)}">
-      <img class="panel-thumb" loading="lazy" alt="What ${esc(device.name)} is showing"
-           src="/api/devices/${encodeURIComponent(device.id)}/render.png">
-      <span class="panel-name">${esc(device.name)}</span>
-      <span class="panel-meta">${esc(formatVolts(device.lastBatteryVolts))} · ${esc(formatRelative(device.lastSeenAt))}</span>
-      ${claimedPill}
-    </button>`;
+function panelHeader(device) {
+  return `<div class="panel-workspace-header">
+    <div class="panel-workspace-title">
+      <h1>${esc(device.name)}</h1>
+      <div class="panel-workspace-id">${esc(device.id)} · ${esc(device.locationLabel || 'No location')}</div>
+    </div>
+    <div class="panel-workspace-statuses">
+      ${device.claimed ? pill('Claimed', 'status--claimed') : pill('Unclaimed', 'status--unclaimed')}
+      ${pill(`fw ${device.lastFirmwareVersion ?? 'unknown'}`)}
+      ${pill(formatVolts(device.lastBatteryVolts))}
+      ${pill(formatRelative(device.lastSeenAt))}
+    </div>
+  </div>`;
+}
+
+function stat(label, value) {
+  return `<div class="panel-stat"><div class="panel-stat-label">${esc(label)}</div><div class="panel-stat-value">${esc(value)}</div></div>`;
 }
 
 function detail(device) {
-  return `<div class="card" id="detail">
-    <h2>${esc(device.name)}${device.claimed ? pill('Claimed', 'status--claimed') : pill('Unclaimed', 'status--unclaimed')}</h2>
-    <p class="meta">${esc(device.id)} · fw ${esc(device.lastFirmwareVersion ?? 'unknown')}</p>
+  return `<div id="detail">
+    ${panelHeader(device)}
+    <div class="panel-tabs" role="tablist" aria-label="Panel settings">
+      <button type="button" data-panel-tab="dashboard">Dashboard</button>
+      <button type="button" data-panel-tab="device">Device</button>
+      <button type="button" data-panel-tab="schedule">Schedule</button>
+    </div>
 
     <form data-id="${esc(device.id)}">
-      ${field(device.id, 'name', 'Name', device.name)}
+      <section class="panel-view" data-panel-view="dashboard">
+        <div class="studio-grid">
+          <div class="studio-card">
+            <div class="studio-card-head"><div><h2>Live e-ink preview</h2><p class="meta">800 × 480 · exactly what this panel will show</p></div></div>
+            <div class="panel-preview-wrap">
+              <img class="panel-preview-image" alt="What ${esc(device.name)} is showing" src="/api/devices/${encodeURIComponent(device.id)}/render.png">
+            </div>
+            <div class="actions">
+              <button type="button" data-push="${esc(device.id)}">Push to display</button>
+              <button type="button" class="ghost" data-zoom="${esc(device.id)}">View full size</button>
+            </div>
+            <div class="panel-stat-grid">
+              ${stat('Last seen', formatRelative(device.lastSeenAt))}
+              ${stat('Refresh', `${device.activeIntervalSeconds}s`)}
+              ${stat('Quiet hours', `${String(device.quietHoursStart).padStart(2, '0')}:00–${String(device.quietHoursEnd).padStart(2, '0')}:00`)}
+              ${stat('Location', device.locationLabel || 'Not set')}
+            </div>
+          </div>
 
-      <h3>Location</h3>
-      <div id="city-picker"></div>
-      ${field(device.id, 'timezone', 'Timezone', device.timezone)}
+          <div class="studio-card">
+            <div class="studio-card-head"><div><h3>Dashboard layout</h3><p class="meta">Select a section to configure it. Widget settings are remembered.</p></div></div>
+            <div class="dashboard-editor" id="dashboard-editor"></div>
+          </div>
+        </div>
+      </section>
 
-      <h3>Dashboard sections</h3>
-      <p class="meta">Widget settings are remembered when you switch content and can be reused on your other panels.</p>
-      <div class="dashboard-editor" id="dashboard-editor"></div>
+      <section class="panel-view" data-panel-view="device" hidden>
+        <div class="device-settings-grid">
+          <div class="studio-card">
+            <div class="studio-card-head"><div><h2>Device details</h2><p class="meta">Identity and location for this panel.</p></div></div>
+            ${field(device.id, 'name', 'Name', device.name)}
+            <label>City</label><div id="city-picker"></div>
+            ${field(device.id, 'timezone', 'Timezone', device.timezone)}
+            <label class="checkbox"><input type="checkbox" name="claimed" ${device.claimed ? 'checked' : ''}>Claimed — show the dashboard instead of the setup screen</label>
+          </div>
+          <div class="studio-card">
+            <div class="studio-card-head"><div><h2>Status</h2><p class="meta">Read-only information reported by the panel.</p></div></div>
+            <div class="panel-stat-grid">
+              ${stat('Device ID', device.id)}
+              ${stat('Firmware', device.lastFirmwareVersion ?? 'unknown')}
+              ${stat('Battery', formatVolts(device.lastBatteryVolts))}
+              ${stat('Last seen', formatRelative(device.lastSeenAt))}
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <h3>Refresh schedule</h3>
-      <div class="row">
-        <div>${field(device.id, 'activeIntervalSeconds', 'Interval (seconds)', device.activeIntervalSeconds, 'number')}</div>
-        <div>${field(device.id, 'quietHoursStart', 'Quiet from (hour)', device.quietHoursStart, 'number')}</div>
-        <div>${field(device.id, 'quietHoursEnd', 'Quiet until (hour)', device.quietHoursEnd, 'number')}</div>
-      </div>
+      <section class="panel-view" data-panel-view="schedule" hidden>
+        <div class="studio-card">
+          <div class="studio-card-head"><div><h2>Refresh schedule</h2><p class="meta">Normal wake interval and quiet hours.</p></div></div>
+          <div class="schedule-settings-grid">
+            <div>${field(device.id, 'activeIntervalSeconds', 'Interval (seconds)', device.activeIntervalSeconds, 'number')}</div>
+            <div>${field(device.id, 'quietHoursStart', 'Quiet from (hour)', device.quietHoursStart, 'number')}</div>
+            <div>${field(device.id, 'quietHoursEnd', 'Quiet until (hour)', device.quietHoursEnd, 'number')}</div>
+          </div>
+        </div>
+      </section>
 
-      <label class="checkbox">
-        <input type="checkbox" name="claimed" ${device.claimed ? 'checked' : ''}>
-        Claimed — show the dashboard instead of the setup screen
-      </label>
-
-      <div class="actions">
-        <button type="submit">Save</button>
-        <button type="button" class="ghost" data-push="${esc(device.id)}">Push</button>
-        <!-- The strip card above already carries a live thumbnail for this
-             device; opening a second copy here would be a second render.png
-             request for the same picture. This reuses that exact <img>
-             (via CSS, in place) rather than fetching it again. -->
-        <button type="button" class="ghost" data-zoom="${esc(device.id)}">View full size</button>
-      </div>
       <p class="notice" id="notice" hidden></p>
       <p class="error" id="error" hidden></p>
+      <div class="panel-save-bar">
+        <span class="panel-save-state" id="save-state">All changes saved</span>
+        <div class="actions"><button type="submit">Save changes</button></div>
+      </div>
     </form>
   </div>`;
 }
 
-function pushMessage(result) {
-  if (result.willAppearBy) {
-    const at = new Date(result.willAppearBy).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return `Rendered. Will appear by ${at} — or press KEY1 on the panel for now.`;
-  }
-  if (result.overdueSince) {
-    const since = new Date(result.overdueSince).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return `Rendered, but this panel has not checked in since ${since}. It will collect it when it next wakes.`;
-  }
-  return 'Rendered. Will appear at the panel’s next check-in.';
-}
-
-// #notice and #error are mutually exclusive: showing one always hides the
-// other, so a failure that follows an earlier success (or vice versa) never
-// leaves both visible at once.
 function showError(root, err) {
-  const notice = root.querySelector('#notice');
-  const error = root.querySelector('#error');
-  notice.hidden = true;
+  const notice = root.querySelector('#notice'); const error = root.querySelector('#error');
+  if (notice) notice.hidden = true;
+  if (!error) return;
   const detailText = (err.issues ?? []).map((i) => `${i.path?.join('.') ?? '?'}: ${i.message}`).join('\n');
-  error.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`;
-  error.hidden = false;
+  error.textContent = `${err.message}${detailText ? `\n${detailText}` : ''}`; error.hidden = false;
 }
-
 function showNotice(root, text) {
-  const notice = root.querySelector('#notice');
-  const error = root.querySelector('#error');
-  error.hidden = true;
-  notice.textContent = text;
-  notice.hidden = false;
+  const notice = root.querySelector('#notice'); const error = root.querySelector('#error');
+  if (error) error.hidden = true; if (notice) { notice.textContent = text; notice.hidden = false; }
+}
+function pushMessage(result) {
+  if (result.willAppearBy) return `Rendered. Will appear by ${new Date(result.willAppearBy).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — or press KEY1 for now.`;
+  if (result.overdueSince) return 'Rendered. The panel will collect it when it next wakes.';
+  return 'Rendered. Will appear at the panel’s next check-in.';
 }
 
 async function save(event, root) {
   event.preventDefault();
-  const form = event.target;
-  const raw = Object.fromEntries(new FormData(form));
-  const picker = form.querySelector('#city-picker');
-  const dashboardEditor = form.querySelector('#dashboard-editor');
-
+  const form = event.target; const raw = Object.fromEntries(new FormData(form));
+  const picker = form.querySelector('#city-picker'); const dashboardEditor = form.querySelector('#dashboard-editor');
   const body = {
-    name: raw.name,
-    timezone: raw.timezone,
+    name: raw.name, timezone: raw.timezone,
     dashboardSections: collectDashboardSections(dashboardEditor),
-    activeIntervalSeconds: Number(raw.activeIntervalSeconds),
-    quietHoursStart: Number(raw.quietHoursStart),
-    quietHoursEnd: Number(raw.quietHoursEnd),
+    activeIntervalSeconds: Number(raw.activeIntervalSeconds), quietHoursStart: Number(raw.quietHoursStart), quietHoursEnd: Number(raw.quietHoursEnd),
     claimed: form.querySelector('[name=claimed]').checked,
   };
-  const remembered = collectRememberedDashboardSettings(dashboardEditor);
-
-  // The city picker owns three fields at once; it only contributes when a
-  // result has actually been chosen.
   if (picker?.dataset.latitude) {
-    body.latitude = Number(picker.dataset.latitude);
-    body.longitude = Number(picker.dataset.longitude);
-    body.locationLabel = picker.dataset.label;
+    body.latitude = Number(picker.dataset.latitude); body.longitude = Number(picker.dataset.longitude); body.locationLabel = picker.dataset.label;
     if (picker.dataset.timezone) body.timezone = picker.dataset.timezone;
   }
-
-  // Newly-entered provider credentials are written first so the very next
-  // preview/render can use them. Blank inputs always mean "keep existing";
-  // stored secrets are never sent back to the browser just to fill a form.
-  const trainApiKey = collectTrainApiKey(dashboardEditor);
-  if (trainApiKey) await sendJson('PUT', '/api/national-rail', { apiKey: trainApiKey });
-
-  const busCredentials = collectBusApiCredentials(dashboardEditor);
-  if (busCredentials) await sendJson('PUT', '/api/transportapi', busCredentials);
-
-  const trafficApiKey = collectTrafficApiKey(dashboardEditor);
-  if (trafficApiKey) await sendJson('PUT', '/api/google-maps', { apiKey: trafficApiKey });
-
-  // Remember every draft before replacing the active DeviceStore sections.
-  // If this ancillary write fails, leave the live panel config untouched so a
-  // visible "Save" failure never partially changes what the e-paper will show.
-  await sendJson('PUT', `/api/dashboard-editor/${encodeURIComponent(form.dataset.id)}`, remembered);
+  const trainKey = collectTrainApiKey(dashboardEditor); if (trainKey) await sendJson('PUT', '/api/national-rail', { apiKey: trainKey });
+  const bus = collectBusApiCredentials(dashboardEditor); if (bus) await sendJson('PUT', '/api/transportapi', bus);
+  const trafficKey = collectTrafficApiKey(dashboardEditor); if (trafficKey) await sendJson('PUT', '/api/google-maps', { apiKey: trafficKey });
+  await sendJson('PUT', `/api/dashboard-editor/${encodeURIComponent(form.dataset.id)}`, collectRememberedDashboardSettings(dashboardEditor));
   await sendJson('PUT', `/api/devices/${encodeURIComponent(form.dataset.id)}`, body);
+  window.dispatchEvent(new CustomEvent('inkpanel:devices-changed'));
   await renderPanels(root);
 }
 
-// Renders (or replaces) the #detail card for `device` and wires its form,
-// push and zoom controls. Shared by the initial render and by card
-// selection so both stay in sync.
+function activateTab(detailEl, name) {
+  selectedPanelTab = name;
+  detailEl.querySelectorAll('[data-panel-tab]').forEach((button) => button.classList.toggle('on', button.dataset.panelTab === name));
+  detailEl.querySelectorAll('[data-panel-view]').forEach((section) => { section.hidden = section.dataset.panelView !== name; });
+}
+
 async function renderDetail(root, device, serviceStatus) {
-  const html = detail(device);
-  const existing = root.querySelector('#detail');
-  if (existing) {
-    existing.outerHTML = html;
-  } else {
-    root.insertAdjacentHTML('beforeend', html);
-  }
-
-  const detailEl = root.querySelector('#detail');
-
-  const form = detailEl.querySelector('form');
-  form.addEventListener('submit', (event) => {
-    // A 401 has already sent the browser to /login.html (see api.js);
-    // painting "authentication required" into the page here would just be
-    // noise on the way out, so only genuine failures get shown.
-    void save(event, root).catch((err) => {
-      if (err?.status !== 401) showError(root, err);
-    });
-  });
+  root.innerHTML = detail(device);
+  window.dispatchEvent(new CustomEvent('inkpanel:panel-selected', { detail: { id: device.id } }));
+  const detailEl = root.querySelector('#detail'); const form = detailEl.querySelector('form');
+  activateTab(detailEl, selectedPanelTab);
+  detailEl.querySelectorAll('[data-panel-tab]').forEach((button) => button.addEventListener('click', () => activateTab(detailEl, button.dataset.panelTab)));
+  form.addEventListener('input', () => { const state = form.querySelector('#save-state'); if (state) state.textContent = 'Unsaved changes'; });
+  form.addEventListener('change', () => { const state = form.querySelector('#save-state'); if (state) state.textContent = 'Unsaved changes'; });
+  form.addEventListener('submit', (event) => void save(event, root).catch((err) => { if (err?.status !== 401) showError(root, err); }));
 
   detailEl.querySelector('[data-push]').addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.textContent = 'Rendering…';
+    const button = event.currentTarget; button.disabled = true; button.textContent = 'Rendering…';
     try {
       const result = await sendJson('POST', `/api/devices/${encodeURIComponent(button.dataset.push)}/push`);
       showNotice(root, pushMessage(result));
-      // Cache-bust the strip thumbnail so it reflects the render that just
-      // happened, rather than requesting a second copy of the same image.
-      const thumb = root.querySelector(`[data-select="${CSS.escape(button.dataset.push)}"] .panel-thumb`);
-      if (thumb) thumb.src = `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
-    } catch (err) {
-      if (err?.status !== 401) showError(root, err);
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Push';
-    }
+      const img = root.querySelector('.panel-preview-image'); if (img) img.src = `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
+    } catch (err) { if (err?.status !== 401) showError(root, err); }
+    finally { button.disabled = false; button.textContent = 'Push to display'; }
   });
+  detailEl.querySelector('[data-zoom]').addEventListener('click', () => root.querySelector('.panel-preview-image')?.classList.toggle('panel-preview-image--zoomed'));
+  detailEl.querySelector('.panel-preview-image').addEventListener('click', (event) => { if (event.currentTarget.classList.contains('panel-preview-image--zoomed')) event.currentTarget.classList.remove('panel-preview-image--zoomed'); });
 
-  detailEl.querySelector('[data-zoom]').addEventListener('click', () => {
-    const img = root.querySelector(`[data-select="${CSS.escape(device.id)}"] .panel-thumb`);
-    img?.classList.toggle('panel-thumb--zoomed');
-  });
-
-  const [{ renderCityPicker }, remembered] = await Promise.all([
-    import('./cityPicker.js'),
-    getJson(`/api/dashboard-editor/${encodeURIComponent(device.id)}`),
-  ]);
+  const [{ renderCityPicker }, remembered] = await Promise.all([import('./cityPicker.js'), getJson(`/api/dashboard-editor/${encodeURIComponent(device.id)}`)]);
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
-
-  renderDashboardEditor(
-    detailEl.querySelector('#dashboard-editor'),
-    device,
-    serviceStatus.trainApi,
-    serviceStatus.busApi,
-    serviceStatus.trafficApi,
-    remembered,
-  );
-}
-
-// Switching the selected card must not re-fetch every thumbnail: it only
-// swaps the detail pane and toggles which card is highlighted. The strip's
-// <img> elements are left completely untouched, so no new render.png
-// requests happen just from clicking around.
-function selectDevice(root, devices, id, serviceStatus) {
-  selectedId = id;
-  root.querySelectorAll('[data-select]').forEach((card) => {
-    card.classList.toggle('on', card.dataset.select === id);
-  });
-  const device = devices.find((d) => d.id === id);
-  void renderDetail(root, device, serviceStatus);
+  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi] = await Promise.all([
-    getJson('/api/devices'),
-    getJson('/api/national-rail'),
-    getJson('/api/transportapi'),
-    getJson('/api/google-maps'),
-  ]);
-  const serviceStatus = { trainApi, busApi, trafficApi };
-
-  if (devices.length === 0) {
-    root.innerHTML = '<div class="card"><p class="empty">No panels yet. Power one on and it will appear here.</p></div>';
-    return;
-  }
-
+  const [{ devices }, trainApi, busApi, trafficApi] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps')]);
+  if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-
-  root.innerHTML = `<div class="panel-strip">${devices.map(thumbnail).join('')}</div>`;
-  root.querySelectorAll('[data-select]').forEach((card) => {
-    card.addEventListener('click', () => selectDevice(root, devices, card.dataset.select, serviceStatus));
-  });
-  root.querySelectorAll('.panel-thumb').forEach((img) => {
-    // While zoomed, clicking the (now full-screen) picture closes it again.
-    // Stop the click from also bubbling to the card's own select handler.
-    img.addEventListener('click', (event) => {
-      if (img.classList.contains('panel-thumb--zoomed')) {
-        event.stopPropagation();
-        img.classList.remove('panel-thumb--zoomed');
-      }
-    });
-  });
-
-  await renderDetail(root, devices.find((d) => d.id === selectedId), serviceStatus);
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi });
 }
