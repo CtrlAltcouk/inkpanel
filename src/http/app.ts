@@ -11,6 +11,7 @@ import type { RuntimeState } from '../runtimeConfig.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
 import type { DeviceEnrolmentLimiter } from './deviceEnrolment.ts';
+import { editorPreferencesRoutes } from './editorPreferencesRoutes.ts';
 import { firmwareRoutes } from './firmwareRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
 import { systemRoutes } from './systemRoutes.ts';
@@ -137,6 +138,7 @@ export function createApp(deps: AppDeps): express.Express {
     deps.googleMapsCredentials,
     deps.transportApiBaseUrl,
   ));
+  app.use('/api', editorPreferencesRoutes(deps.store, deps.dataDir));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
