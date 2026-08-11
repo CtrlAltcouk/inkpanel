@@ -3,6 +3,7 @@ import { esc, formatRelative, formatVolts, field, pill } from './components.js';
 import {
   collectBusApiCredentials,
   collectDashboardSections,
+  collectRememberedDashboardSettings,
   collectTrafficApiKey,
   collectTrainApiKey,
   renderDashboardEditor,
@@ -37,6 +38,7 @@ function detail(device) {
       ${field(device.id, 'timezone', 'Timezone', device.timezone)}
 
       <h3>Dashboard sections</h3>
+      <p class="meta">Widget settings are remembered when you switch content and can be reused on your other panels.</p>
       <div class="dashboard-editor" id="dashboard-editor"></div>
 
       <h3>Refresh schedule</h3>
@@ -114,6 +116,7 @@ async function save(event, root) {
     quietHoursEnd: Number(raw.quietHoursEnd),
     claimed: form.querySelector('[name=claimed]').checked,
   };
+  const remembered = collectRememberedDashboardSettings(dashboardEditor);
 
   // The city picker owns three fields at once; it only contributes when a
   // result has actually been chosen.
@@ -136,6 +139,10 @@ async function save(event, root) {
   const trafficApiKey = collectTrafficApiKey(dashboardEditor);
   if (trafficApiKey) await sendJson('PUT', '/api/google-maps', { apiKey: trafficApiKey });
 
+  // Remember every draft before replacing the active DeviceStore sections.
+  // If this ancillary write fails, leave the live panel config untouched so a
+  // visible "Save" failure never partially changes what the e-paper will show.
+  await sendJson('PUT', `/api/dashboard-editor/${encodeURIComponent(form.dataset.id)}`, remembered);
   await sendJson('PUT', `/api/devices/${encodeURIComponent(form.dataset.id)}`, body);
   await renderPanels(root);
 }
@@ -188,7 +195,10 @@ async function renderDetail(root, device, serviceStatus) {
     img?.classList.toggle('panel-thumb--zoomed');
   });
 
-  const { renderCityPicker } = await import('./cityPicker.js');
+  const [{ renderCityPicker }, remembered] = await Promise.all([
+    import('./cityPicker.js'),
+    getJson(`/api/dashboard-editor/${encodeURIComponent(device.id)}`),
+  ]);
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
 
   renderDashboardEditor(
@@ -197,6 +207,7 @@ async function renderDetail(root, device, serviceStatus) {
     serviceStatus.trainApi,
     serviceStatus.busApi,
     serviceStatus.trafficApi,
+    remembered,
   );
 }
 
