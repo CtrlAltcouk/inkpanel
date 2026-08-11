@@ -11,13 +11,13 @@ InkPanel keeps the ESP32 deliberately simple: the server collects data, builds t
 InkPanel's browser UI provides a Studio workspace for configuring each panel, arranging dashboard widgets, previewing the exact e-ink output, flashing boards and managing server updates. The screenshots below use demo data only.
 
 <p align="center">
-  <img src="docs/screenshots/studio.jpg" alt="InkPanel Studio dashboard with live e-ink preview and widget editor" width="900">
+  <img src="docs/screenshots/studio.svg" alt="InkPanel Studio dashboard with live e-ink preview and widget editor" width="900">
 </p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/device.jpg" alt="InkPanel device settings"></td>
-    <td width="50%"><img src="docs/screenshots/updates.jpg" alt="InkPanel transactional updater"></td>
+    <td width="50%"><img src="docs/screenshots/device.svg" alt="InkPanel device settings"></td>
+    <td width="50%"><img src="docs/screenshots/updates.svg" alt="InkPanel transactional updater"></td>
   </tr>
   <tr>
     <td align="center"><strong>Device settings</strong></td>
@@ -69,9 +69,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/mai
 
 The installer creates the LXC, installs the server dependencies and firmware toolchain, configures the service, and prepares the browser-flash package.
 
-### Local / other Linux host
+### Raspberry Pi / other Linux host
 
-Requires Node.js 22 or newer:
+InkPanel can run on a **Raspberry Pi 4 or Raspberry Pi 5** using a **64-bit Raspberry Pi OS / Debian** installation. The Pi uses the normal Linux installation path below; the Proxmox LXC installer above is not used on Raspberry Pi.
+
+A Raspberry Pi 5 is recommended when available because InkPanel uses Chromium for server-side dashboard rendering, but the same software stack works on ARM64 Linux. Requires Node.js 22 or newer.
 
 ```bash
 git clone https://github.com/CtrlAltcouk/inkpanel.git
