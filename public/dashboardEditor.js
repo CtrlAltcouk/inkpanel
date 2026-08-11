@@ -96,7 +96,7 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   if (type === 'trains') return trainControlsHtml(trainConfigured, trainKey);
   if (type === 'bus') return busControlsHtml(config, busConfigured, busId, busKey);
   if (type === 'traffic') return trafficControlsHtml(config, trafficConfigured, trafficKey);
-  return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
+  return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
 export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}) {
@@ -170,8 +170,38 @@ export function renderDashboardEditor(root, device, trainApi = { configured: fal
   renderLayout(root); renderEditor(root);
 }
 
-export function collectDashboardSections(root) { const state = stateByRoot.get(root); if (!state) throw new Error('dashboard editor is not initialised'); syncCurrent(root, state); return serialiseDashboardDraftState(state.slots); }
-export function collectRememberedDashboardSettings(root) { const state = stateByRoot.get(root); if (!state) throw new Error('dashboard editor is not initialised'); syncCurrent(root, state); return { slots: state.slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({ type, version: 1, config: clone(config) }))) }; }
-export function collectTrainApiKey(root) { const state = stateByRoot.get(root); if (!state) throw new Error('dashboard editor is not initialised'); return state.trainApiKeyDraft.trim(); }
-export function collectBusApiCredentials(root) { const state = stateByRoot.get(root); if (!state) throw new Error('dashboard editor is not initialised'); const appId = state.busAppIdDraft.trim(); const appKey = state.busAppKeyDraft.trim(); if (!appId && !appKey) return null; if (!appId || !appKey) throw new Error('Enter both the TransportAPI app ID and app key, or leave both blank.'); return { appId, appKey }; }
-export function collectTrafficApiKey(root) { const state = stateByRoot.get(root); if (!state) throw new Error('dashboard editor is not initialised'); return state.trafficApiKeyDraft.trim(); }
+export function collectDashboardSections(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  syncCurrent(root, state);
+  return serialiseDashboardDraftState(state.slots);
+}
+
+export function collectRememberedDashboardSettings(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  syncCurrent(root, state);
+  return { slots: state.slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({ type, version: 1, config: clone(config) }))) };
+}
+
+export function collectTrainApiKey(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  return state.trainApiKeyDraft.trim();
+}
+
+export function collectBusApiCredentials(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  const appId = state.busAppIdDraft.trim();
+  const appKey = state.busAppKeyDraft.trim();
+  if (!appId && !appKey) return null;
+  if (!appId || !appKey) throw new Error('Enter both the TransportAPI app ID and app key, or leave both blank.');
+  return { appId, appKey };
+}
+
+export function collectTrafficApiKey(root) {
+  const state = stateByRoot.get(root);
+  if (!state) throw new Error('dashboard editor is not initialised');
+  return state.trafficApiKeyDraft.trim();
+}
