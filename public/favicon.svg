@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="InkPanel">
+  <rect width="64" height="64" rx="14" fill="#0a0a0b"/>
+  <rect x="8" y="11" width="31" height="31" rx="8" fill="none" stroke="#f5f5f6" stroke-width="5"/>
+  <path d="M29 21h-7c-4 0-7 3-7 7v1c0 4 3 7 7 7h7" fill="none" stroke="#f5f5f6" stroke-width="4" stroke-linecap="round"/>
+  <rect x="27" y="23" width="29" height="29" rx="8" fill="#f7a4a2"/>
+  <path d="M35 44l6-14 6 14M38 39h6" fill="none" stroke="#0a0a0b" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
