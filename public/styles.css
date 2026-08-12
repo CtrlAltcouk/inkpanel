@@ -28,6 +28,13 @@
   font-display: swap;
 }
 
+/* Keep 100%-wide controls inside their cards at every viewport width. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   background: var(--bg-0);
   color: var(--fg-1);
@@ -68,6 +75,7 @@ h3 {
 }
 
 .card {
+  min-width: 0;
   background: var(--bg-2);
   border: 1px solid var(--line-1);
   border-radius: var(--radius-lg);
@@ -88,6 +96,8 @@ input[type="number"],
 select,
 textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bg-3);
   border: 1px solid var(--line-1);
   border-radius: var(--radius-sm);
@@ -101,6 +111,7 @@ textarea {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   resize: vertical;
+  overflow-wrap: anywhere;
 }
 
 input:focus,
@@ -144,10 +155,12 @@ button:hover { background: var(--brand-pink-hover); }
 button:active { background: var(--brand-pink-press); }
 
 .meta {
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   color: var(--fg-3);
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .status {
@@ -178,7 +191,7 @@ button:active { background: var(--brand-pink-press); }
   flex-wrap: wrap;
 }
 
-.row > * { flex: 1 1 200px; }
+.row > * { flex: 1 1 200px; min-width: 0; }
 
 .health {
   display: flex;
@@ -293,7 +306,13 @@ body { max-width: none; }
 .panel-meta { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-3); }
 .panel-card .status { margin-left: 0; align-self: flex-start; }
 
-.actions { display: flex; gap: var(--sp-3); align-items: center; }
+.actions {
+  min-width: 0;
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
 button.ghost { background: transparent; color: var(--brand-pink); border: 1px solid var(--brand-pink); }
 button.ghost:hover { background: var(--brand-pink-dim); }
 button:disabled { opacity: 1; background: var(--bg-3); color: var(--fg-3); cursor: default; }
