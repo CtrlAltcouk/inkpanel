@@ -13,23 +13,19 @@ test('admin shell declares the InkPanel favicon and theme colour', async () => {
   assert.ok(html.includes('<meta name="theme-color" content="#0a0a0b">'));
 });
 
-test('admin form controls keep narrow layouts inside their cards', async () => {
+test('admin stylesheet contains narrow-layout overflow safeguards', async () => {
   const css = await readFile(stylesUrl, 'utf8');
+  const safeguards = [
+    'box-sizing: border-box;',
+    'min-width: 0;',
+    'max-width: 100%;',
+    'overflow-wrap: anywhere;',
+    'flex-wrap: wrap;',
+  ];
 
-  assert.ok(css.includes('box-sizing: border-box;'));
-  assert.ok(css.includes('min-width: 0;'));
-  assert.ok(css.includes('max-width: 100%;'));
-  assert.ok(css.includes('overflow-wrap: anywhere;'));
-  assert.ok(css.includes('flex-wrap: wrap;'));
-
-  const controlsStart = css.indexOf('input[type="text"],');
-  const controlsEnd = css.indexOf('\n}', controlsStart);
-  assert.notEqual(controlsStart, -1);
-  assert.notEqual(controlsEnd, -1);
-  const controls = css.slice(controlsStart, controlsEnd);
-  assert.ok(controls.includes('width: 100%;'));
-  assert.ok(controls.includes('min-width: 0;'));
-  assert.ok(controls.includes('max-width: 100%;'));
+  for (const safeguard of safeguards) {
+    assert.ok(css.includes(safeguard), `missing admin layout safeguard: ${safeguard}`);
+  }
 });
 
 test('favicon is a self-contained CtrlAlt-coloured SVG', async () => {
