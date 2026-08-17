@@ -9,7 +9,7 @@ import {
 
 const MAX_WIDGET_TYPES = Object.keys(widgetRegistry).length;
 
-const dashboardEditorSlotSchema = z.array(dashboardWidgetSchema)
+export const dashboardEditorSlotSchema = z.array(dashboardWidgetSchema)
   .max(MAX_WIDGET_TYPES)
   .superRefine((widgets, ctx) => {
     const seen = new Set<string>();
@@ -46,7 +46,7 @@ interface DashboardEditorPreferencesFile {
   devices: Record<string, DashboardEditorSlots>;
 }
 
-function emptySlots(): DashboardEditorSlots {
+export function emptyDashboardEditorSlots(): DashboardEditorSlots {
   return [[], [], [], []];
 }
 
@@ -91,6 +91,10 @@ function mergeShared(current: DashboardWidget[], slots: DashboardEditorSlots): D
  * one last-useful config per type as a fallback for other panels. Calendar URLs
  * and route addresses can be sensitive, so it uses the same 0600 atomic file
  * helper as managed provider credentials.
+ *
+ * The persisted V1 format always keeps four draft buckets. Mini uses bucket 0;
+ * its HTTP route pads the remaining buckets so existing preference files stay
+ * backwards compatible and shared fallback settings work across both sizes.
  */
 export class DashboardEditorPreferencesStore {
   private state: DashboardEditorPreferencesFile = emptyFile();
@@ -117,7 +121,7 @@ export class DashboardEditorPreferencesStore {
   get(deviceId: string): { shared: DashboardWidget[]; slots: DashboardEditorSlots } {
     return {
       shared: clone(this.state.shared),
-      slots: clone(this.state.devices[deviceId] ?? emptySlots()),
+      slots: clone(this.state.devices[deviceId] ?? emptyDashboardEditorSlots()),
     };
   }
 
