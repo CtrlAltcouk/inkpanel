@@ -1,8 +1,8 @@
 import type {
   BusDeparture,
   CalendarEvent,
-  DashboardData,
   DashboardSectionData,
+  MiniDashboardData,
   OctopusAgileData,
   SourceHealth,
   TrainDeparture,
@@ -40,7 +40,7 @@ function eventRow(event: CalendarEvent, timezone: string): string {
   return `<div class="agenda-row"><span class="row-time">${esc(time)}</span><span class="row-text">${esc(event.title)}</span></div>`;
 }
 
-function calendar(section: Extract<DashboardSectionData, { type: 'calendar' }>, data: DashboardData): string {
+function calendar(section: Extract<DashboardSectionData, { type: 'calendar' }>, data: MiniDashboardData): string {
   if (!section.data) return state('CALENDAR', 'Unavailable');
   const events = section.data.today.length > 0 ? section.data.today : section.data.tomorrow;
   const day = section.data.today.length > 0 ? 'TODAY' : 'TOMORROW';
@@ -50,7 +50,7 @@ function calendar(section: Extract<DashboardSectionData, { type: 'calendar' }>, 
     ${stale(section.health, data.timezone)}`;
 }
 
-function weather(section: Extract<DashboardSectionData, { type: 'weather' }>, data: DashboardData): string {
+function weather(section: Extract<DashboardSectionData, { type: 'weather' }>, data: MiniDashboardData): string {
   if (!section.data) return state('WEATHER', 'Unavailable');
   const wx = section.data;
   return `<div class="mini-head">WEATHER</div>
@@ -68,7 +68,7 @@ function departureStatus(departure: TrainDeparture): string {
   return departure.platform ? `PLAT ${departure.platform}` : 'ON TIME';
 }
 
-function trains(section: Extract<DashboardSectionData, { type: 'trains' }>, data: DashboardData): string {
+function trains(section: Extract<DashboardSectionData, { type: 'trains' }>, data: MiniDashboardData): string {
   if (!section.health) return state('TRAINS', 'Not set up');
   if (!section.data) return state('TRAINS', 'Unavailable');
   if (section.data.departures.length === 0) return state('TRAINS', 'No departures');
@@ -88,7 +88,7 @@ function busTime(departure: BusDeparture): string {
   return departure.expected ?? departure.scheduled ?? '--:--';
 }
 
-function bus(section: Extract<DashboardSectionData, { type: 'bus' }>, data: DashboardData): string {
+function bus(section: Extract<DashboardSectionData, { type: 'bus' }>, data: MiniDashboardData): string {
   if (!section.health) return state('BUS', 'Not set up');
   if (!section.data) return state('BUS', 'Unavailable');
   if (section.data.departures.length === 0) return state('BUS', 'No departures');
@@ -102,7 +102,7 @@ function bus(section: Extract<DashboardSectionData, { type: 'bus' }>, data: Dash
     <div class="provider">TransportAPI</div>${stale(section.health, data.timezone)}`;
 }
 
-function traffic(section: Extract<DashboardSectionData, { type: 'traffic' }>, data: DashboardData): string {
+function traffic(section: Extract<DashboardSectionData, { type: 'traffic' }>, data: MiniDashboardData): string {
   if (!section.health) return state('TRAFFIC', 'Not set up');
   if (!section.data) return state('TRAFFIC', 'Unavailable');
   const route = section.data.warning ?? section.data.description ?? '';
@@ -131,7 +131,7 @@ function localIsoDate(iso: string, timezone: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-function octopusDayLabel(octopus: OctopusAgileData, data: DashboardData): string {
+function octopusDayLabel(octopus: OctopusAgileData, data: MiniDashboardData): string {
   if (octopus.isCurrent) return 'NOW';
   const slotDate = localIsoDate(octopus.cheapest.validFrom, data.timezone);
   if (slotDate === data.today.iso) return 'TODAY';
@@ -144,7 +144,7 @@ function octopusDayLabel(octopus: OctopusAgileData, data: DashboardData): string
   }).format(new Date(octopus.cheapest.validFrom)).toUpperCase();
 }
 
-function octopus(section: Extract<DashboardSectionData, { type: 'octopus' }>, data: DashboardData): string {
+function octopus(section: Extract<DashboardSectionData, { type: 'octopus' }>, data: MiniDashboardData): string {
   if (!section.health) return state('OCTOPUS AGILE', 'Not set up');
   if (!section.data) return state('OCTOPUS AGILE', 'Unavailable');
   const from = hhmm(section.data.cheapest.validFrom, data.timezone);
@@ -161,7 +161,7 @@ const BIN_DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
 };
 
-function bins(section: Extract<DashboardSectionData, { type: 'bins' }>, data: DashboardData): string {
+function bins(section: Extract<DashboardSectionData, { type: 'bins' }>, data: MiniDashboardData): string {
   if (!section.health) return state('BINS', 'Not set up');
   if (!section.data) return state('BINS', 'Unavailable');
   if (!section.data.next) return state('BINS', 'No collection scheduled');
@@ -175,7 +175,7 @@ function bins(section: Extract<DashboardSectionData, { type: 'bins' }>, data: Da
     ${stale(section.health, data.timezone)}`;
 }
 
-function renderWidget(section: DashboardSectionData, data: DashboardData): string {
+function renderWidget(section: DashboardSectionData, data: MiniDashboardData): string {
   switch (section.type) {
     case 'calendar': return calendar(section, data);
     case 'weather': return weather(section, data);
@@ -211,7 +211,6 @@ body{font-family:"Inter",Arial,sans-serif;-webkit-font-smoothing:none}
 }
 
 /** Dedicated 200×200 single-widget renderer. Never scales/crops the 800×480 dashboard. */
-export function renderMiniHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
-  const section = data.sections[0] ?? { type: 'empty' as const };
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}</style></head><body><div class="mini">${renderWidget(section, data)}</div></body></html>`;
+export function renderMiniHtml(data: MiniDashboardData, profile: PanelProfile, fontCss: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
 }
