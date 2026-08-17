@@ -10,7 +10,7 @@ These are release gates, not aspirations:
 - Existing firmware 0.1.4 remains able to enrol and fetch frames without sending any new headers.
 - Existing device configuration migrates losslessly; the four widget slots keep their order and configuration.
 - The current EE04 / old-V2 display driver is not modified to support the Mini.
-- A Mini failure must not change the behaviour, firmware package, or rendering of an existing large panel.
+- A Mini failure must not change the behaviour, published firmware package, or rendering of an existing large panel.
 
 ## Mini reference hardware
 
@@ -109,29 +109,60 @@ For a Mini panel, Studio shows:
 
 ## Firmware
 
-Mini firmware keeps the existing InkPanel device contract where practical:
+Mini and full-size builds now share the networking, provisioning, ETag, failure-backoff and sleep-scheduling code while selecting different physical display implementations at compile time.
+
+The default build remains the existing `esp32:esp32:XIAO_ESP32S3_Plus` target with firmware version `0.1.4`, the existing 16 MB partition map, and the untouched `OldV2EPD` driver.
+
+The Mini build uses:
+
+- FQBN `esp32:esp32:XIAO_ESP32S3`
+- compile target `INKPANEL_MINI`
+- firmware version `0.2.0-mini.1` during hardware validation
+- `MiniEPD`, a dedicated SSD1681 full-refresh driver
+- 5,000-byte frame buffer
+- profile header `X-InkPanel-Profile: ssd1681-200x200-mono`
+- a separate 8 MB partition map with one-time provisioning at `0x7FF000`
+- timer wake only for the first supported revision
+- no fabricated battery-voltage telemetry
+
+The device contract remains:
 
 `wake → Wi-Fi → GET frame → 304 = no panel refresh → 200 = refresh → sleep`
 
-It uses a 5,000-byte frame buffer and an SSD1681-specific display implementation. The current `firmware/inkpanel` EE04 target stays intact.
+A 200 response is not considered successful until the physical SSD1681 refresh completes. A display failure preserves the old ETag so the frame is retried after the existing exponential backoff. The Mini driver performs SSD1681 polarity conversion locally; the server wire format stays black-bit-1.
 
-The Mini firmware identifies itself with the Mini profile header. It uses timer wake as the primary wake source. Factory-reset/recovery behaviour must be explicitly mapped to controls available on the standard XIAO ESP32-S3 rather than assuming EE04 KEY1/KEY3 exist.
+CI compiles both firmware targets independently. The full-size build still publishes the existing `firmware/dist` package; Mini compilation is additive and produces a temporary hardware-validation artifact rather than replacing the production WebFlash package.
+
+## Hardware validation package
+
+During the draft phase CI publishes `inkpanel-mini-hardware-validation` for the real-device test. It contains:
+
+- compiled Mini binaries, including a merged image;
+- an Arduino-IDE-ready `arduino/inkpanel` copy of the exact production sources;
+- the Mini target baked into `config.h`;
+- the 8 MB Mini partition map installed as `partitions.csv`;
+- a `README_FIRST.txt` with flashing instructions.
+
+For Arduino IDE validation select the standard **XIAO ESP32S3**, not the Plus board. No extra compiler flags are required in the exported validation sketch.
 
 ## WebFlash and CI
 
-WebFlash will eventually expose the hardware choice explicitly rather than guessing from USB:
+WebFlash will expose the hardware choice explicitly rather than guessing from USB:
 
 - InkPanel 7.5-inch — XIAO ESP32-S3 Plus + EE04
 - InkPanel Mini 1.54-inch — XIAO ESP32-S3 + ePaper Driver Board + SSD1681
 
-Both production firmware targets must compile in CI before Mini support can merge. Existing large firmware manifest/update behaviour must remain backwards compatible while multi-target packaging is introduced deliberately.
+The existing full-size firmware manifest/update behaviour remains the compatibility baseline. Multi-target WebFlash packaging is added only after the real Mini validates the new SSD1681 driver, orientation and polarity.
 
-## Delivery order
+## Delivery status
 
-1. Green existing `main` baseline.
-2. V3 schema + profile registry + enrolment header, with old-profile compatibility tests.
-3. Per-device rendering + dedicated Mini renderer, including 5,000-byte framebuffer tests and unchanged large-profile regression tests.
-4. Studio single-widget mode.
-5. Mini production firmware and CI build.
-6. Hardware validation on the real 1.54-inch panel.
-7. WebFlash multi-hardware selection and documentation.
+- [x] Green existing `main` baseline.
+- [x] V3 schema + profile registry + backwards-compatible enrolment header.
+- [x] Per-device rendering + dedicated 200×200 Mini renderer and 5,000-byte tests.
+- [x] Studio single-widget mode and square preview.
+- [x] Production Mini firmware target added alongside the existing full-size target.
+- [x] CI compiles both standard XIAO Mini and XIAO ESP32-S3 Plus firmware targets.
+- [ ] Real-hardware validation of the production Mini driver: orientation, polarity, full refresh and sleep.
+- [ ] End-to-end Mini frame/ETag/304 validation against the feature-branch server.
+- [ ] WebFlash multi-hardware selection/package.
+- [ ] Final documentation, regression pass and merge.
