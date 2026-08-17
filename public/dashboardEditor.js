@@ -3,7 +3,7 @@ import { renderStationPicker } from './stationPicker.js';
 import { renderBusStopPicker } from './busStopPicker.js';
 import { getJson, sendJson } from './api.js';
 
-const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'todo', 'bins', 'empty'];
+const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'printers', 'todo', 'bins', 'empty'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
 const MINI_PROFILE = 'ssd1681-200x200-mono';
 const stateByRoot = new WeakMap();
@@ -11,6 +11,7 @@ const stateByRoot = new WeakMap();
 function typeLabel(type) {
   if (type === 'octopus') return 'Octopus Agile';
   if (type === 'todo') return 'To Do';
+  if (type === 'printers') return '3D Printers';
   return `${type[0].toUpperCase()}${type.slice(1)}`;
 }
 
@@ -21,6 +22,7 @@ function defaultConfig(type) {
   if (type === 'traffic') return { origin: '', destination: '' };
   if (type === 'octopus') return { tariffCode: '' };
   if (type === 'todo') return { listId: '' };
+  if (type === 'printers') return { printerIds: [] };
   if (type === 'bins') return { uprn: '' };
   return {};
 }
@@ -76,6 +78,15 @@ function rememberCell(cell, slot, type = slot.type) {
     slot.drafts[type] = { tariffCode: cell.querySelector('[data-octopus-tariff]')?.value.trim().toUpperCase() ?? '' };
   } else if (type === 'todo') {
     slot.drafts[type] = { listId: cell.querySelector('[data-todo-list]')?.value ?? '' };
+  } else if (type === 'printers') {
+    const mini = cell.querySelector('[data-printer-single]');
+    slot.drafts[type] = {
+      printerIds: mini
+        ? (mini.value ? [mini.value] : [])
+        : [...cell.querySelectorAll('[data-printer-select]:checked')]
+          .sort((a, b) => Number(a.dataset.printerPosition) - Number(b.dataset.printerPosition))
+          .map((input) => input.value),
+    };
   } else if (type === 'bins') {
     slot.drafts[type] = { uprn: cell.querySelector('[data-bins-uprn]').value.trim() };
   } else slot.drafts[type] = {};
@@ -111,7 +122,35 @@ function todoControlsHtml(config, lists) {
     <div class="todo-editor-create"><input type="text" data-todo-new-list maxlength="64" placeholder="New list name"><button type="button" class="ghost" data-todo-create>Create list</button></div>
     ${selectedControls}<p class="error" data-todo-error hidden></p>`;
 }
-function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists) {
+function printerConnectionHtml(printer) {
+  return `<div class="printer-connection" data-printer-connection="${esc(printer.id)}">
+    <div class="printer-connection-title"><strong>${esc(printer.name)}</strong><span>${esc(printer.baseUrl)}</span><small>${printer.apiKeyConfigured ? 'API key configured' : 'No API key'}</small></div>
+    <div class="printer-connection-edit" data-printer-connection-edit hidden>
+      <input type="text" data-printer-edit-name value="${esc(printer.name)}" maxlength="64" aria-label="Printer name">
+      <input type="url" data-printer-edit-url value="${esc(printer.baseUrl)}" aria-label="Moonraker URL">
+      <input type="password" data-printer-edit-key value="" maxlength="512" placeholder="${printer.apiKeyConfigured ? 'Leave blank to preserve API key' : 'Optional API key'}" autocomplete="new-password" aria-label="Moonraker API key">
+      ${printer.apiKeyConfigured ? '<label class="checkbox"><input type="checkbox" data-printer-clear-key> Clear saved API key</label>' : ''}
+      <button type="button" data-printer-save>Save connection</button>
+    </div>
+    <div class="printer-connection-actions"><button type="button" class="ghost" data-printer-test>Test</button><button type="button" class="ghost" data-printer-edit>Edit</button><button type="button" class="ghost" data-printer-delete>Delete</button></div>
+    <p class="meta" data-printer-test-result hidden></p>
+  </div>`;
+}
+
+function printerControlsHtml(config, printers, isMini) {
+  const selected = config.printerIds ?? [];
+  const selection = isMini
+    ? `<label>Printer</label><select data-printer-single><option value="">Choose a printer</option>${printers.map((printer) => `<option value="${esc(printer.id)}" ${selected[0] === printer.id ? 'selected' : ''}>${esc(printer.name)}</option>`).join('')}</select><p class="meta">InkPanel Mini displays one printer.</p>`
+    : `<label>Printers shown</label><div class="printer-selection">${printers.map((printer) => {
+        const index = selected.indexOf(printer.id);
+        return `<div class="printer-selection-row"><label class="checkbox"><input type="checkbox" data-printer-select data-printer-position="${index >= 0 ? index : 999}" value="${esc(printer.id)}" ${index >= 0 ? 'checked' : ''}> ${esc(printer.name)}</label>${index >= 0 ? `<span><button type="button" class="ghost" data-printer-order="-1" data-printer-id="${esc(printer.id)}" ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="ghost" data-printer-order="1" data-printer-id="${esc(printer.id)}" ${index === selected.length - 1 ? 'disabled' : ''}>&darr;</button></span>` : ''}</div>`;
+      }).join('') || '<p class="meta">Add a printer connection below.</p>'}</div><p class="meta">Select up to four printers. Order controls the overview.</p>`;
+  return `${selection}<div class="printer-management"><h4>Configured printers</h4>${printers.map(printerConnectionHtml).join('') || '<p class="meta">No printer connections yet.</p>'}
+    <div class="printer-connection-create"><input type="text" data-printer-new-name maxlength="64" placeholder="Printer name"><input type="url" data-printer-new-url placeholder="http://192.168.1.50"><input type="password" data-printer-new-key maxlength="512" placeholder="Optional API key" autocomplete="new-password"><button type="button" data-printer-create>Add printer</button></div>
+    <p class="error" data-printer-error hidden></p></div>`;
+}
+
+function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini) {
   if (type === 'calendar') return `<label>Secret iCal URLs, one per line</label><textarea data-calendar-urls rows="3" placeholder="https://calendar.example/private.ics">${esc((config.calendarUrls ?? []).join('\n'))}</textarea><p class="meta">For Google Calendar, <a href="https://support.google.com/calendar/answer/37648?hl=en-GB" target="_blank" rel="noreferrer">find your Secret address in iCal format</a>. Treat that URL like a password.</p>`;
   if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
@@ -120,12 +159,13 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   if (type === 'bus') return busControlsHtml(config, busConfigured, busId, busKey);
   if (type === 'traffic') return trafficControlsHtml(config, trafficConfigured, trafficKey);
   if (type === 'todo') return todoControlsHtml(config, todoLists);
+  if (type === 'printers') return printerControlsHtml(config, printers, isMini);
   return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
-export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = []) {
+export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists)}</div>`;
+  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini)}</div>`;
 }
 
 function summary(type, config, locationLabel, todoLists = []) {
@@ -136,6 +176,7 @@ function summary(type, config, locationLabel, todoLists = []) {
   if (type === 'traffic') return config.origin && config.destination ? `${config.origin} → ${config.destination}` : 'Not set up';
   if (type === 'octopus') return config.tariffCode || 'Not set up';
   if (type === 'todo') return todoLists.find((list) => list.id === config.listId)?.name || 'Not set up';
+  if (type === 'printers') return config.printerIds?.length ? `${config.printerIds.length} printer${config.printerIds.length === 1 ? '' : 's'}` : 'Not set up';
   if (type === 'bins') return config.uprn ? `UPRN ${config.uprn}` : 'Not set up';
   return 'Blank section';
 }
@@ -165,6 +206,10 @@ function markDashboardChanged(root) {
 
 function notifyTodoContentChanged(root) {
   root.dispatchEvent(new CustomEvent('inkpanel:todo-content-changed', { bubbles: true }));
+}
+
+function notifyPrinterContentChanged(root) {
+  root.dispatchEvent(new CustomEvent('inkpanel:printer-content-changed', { bubbles: true }));
 }
 
 function bindTodoEditor(root, state, slot, panel) {
@@ -253,6 +298,103 @@ function bindTodoEditor(root, state, slot, panel) {
   });
 }
 
+function bindPrinterEditor(root, state, slot, panel) {
+  const config = slot.drafts.printers ?? defaultConfig('printers');
+  slot.drafts.printers = config;
+  const showError = (err) => {
+    const output = panel.querySelector('[data-printer-error]');
+    if (!output) return;
+    output.textContent = err?.message ?? String(err);
+    output.hidden = false;
+  };
+  const mutate = async (button, operation, { contentChanged = false } = {}) => {
+    button.disabled = true;
+    try {
+      await operation();
+      state.printers = (await getJson('/api/printers')).printers;
+      if (contentChanged) notifyPrinterContentChanged(root);
+      renderLayout(root);
+      renderEditor(root);
+    } catch (err) {
+      button.disabled = false;
+      showError(err);
+    }
+  };
+
+  panel.querySelectorAll('[data-printer-new-name], [data-printer-new-url], [data-printer-new-key], [data-printer-edit-name], [data-printer-edit-url], [data-printer-edit-key], [data-printer-clear-key]').forEach((control) => {
+    control.addEventListener('input', (event) => event.stopPropagation());
+    control.addEventListener('change', (event) => event.stopPropagation());
+  });
+
+  panel.querySelector('[data-printer-single]')?.addEventListener('change', (event) => {
+    config.printerIds = event.currentTarget.value ? [event.currentTarget.value] : [];
+    markDashboardChanged(root);
+    renderLayout(root);
+    renderEditor(root);
+  });
+  panel.querySelectorAll('[data-printer-select]').forEach((input) => input.addEventListener('change', (event) => {
+    const id = event.currentTarget.value;
+    if (event.currentTarget.checked) {
+      if (config.printerIds.length >= 4) {
+        event.currentTarget.checked = false;
+        showError(new Error('Select up to four printers.'));
+        return;
+      }
+      config.printerIds.push(id);
+    } else config.printerIds = config.printerIds.filter((selectedId) => selectedId !== id);
+    markDashboardChanged(root);
+    renderLayout(root);
+    renderEditor(root);
+  }));
+  panel.querySelectorAll('[data-printer-order]').forEach((button) => button.addEventListener('click', (event) => {
+    const index = config.printerIds.indexOf(event.currentTarget.dataset.printerId);
+    const target = index + Number(event.currentTarget.dataset.printerOrder);
+    [config.printerIds[index], config.printerIds[target]] = [config.printerIds[target], config.printerIds[index]];
+    markDashboardChanged(root);
+    renderEditor(root);
+  }));
+
+  panel.querySelector('[data-printer-create]').addEventListener('click', (event) => {
+    const name = panel.querySelector('[data-printer-new-name]').value.trim();
+    const baseUrl = panel.querySelector('[data-printer-new-url]').value.trim();
+    const apiKey = panel.querySelector('[data-printer-new-key]').value.trim();
+    void mutate(event.currentTarget, () => sendJson('POST', '/api/printers', { name, baseUrl, apiKey }));
+  });
+
+  panel.querySelectorAll('[data-printer-connection]').forEach((connection) => {
+    const id = connection.dataset.printerConnection;
+    connection.querySelector('[data-printer-edit]').addEventListener('click', () => {
+      connection.querySelector('[data-printer-connection-edit]')?.toggleAttribute('hidden');
+    });
+    connection.querySelector('[data-printer-save]').addEventListener('click', (event) => {
+      const apiKey = connection.querySelector('[data-printer-edit-key]').value.trim();
+      void mutate(event.currentTarget, () => sendJson('PUT', `/api/printers/${encodeURIComponent(id)}`, {
+        name: connection.querySelector('[data-printer-edit-name]').value.trim(),
+        baseUrl: connection.querySelector('[data-printer-edit-url]').value.trim(),
+        apiKey,
+        clearApiKey: Boolean(connection.querySelector('[data-printer-clear-key]')?.checked),
+      }), { contentChanged: true });
+    });
+    connection.querySelector('[data-printer-test]').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const output = connection.querySelector('[data-printer-test-result]');
+      button.disabled = true;
+      try {
+        const result = await sendJson('POST', `/api/printers/${encodeURIComponent(id)}/test`);
+        output.textContent = result.ok ? `Connected: ${result.status.state.toUpperCase()}` : result.error;
+        output.hidden = false;
+      } catch (err) {
+        output.textContent = err?.message ?? String(err);
+        output.hidden = false;
+      } finally { button.disabled = false; }
+    });
+    connection.querySelector('[data-printer-delete]').addEventListener('click', (event) => {
+      if (!globalThis.confirm('Delete this printer connection?')) return;
+      void mutate(event.currentTarget, () => sendJson('DELETE', `/api/printers/${encodeURIComponent(id)}`));
+    });
+  });
+}
+
 function renderEditor(root) {
   const state = stateByRoot.get(root);
   const index = state.selectedIndex;
@@ -263,7 +405,7 @@ function renderEditor(root) {
     { configured: state.trainApiConfigured, keyDraft: state.trainApiKeyDraft },
     { configured: state.busApiConfigured, appIdDraft: state.busAppIdDraft, appKeyDraft: state.busAppKeyDraft },
     { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft },
-    slotPosition(state, index), state.todoLists);
+    slotPosition(state, index), state.todoLists, state.printers, state.isMini);
 
   panel.querySelector('[data-widget-type]').addEventListener('change', (event) => {
     const previous = slot.type;
@@ -283,13 +425,15 @@ function renderEditor(root) {
     panel.querySelector('[data-traffic-api-key]').addEventListener('input', (e) => { state.trafficApiKeyDraft = e.currentTarget.value; });
   } else if (slot.type === 'todo') {
     bindTodoEditor(root, state, slot, panel);
+  } else if (slot.type === 'printers') {
+    bindPrinterEditor(root, state, slot, panel);
   }
 }
 
-export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = []) {
+export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = []) {
   const slots = createDashboardDraftState(device.dashboardSections, remembered);
   const isMini = device.panelProfileId === MINI_PROFILE;
-  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists) });
+  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers) });
   root.innerHTML = `<div class="dashboard-composer ${isMini ? 'dashboard-composer--single' : ''}"><div class="dashboard-layout-map ${isMini ? 'dashboard-layout-map--single' : ''}" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>`;
   renderLayout(root); renderEditor(root);
 }

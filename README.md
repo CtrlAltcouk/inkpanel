@@ -137,6 +137,7 @@ Additional provider notes:
 - [Bus and Traffic](docs/bus-traffic.md)
 - [Octopus Agile](docs/octopus-agile.md)
 - [To Do](docs/todo.md)
+- [Klipper 3D Printers](docs/klipper-printers.md)
 - [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
 
 ## Hardware
@@ -211,6 +212,7 @@ docs/         current deployment, flashing, provider and hardware documentation
 - [Bus and Traffic](docs/bus-traffic.md)
 - [Octopus Agile](docs/octopus-agile.md)
 - [To Do](docs/todo.md)
+- [Klipper 3D Printers](docs/klipper-printers.md)
 - [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
 - [Hardware verification](docs/hardware/verification.md)
 

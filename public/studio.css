@@ -363,6 +363,21 @@ body {
 }
 .todo-editor-row input { margin: 0; }
 .todo-editor-row--done input[type="text"] { color: var(--fg-3); text-decoration: line-through; }
+
+.printer-selection { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.printer-selection-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.printer-selection-row .checkbox { margin: 0; }
+.printer-selection-row > span { display: flex; gap: 4px; }
+.printer-selection-row button { min-width: 34px; padding: 5px 8px; }
+.printer-management { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line-1); }
+.printer-management h4 { margin: 0 0 var(--sp-3); }
+.printer-connection { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line-1); }
+.printer-connection-title { display: grid; gap: 2px; min-width: 0; }
+.printer-connection-title span { color: var(--fg-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.printer-connection-title small { color: var(--fg-3); }
+.printer-connection-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.printer-connection-edit, .printer-connection-create { display: grid; gap: var(--sp-2); margin-top: var(--sp-2); }
+.printer-connection-create { padding-top: var(--sp-3); }
 .todo-editor-row .todo-editor-move,
 .todo-editor-row .todo-editor-delete { min-height: 32px; margin: 0; padding: 4px; }
 .todo-editor-row .todo-editor-delete { color: var(--danger); }

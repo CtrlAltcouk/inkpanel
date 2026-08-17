@@ -6,6 +6,7 @@ import type {
   DashboardData,
   DashboardSectionData,
   OctopusAgileData,
+  PrinterStatus,
   SourceHealth,
   TodoData,
   TrafficData,
@@ -192,6 +193,55 @@ const TODO_CSS = `.todo-list{display:flex;flex-direction:column;gap:5px;overflow
 .todo-row>span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .todo-box{width:13px;height:13px;border:2px solid #000;}`;
 
+function duration(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  const minutes = Math.max(0, Math.round(seconds / 60));
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours ? `${hours}h ${remainder}m` : `${remainder}m`;
+}
+
+function progressBar(percent: number | null, className = 'printer-progress'): string {
+  if (percent === null) return '';
+  return `<div class="${className}"><span style="width:${percent}%"></span></div>`;
+}
+
+function printerMeta(printer: PrinterStatus): string {
+  const eta = duration(printer.remainingSeconds);
+  const layer = printer.currentLayer !== null && printer.totalLayers !== null
+    ? `Layer ${printer.currentLayer} / ${printer.totalLayers}` : null;
+  return [eta ? `${eta} remaining` : null, layer].filter(Boolean).map((value) => `<span>${esc(value!)}</span>`).join('');
+}
+
+function printerHero(printer: PrinterStatus): string {
+  const active = printer.state === 'printing' || printer.state === 'paused';
+  if (!active) {
+    return `<div class="printer-hero"><div class="printer-hero-head"><strong>${esc(printer.name)}</strong><span>${esc(printer.state.toUpperCase())}</span></div><div class="printer-state"><strong>${esc(printer.state.toUpperCase())}</strong><span>${esc(printer.message ?? (printer.state === 'idle' ? 'Ready' : ''))}</span></div></div>`;
+  }
+  const temps = [
+    printer.nozzle ? `NOZZLE ${printer.nozzle.current}° / ${printer.nozzle.target}°` : null,
+    printer.bed ? `BED ${printer.bed.current}° / ${printer.bed.target}°` : null,
+  ].filter(Boolean).join('    ');
+  return `<div class="printer-hero"><div class="printer-hero-head"><strong>${esc(printer.name)}</strong><span>${esc(printer.state.toUpperCase())}</span></div>
+    <div class="printer-percent disp tnum">${printer.progressPercent ?? 0}%</div>${progressBar(printer.progressPercent)}
+    ${printer.filename ? `<div class="printer-file">${esc(printer.filename)}</div>` : ''}
+    <div class="printer-meta tnum">${printerMeta(printer)}</div>
+    ${temps ? `<div class="printer-temps tnum">${esc(temps)}</div>` : ''}</div>`;
+}
+
+function printersCell(section: Extract<DashboardSectionData, { type: 'printers' }>): string {
+  if (!section.configured || !section.data) return emptySlot('3D Printers — not set up');
+  if (section.data.printers.length === 1) return printerHero(section.data.printers[0]!);
+  return `<div class="printer-multi">${section.data.printers.slice(0, 4).map((printer) => {
+    const active = printer.state === 'printing' || printer.state === 'paused';
+    const value = printer.progressPercent !== null && active
+      ? `${printer.progressPercent}%` : printer.state.toUpperCase();
+    return `<div class="printer-multi-row"><div><strong>${esc(printer.name)}</strong><span>${esc(value)}</span></div>${progressBar(active ? printer.progressPercent : null, 'printer-progress printer-progress--small')}</div>`;
+  }).join('')}</div>`;
+}
+
+const PRINTER_CSS = `.printer-hero{height:116px;overflow:hidden}.printer-hero-head{display:flex;justify-content:space-between;gap:10px;font-size:11px;font-weight:800;letter-spacing:.04em}.printer-hero-head strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.printer-percent{text-align:center;font-size:31px;line-height:.9;margin-top:2px}.printer-progress{height:12px;border:2px solid #000;margin-top:3px;padding:1px}.printer-progress>span{display:block;height:100%;background:#000}.printer-file{font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}.printer-meta{display:flex;justify-content:space-between;font-size:9px;font-weight:700;margin-top:2px}.printer-temps{font-size:8px;font-weight:700;margin-top:3px;white-space:pre}.printer-state{height:91px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.printer-state strong{font-size:24px}.printer-state span{font-size:10px;margin-top:4px}.printer-multi{height:116px;display:grid;grid-template-rows:repeat(4,minmax(0,1fr));gap:2px;overflow:hidden}.printer-multi-row>div:first-child{display:flex;justify-content:space-between;gap:8px;font-size:10px;line-height:12px}.printer-multi-row strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.printer-progress--small{height:7px;margin-top:1px;padding:0}`;
+
 function renderSection(section: DashboardSectionData, data: DashboardData, position: string): string {
   if (section.type === 'empty') return `<div class="cell cell--${position}"></div>`;
   let label: string;
@@ -225,6 +275,10 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
       label = 'To Do';
       content = todoCell(section.data, section.configured);
       break;
+    case 'printers':
+      label = '3D Printers';
+      content = printersCell(section);
+      break;
     case 'bins':
       label = 'Bins';
       content = binsCell(section.data, section.health);
@@ -236,5 +290,6 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
   const positions = ['tl', 'tr', 'bl', 'br'];
   const todoCss = data.sections.some((section) => section.type === 'todo') ? TODO_CSS : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}${todoCss}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
+  const printerCss = data.sections.some((section) => section.type === 'printers') ? PRINTER_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}${todoCss}${printerCss}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
 }

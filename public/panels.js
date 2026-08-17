@@ -143,6 +143,10 @@ export function bindTodoPreviewRefresh(editor, root, deviceId) {
   editor.addEventListener('inkpanel:todo-content-changed', () => refreshPanelPreview(root, deviceId));
 }
 
+export function bindPrinterPreviewRefresh(editor, root, deviceId) {
+  editor.addEventListener('inkpanel:printer-content-changed', () => refreshPanelPreview(root, deviceId));
+}
+
 async function save(event, root) {
   event.preventDefault();
   const form = event.target; const raw = Object.fromEntries(new FormData(form));
@@ -198,12 +202,13 @@ async function renderDetail(root, device, serviceStatus) {
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
   const dashboardEditor = detailEl.querySelector('#dashboard-editor');
   bindTodoPreviewRefresh(dashboardEditor, root, device.id);
-  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists);
+  bindPrinterPreviewRefresh(dashboardEditor, root, device.id);
+  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists')]);
+  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers')]);
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists });
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers });
 }
