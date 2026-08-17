@@ -72,6 +72,7 @@ export type DashboardSectionData =
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 
+/** Existing 800×480 renderer contract. Keep this exact four-slot shape. */
 export type DashboardSectionDataTuple = [
   DashboardSectionData,
   DashboardSectionData,
@@ -79,7 +80,9 @@ export type DashboardSectionDataTuple = [
   DashboardSectionData,
 ];
 
-export interface DashboardData {
+export type MiniDashboardSectionDataTuple = [DashboardSectionData];
+
+interface DashboardDataBase {
   /** When this object was built. Excluded from the content hash. */
   generatedAt: string;
   /** When the rendered content last actually changed. Not rendered. */
@@ -88,9 +91,20 @@ export interface DashboardData {
   today: TodayInfo;
   headerWeather: WeatherData | null;
   headerWeatherHealth: SourceHealth;
-  sections: DashboardSectionDataTuple;
   battery: BatteryInfo;
 }
+
+/** Existing large-panel model. Deliberately still exactly four sections. */
+export interface DashboardData extends DashboardDataBase {
+  sections: DashboardSectionDataTuple;
+}
+
+/** 1.54-inch Mini model. It has exactly one section, not three hidden slots. */
+export interface MiniDashboardData extends DashboardDataBase {
+  sections: MiniDashboardSectionDataTuple;
+}
+
+export type ProfileDashboardData = DashboardData | MiniDashboardData;
 
 export type { TrainData, TrainDeparture, DepartureStatus } from '../sources/train.ts';
 export type { BinsData, BinCollection, BinType } from '../sources/bins.ts';

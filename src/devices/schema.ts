@@ -1,7 +1,11 @@
 import { z } from 'zod';
-import { DEFAULT_DASHBOARD_SECTIONS, dashboardSectionsSchema } from '../widgets/registry.ts';
+import {
+  DEFAULT_DASHBOARD_SECTIONS,
+  dashboardSectionsSchema,
+  dashboardWidgetSchema,
+} from '../widgets/registry.ts';
 
-export const CURRENT_DEVICE_STORE_SCHEMA_VERSION = 2 as const;
+export const CURRENT_DEVICE_STORE_SCHEMA_VERSION = 3 as const;
 
 /** Device IDs come from firmware; keep them to the existing safe alphabet. */
 const deviceIdV1Schema = z
@@ -176,7 +180,7 @@ export const deviceStoreV2PersistenceSchema = z
   .superRefine(rejectDuplicateDeviceIds);
 export type DeviceStoreV2Persistence = z.infer<typeof deviceStoreV2PersistenceSchema>;
 
-/** Current V2 runtime schema: frozen envelope plus the installed widget registry. */
+/** Frozen V2 runtime schema: frozen envelope plus the installed widget registry. */
 export const deviceRecordV2Schema = deviceRecordV2PersistenceSchema.extend({
   dashboardSections: dashboardSectionsSchema,
 });
@@ -187,7 +191,7 @@ export const deviceStoreV2Schema = z
   .superRefine(rejectDuplicateDeviceIds);
 export type DeviceStoreV2 = z.infer<typeof deviceStoreV2Schema>;
 
-/** Current runtime defaults. Historical migrations never call this. */
+/** Frozen V2 runtime defaults. Historical migrations never call current defaults. */
 export function defaultDeviceV2(id: string): DeviceRecordV2 {
   return {
     id,
@@ -211,6 +215,101 @@ export function defaultDeviceV2(id: string): DeviceRecordV2 {
     locationLabel: '',
     lastWakeSeconds: null,
   };
+}
+
+/**
+ * V3 introduces multiple physical display profiles and variable dashboard slot
+ * counts. V1/V2 stay frozen so old persisted files remain independently
+ * parseable and migrations remain deterministic.
+ */
+export const panelProfileIdV3Schema = z.enum([
+  'wft0583-800x480-mono',
+  'ssd1681-200x200-mono',
+]);
+
+export const dashboardSectionsV3PersistenceSchema = z
+  .array(dashboardWidgetEnvelopeV2Schema)
+  .min(1)
+  .max(4);
+
+export const dashboardSectionsV3Schema = z
+  .array(dashboardWidgetSchema)
+  .min(1)
+  .max(4);
+
+function requireProfileSlotCount(
+  device: { panelProfileId: z.infer<typeof panelProfileIdV3Schema>; dashboardSections: unknown[] },
+  ctx: z.RefinementCtx,
+): void {
+  const expected = device.panelProfileId === 'ssd1681-200x200-mono' ? 1 : 4;
+  if (device.dashboardSections.length !== expected) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['dashboardSections'],
+      message: `${device.panelProfileId} requires exactly ${expected} dashboard section${expected === 1 ? '' : 's'}`,
+    });
+  }
+}
+
+const deviceRecordV3PersistenceBaseSchema = z.strictObject({
+  id: deviceIdV1Schema,
+  name: z.string().min(1).max(64),
+  claimed: z.boolean(),
+  timezone: timezoneV1Schema,
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  dashboardSections: dashboardSectionsV3PersistenceSchema,
+  panelProfileId: panelProfileIdV3Schema,
+  quietHoursStart: z.number().int().min(0).max(23),
+  quietHoursEnd: z.number().int().min(0).max(23),
+  activeIntervalSeconds: wakeIntervalV1Schema,
+  lowBatteryIntervalSeconds: wakeIntervalV1Schema,
+  lowBatteryVolts: z.number().min(2.5).max(4.2),
+  unclaimedIntervalSeconds: wakeIntervalV1Schema,
+  lastSeenAt: nullableStringV1Schema,
+  lastBatteryVolts: z.number().nullable(),
+  lastEtag: nullableStringV1Schema,
+  lastFirmwareVersion: nullableStringV1Schema,
+  locationLabel: z.string().max(120),
+  lastWakeSeconds: z.number().int().min(60).max(86_400).nullable(),
+});
+
+export const deviceRecordV3PersistenceSchema = deviceRecordV3PersistenceBaseSchema
+  .superRefine(requireProfileSlotCount);
+export type DeviceRecordV3Persistence = z.infer<typeof deviceRecordV3PersistenceSchema>;
+
+export const deviceStoreV3PersistenceSchema = z
+  .strictObject({
+    schemaVersion: z.literal(3),
+    devices: z.array(deviceRecordV3PersistenceSchema),
+  })
+  .superRefine(rejectDuplicateDeviceIds);
+export type DeviceStoreV3Persistence = z.infer<typeof deviceStoreV3PersistenceSchema>;
+
+export const deviceRecordV3Schema = deviceRecordV3PersistenceBaseSchema
+  .extend({ dashboardSections: dashboardSectionsV3Schema })
+  .superRefine(requireProfileSlotCount);
+export type DeviceRecordV3 = z.infer<typeof deviceRecordV3Schema>;
+
+export const deviceStoreV3Schema = z
+  .strictObject({ schemaVersion: z.literal(3), devices: z.array(deviceRecordV3Schema) })
+  .superRefine(rejectDuplicateDeviceIds);
+export type DeviceStoreV3 = z.infer<typeof deviceStoreV3Schema>;
+
+/** Current runtime defaults. Historical migrations never call this. */
+export function defaultDeviceV3(
+  id: string,
+  panelProfileId: z.infer<typeof panelProfileIdV3Schema> = 'wft0583-800x480-mono',
+): DeviceRecordV3 {
+  const v2 = defaultDeviceV2(id);
+  const dashboardSections = panelProfileId === 'ssd1681-200x200-mono'
+    ? [{ type: 'weather' as const, version: 1 as const, config: {} }]
+    : structuredClone(DEFAULT_DASHBOARD_SECTIONS);
+  return deviceRecordV3Schema.parse({
+    ...v2,
+    panelProfileId,
+    dashboardSections,
+  });
 }
 
 /**
@@ -295,6 +394,18 @@ export function migrateV1ToV2(parsed: unknown): DeviceStoreV2Persistence {
   });
 }
 
+/** A permanently frozen V2 -> V3 migration. Existing four-slot panels are unchanged. */
+export function migrateV2ToV3(parsed: unknown): DeviceStoreV3Persistence {
+  const v2 = deviceStoreV2PersistenceSchema.parse(parsed);
+  return deviceStoreV3PersistenceSchema.parse({
+    schemaVersion: 3,
+    devices: v2.devices.map((device) => ({
+      ...device,
+      dashboardSections: [...device.dashboardSections],
+    })),
+  });
+}
+
 export type DeviceStoreMigration = (file: unknown) => unknown;
 export type DeviceStoreMigrations = Readonly<Partial<Record<number, DeviceStoreMigration>>>;
 
@@ -314,17 +425,17 @@ export function runDeviceStoreMigrations(
   return migrated;
 }
 
-// Keyed by the input version. Add V1 -> V2 at key 1, V2 -> V3 at key 2, and
-// advance the current aliases below. Historical schemas and migrations stay put.
+// Keyed by the input version. Historical schemas and migrations stay put.
 const MIGRATIONS: DeviceStoreMigrations = {
   0: migrateV0ToV1,
   1: migrateV1ToV2,
+  2: migrateV2ToV3,
 };
 
 // Runtime aliases point only at the latest schema. Migrations never use them.
-export const currentDeviceRecordSchema = deviceRecordV2Schema;
-export const currentDeviceStoreSchema = deviceStoreV2Schema;
-export type CurrentDeviceStoreFile = DeviceStoreV2;
+export const currentDeviceRecordSchema = deviceRecordV3Schema;
+export const currentDeviceStoreSchema = deviceStoreV3Schema;
+export type CurrentDeviceStoreFile = DeviceStoreV3;
 export const deviceIdSchema = deviceIdV1Schema;
 export const timezoneSchema = timezoneV1Schema;
 

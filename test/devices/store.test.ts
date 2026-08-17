@@ -9,7 +9,11 @@ import {
   DeviceStoreError,
   type DeviceStoreErrorCode,
 } from '../../src/devices/store.ts';
-import { currentDeviceRecordSchema, defaultDeviceV1 } from '../../src/devices/schema.ts';
+import {
+  CURRENT_DEVICE_STORE_SCHEMA_VERSION,
+  currentDeviceRecordSchema,
+  defaultDeviceV1,
+} from '../../src/devices/schema.ts';
 
 async function withStore(fn: (store: DeviceStore, path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-dev-'));
@@ -69,7 +73,7 @@ test('writes valid JSON atomically', async () => {
   await withStore(async (store, path) => {
     await store.getOrCreate('esp32-a1b2c3');
     const parsed = JSON.parse(await readFile(path, 'utf8'));
-    assert.equal(parsed.schemaVersion, 2);
+    assert.equal(parsed.schemaVersion, CURRENT_DEVICE_STORE_SCHEMA_VERSION);
     assert.ok(Array.isArray(parsed.devices));
   });
 });
@@ -173,8 +177,6 @@ test('valid JSON with an invalid top-level store shape also fails closed', async
 
 test('non-ENOENT filesystem read failures are not disguised as a new installation', async () => {
   await withStore(async (_store, path) => {
-    // A directory at the config-file path reliably makes readFile fail on the
-    // Linux environment used by CI without relying on chmod/root semantics.
     await mkdir(path);
     const reopened = new DeviceStore(path);
     const err = await expectStoreError(() => reopened.list(), 'config_io');
@@ -199,10 +201,10 @@ test('new devices start with the migrated four-section dashboard', async () => {
   });
 });
 
-test('current V2 defaults are explicit and return independent section configs', () => {
+test('current runtime defaults are explicit and return independent section configs', () => {
   const first = defaultDevice('default-a');
   const second = defaultDevice('default-b');
-  assert.equal('calendarUrls' in first, false, 'runtime defaults are V2-shaped, not historical V1');
+  assert.equal('calendarUrls' in first, false, 'runtime defaults use the widget-envelope shape, not historical V1 fields');
   assert.deepEqual(first.dashboardSections.map((section) => section.type), ['calendar', 'weather', 'trains', 'bins']);
   if (first.dashboardSections[0].type === 'calendar') {
     first.dashboardSections[0].config.calendarUrls.push('https://example.com/a.ics');
@@ -214,7 +216,6 @@ test('current V2 defaults are explicit and return independent section configs', 
 
 test('a minimal legacy config migrates in memory to a complete current record', async () => {
   await withStore(async (_store, path) => {
-    // A record with none of the new fields, as Spec 1 would have written it.
     await writeFile(path, JSON.stringify({
       devices: [{ id: 'esp32-old', name: 'Old panel', claimed: true }],
     }), 'utf8');
@@ -298,7 +299,7 @@ test('legacy migration preserves explicit user configuration and defaults only m
       schemaVersion: number;
       devices: unknown[];
     };
-    assert.equal(persisted.schemaVersion, 2);
+    assert.equal(persisted.schemaVersion, CURRENT_DEVICE_STORE_SCHEMA_VERSION);
     assert.equal(currentDeviceRecordSchema.safeParse(persisted.devices[0]).success, true);
   });
 });
@@ -366,7 +367,11 @@ for (const [description, sections] of [
 
 test('a future schema version is unsupported and remains byte-for-byte unchanged', async () => {
   await withStore(async (_store, path) => {
-    const original = '{"schemaVersion":3,"devices":[],"futureFeature":true}\n';
+    const original = `${JSON.stringify({
+      schemaVersion: CURRENT_DEVICE_STORE_SCHEMA_VERSION + 1,
+      devices: [],
+      futureFeature: true,
+    })}\n`;
     await writeFile(path, original, 'utf8');
 
     const reopened = new DeviceStore(path);

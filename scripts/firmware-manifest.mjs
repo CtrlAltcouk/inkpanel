@@ -7,30 +7,39 @@
  * from the firmware source prevents the browser flasher from inventing a
  * flash address independently of the partition table compiled into the board.
  *
- * Usage: node scripts/firmware-manifest.mjs <distDir> <sketchDir>
+ * Usage: node scripts/firmware-manifest.mjs <distDir> <sketchDir> [full|mini]
  */
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// The three region images used for a settings-preserving firmware update.
-// The custom InkPanel partition table deliberately keeps these standard
-// offsets stable so existing boards can move to it without relocating NVS or
-// the running application.
 const PARTITION_TABLE_OFFSET = '0x8000';
 const APP_OFFSET = '0x10000';
 const PROVISION_PARTITION_NAME = 'provision';
 const PROVISION_FORMAT_VERSION = 1;
+const TARGETS = new Set(['full', 'mini']);
 
-/** Read the version the firmware will actually report. */
-export async function readFirmwareVersion(sketchDir) {
+/** Read the version the selected firmware target will actually report. */
+export async function readFirmwareVersion(sketchDir, target = 'full') {
+  if (!TARGETS.has(target)) throw new Error(`unknown firmware target: ${target}`);
   const configPath = join(sketchDir, 'config.h');
   const text = await readFile(configPath, 'utf8');
-  const match = text.match(/FIRMWARE_VERSION\s*=\s*"([^"]+)"/);
-  if (!match) {
+  const versions = [...text.matchAll(/FIRMWARE_VERSION\s*=\s*"([^"]+)"/g)].map((match) => match[1]);
+  if (versions.length === 0) {
     throw new Error(`could not find FIRMWARE_VERSION in ${configPath}`);
   }
-  return match[1];
+
+  // config.h deliberately keeps the legacy/full-size literal first so callers
+  // that predate multi-target firmware continue to read the same value. Mini is
+  // the second compile branch. Fail rather than silently reusing the full-size
+  // version if that contract is ever changed accidentally.
+  if (target === 'mini') {
+    if (versions.length < 2) {
+      throw new Error(`could not find Mini FIRMWARE_VERSION in ${configPath}`);
+    }
+    return versions[1];
+  }
+  return versions[0];
 }
 
 function parsePartitionNumber(value, field) {
@@ -52,11 +61,6 @@ function parsePartitionNumber(value, field) {
   return number;
 }
 
-/**
- * Read the address the firmware itself knows as the `provision` partition.
- * The browser writes secrets only to this explicitly reserved sector; it must
- * never guess an unused-looking address.
- */
 export async function readProvisioningPartition(sketchDir) {
   const path = join(sketchDir, 'partitions.csv');
   const text = await readFile(path, 'utf8');
@@ -80,8 +84,9 @@ export async function readProvisioningPartition(sketchDir) {
   return { offset, size, format: PROVISION_FORMAT_VERSION };
 }
 
-export async function buildManifest(dist, sketchDir) {
-  const version = await readFirmwareVersion(sketchDir);
+export async function buildManifest(dist, sketchDir, target = 'full') {
+  if (!TARGETS.has(target)) throw new Error(`unknown firmware target: ${target}`);
+  const version = await readFirmwareVersion(sketchDir, target);
 
   const report = JSON.parse(await readFile(join(dist, 'build-report.json'), 'utf8'));
   const rawProps = report.builder_result?.build_properties ?? report.build_properties;
@@ -105,9 +110,6 @@ export async function buildManifest(dist, sketchDir) {
   const files = await readdir(dist);
   const find = (suffix) => files.find((f) => f.endsWith(suffix));
 
-  // A routine update must not write through NVS or the one-time provisioning
-  // sector. These three binaries cover only bootloader, partition table and
-  // application regions, so stored Wi-Fi/server settings remain untouched.
   const updateParts = [
     { path: find('.bootloader.bin'), offset: bootloaderAddr },
     { path: find('.partitions.bin'), offset: PARTITION_TABLE_OFFSET },
@@ -120,16 +122,11 @@ export async function buildManifest(dist, sketchDir) {
     }
   }
 
-  // Fresh installs and factory recovery prefer arduino-cli's complete merged
-  // image. New-board setup overlays the one-time provisioning record after
-  // this image, before the ESP32 is allowed to boot.
   const merged = find('.merged.bin');
   const parts = merged
     ? [{ path: merged, offset: '0x0' }]
     : updateParts;
 
-  // An empty binary is worse than a missing one. esptool-js silently skips
-  // zero-length images, leaving a flash that appears successful but cannot boot.
   const pathsToValidate = [...new Set([...parts, ...updateParts].map((part) => part.path))];
   for (const path of pathsToValidate) {
     const { size } = await stat(join(dist, path));
@@ -143,6 +140,7 @@ export async function buildManifest(dist, sketchDir) {
   const provisioning = await readProvisioningPartition(sketchDir);
   const normalise = (list) => list.map((p) => ({ path: p.path, offset: Number(p.offset) }));
   const manifest = {
+    target,
     version,
     builtAt: new Date().toISOString(),
     parts: normalise(parts),
@@ -155,13 +153,13 @@ export async function buildManifest(dist, sketchDir) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [dist, sketchDir] = process.argv.slice(2);
+  const [dist, sketchDir, target = 'full'] = process.argv.slice(2);
   if (!dist || !sketchDir) {
-    console.error('usage: firmware-manifest.mjs <distDir> <sketchDir>');
+    console.error('usage: firmware-manifest.mjs <distDir> <sketchDir> [full|mini]');
     process.exit(1);
   }
   try {
-    await buildManifest(dist, sketchDir);
+    await buildManifest(dist, sketchDir, target);
   } catch (err) {
     console.error(err.message);
     process.exit(1);

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type {
   DashboardData,
   DashboardSectionData,
-  DashboardSectionDataTuple,
+  MiniDashboardData,
+  ProfileDashboardData,
   SourceHealth,
   WeatherData,
 } from '../model/dashboard.ts';
@@ -31,14 +32,15 @@ import {
 } from '../sources/octopusAgile.ts';
 import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
-import { renderHtml } from './template.ts';
+import { renderProfileHtml } from './profileTemplate.ts';
 import { loadFontCss } from './fonts.ts';
 
 const SOURCE_TIMEOUT_MS = 8000;
 
 export interface SourceBundle {
   headerWeather: RunOutcome<WeatherData>;
-  sections: DashboardSectionDataTuple;
+  /** Profile validation decides whether there must be one or four entries. */
+  sections: DashboardSectionData[];
 }
 
 export interface FrameDeps {
@@ -233,7 +235,7 @@ export class FrameService {
       headerWeatherPromise,
       Promise.all(device.dashboardSections.map(sectionRequest)),
     ]);
-    return { headerWeather, sections: sections as DashboardSectionDataTuple };
+    return { headerWeather, sections };
   }
 
   private buildData(
@@ -241,7 +243,7 @@ export class FrameService {
     bundle: SourceBundle,
     batteryVolts: number | null,
     contentChangedAt: string,
-  ): DashboardData {
+  ): ProfileDashboardData {
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: device.timezone,
@@ -262,7 +264,7 @@ export class FrameService {
     }).formatToParts(now);
     const isoPart = (type: string) => isoParts.find((p) => p.type === type)?.value ?? '';
 
-    return {
+    const common = {
       generatedAt: now.toISOString(),
       contentChangedAt,
       timezone: device.timezone,
@@ -274,9 +276,26 @@ export class FrameService {
       },
       headerWeather: bundle.headerWeather.data,
       headerWeatherHealth: bundle.headerWeather.health,
-      sections: bundle.sections,
       battery: { volts: batteryVolts, percent: batteryPercent(batteryVolts) },
     };
+
+    const profile = this.profileFor(device);
+    if (profile.dashboardSlots === 1) {
+      if (bundle.sections.length !== 1) {
+        throw new Error(`${profile.id} expected one dashboard section, got ${bundle.sections.length}`);
+      }
+      const mini: MiniDashboardData = { ...common, sections: [bundle.sections[0]!] };
+      return mini;
+    }
+
+    if (bundle.sections.length !== 4) {
+      throw new Error(`${profile.id} expected four dashboard sections, got ${bundle.sections.length}`);
+    }
+    const large: DashboardData = {
+      ...common,
+      sections: [bundle.sections[0]!, bundle.sections[1]!, bundle.sections[2]!, bundle.sections[3]!],
+    };
+    return large;
   }
 
   private diagnosticHealth(bundle: SourceBundle): DiagnosticHealth[] {
@@ -340,9 +359,12 @@ export class FrameService {
     }
 
     const contentChangedAt = unchanged ? previous.contentChangedAt : new Date().toISOString();
-    const data = { ...provisional, contentChangedAt };
+    const data = { ...provisional, contentChangedAt } as ProfileDashboardData;
     const profile = this.profileFor(device);
-    const rendered = await this.rasterise(renderHtml(data, profile, await this.fontCss()), profile);
+    const rendered = await this.rasterise(
+      renderProfileHtml(data, profile, await this.fontCss()),
+      profile,
+    );
     const frame: Frame = { ...rendered, contentChangedAt };
 
     this.memo.set(device.id, { hash, frame, contentChangedAt, health });
@@ -427,6 +449,6 @@ export class FrameService {
   async previewHtml(device: DeviceRecord): Promise<string> {
     const bundle = await this.fetchAll(device);
     const data = this.buildData(device, bundle, device.lastBatteryVolts, new Date().toISOString());
-    return renderHtml(data, this.profileFor(device), await this.fontCss());
+    return renderProfileHtml(data, this.profileFor(device), await this.fontCss());
   }
 }

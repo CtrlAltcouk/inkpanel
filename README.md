@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltcouk/inkpanel/actions/workflows/ci.yml)
 
-A self-hosted, day-at-a-glance dashboard for 7.5-inch e-paper displays.
+A self-hosted, day-at-a-glance e-paper dashboard with both full-size and single-widget display profiles.
 
-InkPanel keeps the ESP32 deliberately simple: the server collects data, builds the dashboard, renders an 800×480 1-bit frame, and tells the panel when to wake again. The battery-powered panel wakes, checks for a new frame, refreshes only when the content changed, then returns to deep sleep.
+InkPanel keeps the ESP32 deliberately simple: the server collects data, builds the appropriate layout for each panel profile, renders a 1-bit framebuffer, and tells the panel when to wake again. The battery-powered panel wakes, checks for a new frame, refreshes only when the content changed, then returns to deep sleep.
 
 ## Web UI
 
-InkPanel's browser UI provides a Studio workspace for configuring each panel, arranging dashboard widgets, previewing the exact e-ink output, flashing boards and managing server updates. The screenshots below use demo data only.
+InkPanel's browser UI provides a Studio workspace for configuring each panel, previewing the exact e-ink output, flashing boards and managing server updates. The screenshots below use demo data only.
 
 <p align="center">
   <img src="docs/screenshots/studio.svg" alt="InkPanel Studio dashboard with live e-ink preview and widget editor" width="900">
@@ -29,7 +29,12 @@ InkPanel's browser UI provides a Studio workspace for configuring each panel, ar
 
 The web UI provides a Studio-style workspace for each panel with a live preview, dashboard configuration, device settings, scheduling, flashing and server updates.
 
-Each panel has four independently configurable dashboard positions. Current widget types are:
+The supported layouts are:
+
+- **7.5-inch / 800×480** — four independently configurable dashboard positions.
+- **InkPanel Mini / 1.54-inch / 200×200** — one full-screen widget.
+
+Current widget types are:
 
 - **Calendar** — one or more iCal feeds
 - **Weather** — Open-Meteo using the panel location
@@ -45,7 +50,7 @@ Provider credentials are stored server-side and are not written into panel firmw
 ## How it works
 
 ```text
-Data providers ──> InkPanel server ──> 800×480 monochrome frame ──> ESP32/e-paper
+Data providers ──> InkPanel server ──> profile-specific 1-bit frame ──> ESP32/e-paper
                        │
                        ├─ Web admin / Studio UI
                        ├─ source cache + health
@@ -55,7 +60,7 @@ Data providers ──> InkPanel server ──> 800×480 monochrome frame ──>
 
 A rendered frame has a content identity. If a panel already has the current image, the server returns `304` and the e-paper display is not refreshed. This avoids unnecessary flashing and saves battery power.
 
-The physical e-paper renderer is intentionally separate from the browser/admin UI. Changes to the admin interface should not change the e-paper design or framebuffer pipeline unless that is an explicit renderer task. See [docs/ui-redesign-constraint.md](docs/ui-redesign-constraint.md).
+The physical e-paper renderers are intentionally separate from the browser/admin UI. Changes to the admin interface should not change an e-paper design or framebuffer pipeline unless that is an explicit renderer task. See [docs/ui-redesign-constraint.md](docs/ui-redesign-constraint.md).
 
 ## Quick start
 
@@ -67,7 +72,7 @@ Run this on the Proxmox host:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/CtrlAltcouk/inkpanel/main/scripts/proxmox/inkpanel-lxc.sh)"
 ```
 
-The installer creates the LXC, installs the server dependencies and firmware toolchain, configures the service, and prepares the browser-flash package.
+The installer creates the LXC, installs the server dependencies and firmware toolchain, configures the service, and prepares both browser-flash firmware targets.
 
 ### Raspberry Pi / other Linux host
 
@@ -91,18 +96,21 @@ With no physical panel connected, the protocol can be exercised with:
 npm run fake-device -- --once
 ```
 
-That writes `frame.png`, representing the frame a real panel would receive.
+That writes `frame.png`, representing the frame a real full-size panel would receive.
 
 ## Flashing and provisioning
 
 The recommended new-board path is entirely browser based and does not require the Arduino IDE or the `192.168.4.1` recovery portal:
 
 1. Open **Flash** over the InkPanel HTTPS address in Chrome or Edge.
-2. Choose **Set up a new board**.
-3. Enter Wi-Fi details and confirm the InkPanel server address.
-4. Select the XIAO once in the browser device picker.
-5. InkPanel flashes the firmware and a one-time provisioning record in the same transaction.
-6. On first boot the firmware imports the settings into NVS, erases the temporary record, joins Wi-Fi and contacts InkPanel.
+2. Choose the physical hardware target:
+   - **InkPanel 7.5-inch** — XIAO ESP32-S3 Plus + EE04.
+   - **InkPanel Mini 1.54-inch** — XIAO ESP32-S3 + ePaper Driver Board + SSD1681.
+3. Choose **Set up a new board**.
+4. Enter Wi-Fi details and confirm the InkPanel server address.
+5. Select the XIAO once in the browser device picker.
+6. InkPanel flashes the selected firmware target and a one-time provisioning record in the same transaction.
+7. On first boot the firmware imports the settings into NVS, erases the temporary record, joins Wi-Fi and contacts InkPanel.
 
 Routine **Update existing board** flashing preserves NVS, so Wi-Fi and server settings survive firmware updates. USB configuration and the temporary `inkpanel-setup` / `192.168.4.1` portal remain recovery paths.
 
@@ -110,7 +118,7 @@ See [docs/flashing.md](docs/flashing.md) for the complete flow and recovery opti
 
 ## Configuration and data providers
 
-Panel name, timezone, location, schedule and dashboard layout are configured from the web UI.
+Panel name, timezone, location, schedule and dashboard content are configured from the web UI.
 
 Some widgets require provider setup:
 
@@ -132,22 +140,22 @@ Additional provider notes:
 
 ## Hardware
 
-The reference hardware, and the configuration tested by this project, is:
+InkPanel supports two reference hardware profiles:
 
-| Part | Detail |
-|---|---|
-| MCU | Seeed XIAO ESP32-S3 Plus |
-| Carrier | Seeed XIAO ePaper Display Board (EE04), 24-pin jumper |
-| Panel | 7.5-inch 800×480 monochrome Good Display GDEW075T7 / flex `WFT0583CZ61` |
-| Driver | Waveshare old-V2 full-refresh sequence |
+| Profile | MCU / carrier | Panel | Layout |
+|---|---|---|---|
+| `wft0583-800x480-mono` | Seeed XIAO ESP32-S3 Plus + EE04 | 7.5-inch 800×480 GDEW075T7 / `WFT0583CZ61` | Four widgets |
+| `ssd1681-200x200-mono` | Seeed XIAO ESP32-S3 + ePaper Driver Board for XIAO | 1.54-inch 200×200 monochrome SSD1681 | One widget |
 
-Panel revision matters. This display requires the old-V2 initialisation sequence; changing the renderer or driver to a similarly named newer Waveshare/GxEPD2 profile can leave this hardware blank.
+The full-size display requires the Waveshare old-V2 initialisation sequence; changing it to a similarly named newer Waveshare/GxEPD2 profile can leave that hardware blank. The Mini uses its own SSD1681 driver and does not modify the working old-V2 path.
 
-Hardware notes and verification material are under [docs/hardware](docs/hardware/).
+See [InkPanel Mini](docs/inkpanel-mini.md) and the material under [docs/hardware](docs/hardware/) for hardware details and validation notes.
 
 ## Updates
 
-The Proxmox/LXC installation includes a transactional self-updater exposed in **Updates** in the web UI. It pulls `main` fast-forward-only, validates the candidate, rebuilds firmware when tracked firmware inputs changed, health-checks the new service and rolls back to the previous working commit if deployment fails.
+The Proxmox/LXC installation includes a transactional self-updater exposed in **Updates** in the web UI. It pulls `main` fast-forward-only, validates the candidate, rebuilds the complete firmware package when tracked firmware inputs changed, health-checks the new service and rolls back to the previous working commit if deployment fails.
+
+The complete `firmware/dist` package contains the historical full-size package at its root and the Mini package under `firmware/dist/mini`, so the existing updater snapshot/rollback protects both.
 
 For that reason, **`main` is the deployable branch** and should stay green.
 
@@ -161,7 +169,7 @@ npm test          # full Node/Chromium test suite
 npm run test:tz   # repeat tests under multiple server timezones
 ```
 
-GitHub Actions also compiles the production `XIAO_ESP32S3_Plus` firmware on every push to `main` and on pull requests.
+GitHub Actions compiles both the production `XIAO_ESP32S3_Plus` full-size firmware and the standard `XIAO_ESP32S3` Mini firmware on pull requests and on pushes to `main`.
 
 Repository policy:
 
@@ -197,6 +205,7 @@ docs/         current deployment, flashing, provider and hardware documentation
 
 - [Deployment](docs/deployment.md)
 - [Flashing and provisioning](docs/flashing.md)
+- [InkPanel Mini](docs/inkpanel-mini.md)
 - [National Rail](docs/national-rail.md)
 - [Bus and Traffic](docs/bus-traffic.md)
 - [Octopus Agile](docs/octopus-agile.md)
@@ -207,4 +216,4 @@ docs/         current deployment, flashing, provider and hardware documentation
 
 MIT — see [LICENSE](LICENSE).
 
-The e-paper driver sequence is adapted from Waveshare's `epd7in5_V2_old.py` and retains its original permission notice.
+The 7.5-inch e-paper driver sequence is adapted from Waveshare's `epd7in5_V2_old.py` and retains its original permission notice.

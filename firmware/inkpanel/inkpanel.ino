@@ -1,24 +1,35 @@
 /*
   inkpanel firmware.
 
-  Wakes on a timer or KEY1, fetches a frame, draws it only if it changed, and
-  sleeps for however long the server said. The device holds no opinion about
-  scheduling — that lives in TypeScript where it can be tested and changed
-  without reflashing.
+  Wakes on a timer (or KEY1 on the full-size EE04 hardware), fetches a frame,
+  draws it only if it changed, and sleeps for however long the server said. The
+  device holds no opinion about scheduling — that lives in TypeScript where it
+  can be tested and changed without reflashing.
 
   First boot with no stored credentials first imports the one-time provisioning
   record written during WebFlash. USB provisioning and the captive portal stay
-  available as recovery paths. Hold KEY3 while resetting to wipe credentials.
+  available as recovery paths. The EE04 build also keeps KEY3 factory reset.
+
+  The default build remains the existing 7.5-inch EE04/WFT0583 target. Defining
+  INKPANEL_MINI selects the standard XIAO ESP32-S3 + Seeed ePaper Driver Board +
+  1.54-inch SSD1681 target without duplicating the network/provisioning logic.
 */
 #include <Arduino.h>
 #include <WiFi.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <math.h>
 
 #include "config.h"
 #include "FlashProvisioning.h"
 #include "FrameClient.h"
+#ifdef INKPANEL_MINI
+#include "MiniEPD.h"
+using ActiveEPD = MiniEPD;
+#else
 #include "OldV2EPD.h"
+using ActiveEPD = OldV2EPD;
+#endif
 #include "Provisioning.h"
 
 // Optional development shortcut. Copy secrets.example.h to secrets.h to skip
@@ -28,7 +39,7 @@
 #define HAVE_COMPILED_CREDENTIALS 1
 #endif
 
-OldV2EPD display;
+ActiveEPD display;
 static Credentials credentials;
 
 // RTC memory survives deep sleep, so the ETag and failure streak persist
@@ -38,6 +49,12 @@ RTC_DATA_ATTR char storedEtag[48] = {0};
 RTC_DATA_ATTR uint32_t consecutiveFailures = 0;
 
 static float readBatteryVoltage() {
+#ifdef INKPANEL_MINI
+  // The standard XIAO ESP32-S3 + Seeed ePaper Driver Board exposes charging and
+  // battery power but no dedicated battery-sense divider. Missing telemetry is
+  // safer than reporting an invented voltage; the server treats NaN as absent.
+  return NAN;
+#else
   pinMode(Hardware::BATTERY_ADC_ENABLE_PIN, OUTPUT);
   digitalWrite(Hardware::BATTERY_ADC_ENABLE_PIN, HIGH);
   delay(10);
@@ -46,6 +63,7 @@ static float readBatteryVoltage() {
       (static_cast<float>(analogRead(Hardware::BATTERY_ADC_PIN)) / 4096.0f) * 7.16f;
   digitalWrite(Hardware::BATTERY_ADC_ENABLE_PIN, LOW);
   return volts;
+#endif
 }
 
 static const char* wakeReason() {
@@ -103,6 +121,15 @@ static void sleepFor(uint32_t seconds) {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
+#ifdef INKPANEL_MINI
+  // The small driver board has no software-controlled panel power rail. A
+  // best-effort controller deep-sleep is therefore the Mini fail-safe cleanup
+  // path as well as the normal post-refresh state. sleep() is a no-op if this
+  // wake cycle never initialised the SSD1681.
+  if (!display.sleep()) {
+    Serial.printf("[epd] sleep warning: %s\n", display.lastError());
+  }
+#else
   // This is also the fail-safe cleanup path after an EPD init/draw timeout: cut
   // the rail before entering deep sleep even if the controller never became idle.
   pinMode(Hardware::EPD_ENABLE, OUTPUT);
@@ -112,8 +139,9 @@ static void sleepFor(uint32_t seconds) {
   rtc_gpio_pullup_en(key1);
   rtc_gpio_pulldown_dis(key1);
   esp_sleep_enable_ext1_wakeup(1ULL << Hardware::KEY1, ESP_EXT1_WAKEUP_ANY_LOW);
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(seconds) * 1000000ULL);
+#endif
 
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(seconds) * 1000000ULL);
   esp_deep_sleep_start();
 }
 
@@ -138,10 +166,15 @@ void setup() {
   deviceId(id, sizeof(id));
   const char* reason = wakeReason();
   Serial.printf("\n[inkpanel] %s device=%s wake=%s\n", FIRMWARE_VERSION, id, reason);
+#ifdef INKPANEL_MINI
+  Serial.printf("[inkpanel] profile=%s framebuffer=%u bytes\n",
+                PANEL_PROFILE_ID, static_cast<unsigned>(ActiveEPD::BUFFER_SIZE));
+#endif
 
-  // KEY3 is a genuine factory-configuration reset: clear both durable NVS and
-  // any one-time WebFlash record so a pending record cannot immediately put
-  // credentials back after the user deliberately wiped them.
+#ifndef INKPANEL_MINI
+  // KEY3 is a genuine factory-configuration reset on the EE04: clear both
+  // durable NVS and any one-time WebFlash record so a pending record cannot
+  // immediately put credentials back after the user deliberately wiped them.
   pinMode(Hardware::KEY3, INPUT_PULLUP);
   delay(50);
   if (digitalRead(Hardware::KEY3) == LOW) {
@@ -150,11 +183,12 @@ void setup() {
     clearFlashProvisioning();
     runProvisioningPortal();
   }
+#endif
 
   if (!obtainCredentials()) {
-    // Normal new-board setup is now completed entirely inside the flash
-    // operation: the browser writes a CRC-protected record into the dedicated
-    // provisioning partition. Import it before depending on USB re-enumeration.
+    // Normal new-board setup is completed entirely inside the flash operation:
+    // the browser writes a CRC-protected record into the dedicated provisioning
+    // partition. Import it before depending on USB re-enumeration.
     Serial.println("[setup] no credentials stored — checking flash-time provisioning");
     if (importFlashProvisioning() && obtainCredentials()) {
       Serial.println("[setup] flash-time credentials imported");
@@ -179,8 +213,8 @@ void setup() {
   }
 
   const FetchOutcome outcome = fetchFrame(
-      credentials.serverUrl, id, display.framebuffer(), OldV2EPD::BUFFER_SIZE,
-      storedEtag, volts, reason);
+      credentials.serverUrl, id, display.framebuffer(), ActiveEPD::BUFFER_SIZE,
+      storedEtag, volts, reason, PANEL_PROFILE_ID);
 
   if (outcome.result == FetchResult::Failed) {
     consecutiveFailures++;
@@ -207,12 +241,12 @@ void setup() {
   }
 
   // The physical refresh completed. Record its ETag before asking the controller
-  // to enter deep sleep; if that final controller-sleep command fails, sleepFor()
-  // still cuts the EPD power rail and a later 304 will not redraw the same frame.
+  // to enter deep sleep. On the large board sleepFor() still cuts the EPD rail;
+  // on Mini, sleepFor() repeats the idempotent best-effort controller sleep.
   snprintf(storedEtag, sizeof(storedEtag), "%s", outcome.etag);
   consecutiveFailures = 0;
   if (!display.sleep()) {
-    Serial.printf("[epd] sleep warning: %s; power rail will be cut\n", display.lastError());
+    Serial.printf("[epd] sleep warning: %s\n", display.lastError());
   }
   Serial.println("[epd] drawn");
 

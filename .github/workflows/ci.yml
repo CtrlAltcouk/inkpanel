@@ -6,7 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Cancel superseded runs on the same branch rather than queueing them.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -30,7 +29,7 @@ jobs:
 
       - name: Shell syntax
         run: |
-          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/firmware-input-hash.sh; do
+          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/compile-mini-firmware.sh scripts/firmware-input-hash.sh; do
             echo "checking $script"
             bash -n "$script"
           done
@@ -56,7 +55,7 @@ jobs:
         run: npm run test:tz
 
   firmware:
-    name: Compile XIAO ESP32-S3 Plus firmware
+    name: Compile InkPanel firmware targets
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -78,21 +77,45 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile production firmware and manifest
+      - name: Build production firmware packages
         run: ./scripts/build-firmware.sh
 
-      - name: Check expected firmware outputs
+      - name: Build Mini hardware validation artifact
+        env:
+          MINI_ARTIFACT_DIR: ${{ github.workspace }}/firmware/mini-validation-artifact
+        run: bash scripts/compile-mini-firmware.sh
+
+      - name: Check published full-size and Mini firmware outputs
         run: |
           test -s firmware/dist/manifest.json
           test -s firmware/dist/input.sha256
           test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
+          test -s firmware/dist/mini/manifest.json
+          test -n "$(find firmware/dist/mini -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
+          test "$(node -e "const m=require('./firmware/dist/manifest.json'); process.stdout.write(m.target)")" = "full"
+          test "$(node -e "const m=require('./firmware/dist/mini/manifest.json'); process.stdout.write(m.target)")" = "mini"
           test "$(cat firmware/dist/input.sha256)" = "$(bash scripts/firmware-input-hash.sh)"
+
+      - name: Check Mini validation package
+        run: |
+          test -s firmware/mini-validation-artifact/README_FIRST.txt
+          test -s firmware/mini-validation-artifact/arduino/inkpanel/inkpanel.ino
+          test -s firmware/mini-validation-artifact/arduino/inkpanel/MiniEPD.cpp
+          test -s firmware/mini-validation-artifact/driver-test/InkPanelMiniDriverTest/InkPanelMiniDriverTest.ino
+          test -n "$(find firmware/mini-validation-artifact/binaries -maxdepth 1 -name '*.merged.bin' -type f -size +0c -print -quit)"
+
+      - name: Upload Mini hardware validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkpanel-mini-hardware-validation
+          path: |
+            firmware/mini-validation-artifact/
+            !firmware/mini-validation-artifact/**/build/**
+          if-no-files-found: error
+          retention-days: 14
 
   golden:
     name: Generate golden reference
-    # Manual only. Golden images are environment-specific, so the canonical one
-    # is whatever this Linux runner produces — download the artifact and commit
-    # it if you want layout regression cover.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -30,15 +30,6 @@ export function httpsUrl(httpsPort, href = window.location.href) {
   return url.toString();
 }
 
-/**
- * UA sniffing is normally the wrong tool for the job — feature detection is
- * almost always better. It does not work here: `navigator.serial` is
- * undefined in *both* of the situations this module needs to tell apart (an
- * unsupported browser, and an unsupported context on a browser that would
- * otherwise support WebSerial), so there is no feature left to detect. The
- * origin's secure-context state alone cannot separate them — only the
- * browser family can, which is the one thing left to check.
- */
 function looksLikeChromiumFamily() {
   const ua = navigator.userAgent || '';
   return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
@@ -76,16 +67,13 @@ export function noBuildNotice() {
   </div>`;
 }
 
-/**
- * Fetch a firmware image as a byte-preserving binary string.
- *
- * The historical tests and manifest helper use this representation, so it is
- * kept at the HTTP boundary. prepareFlashParts() converts it to Uint8Array
- * immediately before esptool-js sees it; passing the string directly to the
- * compressor would UTF-8-expand bytes above 0x7F.
- */
-export async function fetchBinary(name) {
-  const res = await fetch(`/api/firmware/bin/${encodeURIComponent(name)}`);
+/** Fetch a firmware image as a byte-preserving binary string. */
+export async function fetchBinary(name, targetId = 'full') {
+  const encodedName = encodeURIComponent(name);
+  const targetPath = targetId === 'full'
+    ? `/api/firmware/bin/${encodedName}`
+    : `/api/firmware/targets/${encodeURIComponent(targetId)}/bin/${encodedName}`;
+  const res = await fetch(targetPath);
   if (!res.ok) throw new Error(`could not download ${name} (${res.status})`);
   const bytes = new Uint8Array(await res.arrayBuffer());
 
@@ -107,23 +95,10 @@ export function isEsp32S3(chip) {
   return /ESP32-S3/i.test(String(chip));
 }
 
-/**
- * Kept deliberately narrow for backwards compatibility: this helper answers
- * only whether the explicit factory-reset radio value was chosen. New-board
- * setup also performs a full erase, but that is a separate product mode and
- * is handled explicitly in renderFlash().
- */
 export function shouldErase(modeValue) {
   return modeValue === 'erase';
 }
 
-/**
- * Select the image set appropriate to the requested operation.
- *
- * `parts` is the full install/recovery set (normally merged.bin). A routine
- * update MUST use updateParts, which contains only bootloader/partition/app
- * regions and therefore cannot erase the NVS credentials partition.
- */
 export function selectFlashManifestParts(manifest, modeValue) {
   if (modeValue === 'preserve') {
     if (!Array.isArray(manifest.updateParts) || manifest.updateParts.length === 0) {
@@ -141,19 +116,15 @@ export function selectFlashManifestParts(manifest, modeValue) {
 }
 
 /** Turn manifest entries into the {address, data} pairs esptool-js wants. */
-export async function buildFlashParts(parts, fetchBinaryFn = fetchBinary) {
+export async function buildFlashParts(parts, fetchBinaryFn = fetchBinary, targetId = 'full') {
   return Promise.all(
     parts.map(async (part) => ({
       address: part.offset,
-      data: await fetchBinaryFn(part.path),
+      data: await fetchBinaryFn(part.path, targetId),
     })),
   );
 }
 
-/**
- * Convert downloaded firmware into the exact byte arrays esptool-js 0.6.x
- * expects, and sanity-check the image that will live at flash address 0.
- */
 export function prepareFlashParts(parts) {
   const prepared = parts.map((part, index) => {
     let data;
@@ -199,7 +170,6 @@ function utf8Length(value) {
   return new TextEncoder().encode(value).length;
 }
 
-/** Validate and normalise the values that will be written into panel NVS. */
 export function validateNewBoardConfig(config) {
   const ssid = String(config?.ssid ?? '');
   const password = String(config?.password ?? '');
@@ -234,7 +204,6 @@ function base64Utf8(value) {
   return btoa(binary);
 }
 
-/** Build the one-line recovery protocol record understood by Provisioning.cpp. */
 export function buildProvisionCommand(config) {
   const checked = validateNewBoardConfig(config);
   return `${PROVISION_PREFIX}${base64Utf8(checked.ssid)}|${base64Utf8(checked.password)}|${base64Utf8(checked.serverUrl)}\n`;
@@ -256,7 +225,6 @@ async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Re-open an already authorised board for the configure-only recovery path. */
 export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -284,11 +252,6 @@ export async function reopenProvisioningPort(originalPort, timeoutMs = 18000) {
   );
 }
 
-/**
- * Recovery provisioning for a board that is already running InkPanel firmware.
- * Normal new-board setup no longer depends on this post-reset USB handshake;
- * its settings are written to flash before the first boot.
- */
 export async function provisionNewBoard(originalPort, config, write = () => {}, timeoutMs = 30000) {
   const checked = validateNewBoardConfig(config);
   const command = buildProvisionCommand(checked);
@@ -346,7 +309,6 @@ export async function provisionNewBoard(originalPort, config, write = () => {}, 
   }
 }
 
-/** User-facing classification for common WebSerial/esptool failures. */
 export function explainFailure(err) {
   const message = String(err?.message ?? err);
 
@@ -377,11 +339,45 @@ export function explainFailure(err) {
          'cannot be overwritten. It is safe to try again.';
 }
 
-export function readyPanel(manifest) {
+function legacyCatalog(manifest) {
+  return {
+    defaultTarget: 'full',
+    targets: [{
+      id: 'full',
+      label: 'InkPanel 7.5-inch',
+      hardware: 'XIAO ESP32-S3 Plus + EE04',
+      manifest,
+    }],
+  };
+}
+
+function validCatalog(catalog) {
+  return catalog && Array.isArray(catalog.targets) && catalog.targets.some((target) => target?.id === 'full');
+}
+
+export function readyPanel(manifest, catalog = legacyCatalog(manifest)) {
   const serverUrl = esc(String(manifest.serverUrl ?? ''));
+  const selectableTargets = catalog.targets ?? [];
+  const hardwareChooser = selectableTargets.length > 1
+    ? `<fieldset class="flash-mode hardware-target">
+      <legend>Which panel hardware are you flashing?</legend>
+      ${selectableTargets.map((target) => {
+        const available = target.manifest?.available === true;
+        const checked = target.id === (catalog.defaultTarget ?? 'full') ? ' checked' : '';
+        const disabled = available ? '' : ' disabled';
+        const version = available ? ` &middot; firmware ${esc(target.manifest.version)}` : ' &middot; build unavailable';
+        return `<label>
+          <input type="radio" name="hardware-target" value="${esc(target.id)}"${checked}${disabled}>
+          <span><strong>${esc(target.label)}</strong> <em>&mdash; ${esc(target.hardware)}${version}</em></span>
+        </label>`;
+      }).join('')}
+    </fieldset>`
+    : '';
+
   return `<div class="card">
     <h3>Flash or configure a panel</h3>
-    <p class="meta">Firmware ${esc(manifest.version)} &middot; built ${esc(manifest.builtAt)}</p>
+    ${hardwareChooser}
+    <p class="meta" data-firmware-meta>Firmware ${esc(manifest.version)} &middot; built ${esc(manifest.builtAt)}</p>
 
     <fieldset class="flash-mode">
       <legend>What do you want to do?</legend>
@@ -449,17 +445,28 @@ export async function renderFlash(root) {
     return;
   }
 
-  const manifest = await getJson('/api/firmware/manifest');
-  if (!manifest.available) {
+  // Fetch the legacy/full-size manifest first so this browser remains usable
+  // against a partially-updated server that does not have the target catalog.
+  const legacyManifest = await getJson('/api/firmware/manifest');
+  if (!legacyManifest.available) {
     root.innerHTML = noBuildNotice();
     return;
   }
 
-  root.innerHTML = readyPanel(manifest);
+  let catalog = legacyCatalog(legacyManifest);
+  try {
+    const candidate = await getJson('/api/firmware/targets');
+    if (validCatalog(candidate)) catalog = candidate;
+  } catch {
+    // Backwards-compatible fallback: full-size flashing remains available.
+  }
+
+  root.innerHTML = readyPanel(legacyManifest, catalog);
 
   const button = root.querySelector('[data-connect]');
   const log = root.querySelector('.flash-log');
   const newFields = root.querySelector('[data-new-board-fields]');
+  const firmwareMeta = root.querySelector('[data-firmware-meta]');
 
   const write = (line) => {
     log.hidden = false;
@@ -468,18 +475,29 @@ export async function renderFlash(root) {
   };
 
   const selectedMode = () => root.querySelector('input[name=mode]:checked')?.value ?? 'preserve';
-  const syncModeUi = () => {
+  const selectedTargetId = () => root.querySelector('input[name=hardware-target]:checked')?.value ?? catalog.defaultTarget ?? 'full';
+  const selectedTarget = () => catalog.targets.find((target) => target.id === selectedTargetId()) ?? catalog.targets[0];
+
+  const syncUi = () => {
     const mode = selectedMode();
+    const target = selectedTarget();
+    const manifest = target?.manifest ?? legacyManifest;
     const needsSettings = mode === 'new' || mode === 'configure';
     if (newFields) newFields.hidden = !needsSettings;
+    if (firmwareMeta) {
+      firmwareMeta.textContent = manifest.available
+        ? `Firmware ${manifest.version} · built ${manifest.builtAt}`
+        : 'No firmware build is available for this hardware target.';
+    }
     if (button) {
       if (mode === 'new') button.textContent = 'Flash & configure new board';
       else if (mode === 'configure') button.textContent = 'Configure board over USB';
       else button.textContent = 'Connect a board';
+      button.disabled = mode !== 'configure' && manifest.available !== true;
     }
   };
-  root.querySelectorAll?.('input[name=mode]').forEach((radio) => radio.addEventListener('change', syncModeUi));
-  syncModeUi();
+  root.querySelectorAll?.('input[name=mode], input[name=hardware-target]').forEach((radio) => radio.addEventListener('change', syncUi));
+  syncUi();
 
   button.addEventListener('click', async () => {
     button.disabled = true;
@@ -487,6 +505,9 @@ export async function renderFlash(root) {
     log.textContent = '';
 
     const mode = selectedMode();
+    const target = selectedTarget();
+    const manifest = target?.manifest ?? legacyManifest;
+    const targetId = target?.id ?? 'full';
     let newConfig = null;
     if (mode === 'new' || mode === 'configure') {
       try {
@@ -508,6 +529,11 @@ export async function renderFlash(root) {
         write('Done. The board saved the Wi-Fi and InkPanel brain address and will now join the network.');
         return;
       }
+
+      if (manifest.available !== true) {
+        throw new Error(`No firmware build is available for ${target?.label ?? targetId}.`);
+      }
+      write(`Hardware target: ${target?.label ?? targetId}`);
 
       const { ESPLoader, Transport } = await import('./vendor/esptool-js.js');
       transport = new Transport(port, true);
@@ -532,7 +558,7 @@ export async function renderFlash(root) {
       }
 
       const manifestParts = selectFlashManifestParts(manifest, mode);
-      let parts = prepareFlashParts(await buildFlashParts(manifestParts));
+      let parts = prepareFlashParts(await buildFlashParts(manifestParts, fetchBinary, targetId));
 
       if (mode === 'new') {
         if (!manifest.provisioning) {
@@ -567,7 +593,7 @@ export async function renderFlash(root) {
       write(`\n${explainFailure(err)}`);
     } finally {
       try { await transport?.disconnect(); } catch { /* already gone */ }
-      button.disabled = false;
+      syncUi();
     }
   });
 }

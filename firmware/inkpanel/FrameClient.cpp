@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <esp_mac.h>
+#include <math.h>
 #include <string.h>
 
 #include "config.h"
@@ -65,7 +66,8 @@ FetchOutcome fetchFrame(const char* serverUrl,
                         size_t bufferSize,
                         const char* currentEtag,
                         float batteryVolts,
-                        const char* wakeReason) {
+                        const char* wakeReason,
+                        const char* panelProfileId) {
   FetchOutcome outcome{FetchResult::Failed, FALLBACK_WAKE_SECONDS, {0}};
 
   char url[224];
@@ -79,11 +81,21 @@ FetchOutcome fetchFrame(const char* serverUrl,
     return outcome;
   }
 
-  char volts[16];
-  snprintf(volts, sizeof(volts), "%.2f", batteryVolts);
-  http.addHeader("X-Battery-Voltage", volts);
+  // The standard XIAO ESP32-S3 used by InkPanel Mini has no dedicated battery
+  // sense circuit on the Seeed ePaper Driver Board. Omit telemetry rather than
+  // inventing a reading; the server already treats a missing battery header as
+  // unknown. The existing EE04 path still sends the same finite voltage value.
+  if (isfinite(batteryVolts) && batteryVolts > 0.0f) {
+    char volts[16];
+    snprintf(volts, sizeof(volts), "%.2f", batteryVolts);
+    http.addHeader("X-Battery-Voltage", volts);
+  }
+
   http.addHeader("X-Firmware-Version", FIRMWARE_VERSION);
   http.addHeader("X-Wake-Reason", wakeReason);
+  if (panelProfileId && panelProfileId[0]) {
+    http.addHeader("X-InkPanel-Profile", panelProfileId);
+  }
   if (currentEtag && currentEtag[0]) http.addHeader("If-None-Match", currentEtag);
 
   // HTTPClient discards response headers unless asked to keep them.

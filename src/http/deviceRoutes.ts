@@ -3,17 +3,26 @@ import type { DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import { nextWakeSeconds } from '../schedule/nextWake.ts';
 import { deviceIdSchema } from '../devices/schema.ts';
+import type { PanelProfileId } from '../devices/types.ts';
+import { panelProfile, WFT0583 } from '../panel/profile.ts';
 import {
   DeviceEnrolmentLimiter,
   firmwareAutoEnrolmentIdSchema,
 } from './deviceEnrolment.ts';
 
 const ERROR_RETRY_SECONDS = 300;
+const PROFILE_HEADER = 'x-inkpanel-profile';
 
 function parseVolts(raw: string | undefined): number | null {
   if (!raw) return null;
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function requestedProfileId(raw: string | undefined): PanelProfileId | null | 'invalid' {
+  if (!raw) return null;
+  const profile = panelProfile(raw.trim());
+  return profile ? profile.id as PanelProfileId : 'invalid';
 }
 
 export function deviceRoutes(
@@ -28,6 +37,12 @@ export function deviceRoutes(
     const id = req.params.id;
     if (!deviceIdSchema.safeParse(id).success) {
       res.status(400).json({ error: 'invalid device id' });
+      return;
+    }
+
+    const advertisedProfile = requestedProfileId(req.get(PROFILE_HEADER));
+    if (advertisedProfile === 'invalid') {
+      res.status(400).json({ error: 'unknown panel profile' });
       return;
     }
 
@@ -48,13 +63,28 @@ export function deviceRoutes(
       }
 
       try {
-        const result = await store.getOrCreateWithStatus(id);
+        // Firmware 0.1.4 predates the profile header. Missing therefore means
+        // the existing 7.5-inch profile, preserving old-board auto-enrolment.
+        const result = await store.getOrCreateWithStatus(
+          id,
+          advertisedProfile ?? WFT0583.id as PanelProfileId,
+        );
         reserved.reservation.complete(result.created);
         device = result.device;
       } catch (err) {
         reserved.reservation.complete(false);
         throw err;
       }
+    } else if (advertisedProfile && advertisedProfile !== device.panelProfileId) {
+      // Never silently switch an existing physical device to a different wire
+      // framebuffer. A mismatch is almost certainly the wrong firmware build.
+      res.set('X-InkPanel-Profile', device.panelProfileId);
+      res.status(409).json({
+        error: 'panel profile mismatch',
+        expected: device.panelProfileId,
+        advertised: advertisedProfile,
+      });
+      return;
     }
     const batteryVolts = parseVolts(req.get('x-battery-voltage'));
 
@@ -70,6 +100,7 @@ export function deviceRoutes(
       lastWakeSeconds: wake,
     });
     res.set('X-Next-Wake-Seconds', String(wake));
+    res.set('X-InkPanel-Profile', device.panelProfileId);
     res.set('Cache-Control', 'no-store');
 
     try {

@@ -4,6 +4,7 @@ import { renderBusStopPicker } from './busStopPicker.js';
 
 const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'bins', 'empty'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
+const MINI_PROFILE = 'ssd1681-200x200-mono';
 const stateByRoot = new WeakMap();
 
 function typeLabel(type) {
@@ -99,9 +100,9 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
-export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}) {
+export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index]) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${POSITIONS[index]}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '')}</div>`;
+  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '')}</div>`;
 }
 
 function summary(type, config, locationLabel) {
@@ -117,13 +118,14 @@ function summary(type, config, locationLabel) {
 
 function currentPanel(root) { return root.querySelector('[data-dashboard-config-panel]'); }
 function syncCurrent(root, state) { rememberCell(currentPanel(root), state.slots[state.selectedIndex]); }
+function slotPosition(state, index) { return state.isMini ? 'Display content' : POSITIONS[index]; }
 
 function renderLayout(root) {
   const state = stateByRoot.get(root);
   const map = root.querySelector('[data-dashboard-layout-map]');
   map.innerHTML = state.slots.map((slot, index) => {
     const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-    return `<button type="button" class="dashboard-slot-summary ${index === state.selectedIndex ? 'on' : ''}" data-dashboard-select="${index}"><span class="dashboard-slot-summary__dot ${slot.type === 'empty' ? 'dashboard-slot-summary__dot--empty' : ''}"></span><span class="dashboard-slot-summary__position">${POSITIONS[index]}</span><span class="dashboard-slot-summary__type">${typeLabel(slot.type)}</span><span class="dashboard-slot-summary__detail">${esc(summary(slot.type, config, state.locationLabel))}</span></button>`;
+    return `<button type="button" class="dashboard-slot-summary ${index === state.selectedIndex ? 'on' : ''}" data-dashboard-select="${index}"><span class="dashboard-slot-summary__dot ${slot.type === 'empty' ? 'dashboard-slot-summary__dot--empty' : ''}"></span><span class="dashboard-slot-summary__position">${esc(slotPosition(state, index))}</span><span class="dashboard-slot-summary__type">${typeLabel(slot.type)}</span><span class="dashboard-slot-summary__detail">${esc(summary(slot.type, config, state.locationLabel))}</span></button>`;
   }).join('');
   map.querySelectorAll('[data-dashboard-select]').forEach((button) => button.addEventListener('click', () => {
     syncCurrent(root, state);
@@ -142,7 +144,8 @@ function renderEditor(root) {
   panel.innerHTML = dashboardCellHtml(state.deviceId, index, slot, state.locationLabel,
     { configured: state.trainApiConfigured, keyDraft: state.trainApiKeyDraft },
     { configured: state.busApiConfigured, appIdDraft: state.busAppIdDraft, appKeyDraft: state.busAppKeyDraft },
-    { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft });
+    { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft },
+    slotPosition(state, index));
 
   panel.querySelector('[data-widget-type]').addEventListener('change', (event) => {
     const previous = slot.type;
@@ -165,8 +168,9 @@ function renderEditor(root) {
 
 export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }) {
   const slots = createDashboardDraftState(device.dashboardSections, remembered);
-  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '' });
-  root.innerHTML = '<div class="dashboard-composer"><div class="dashboard-layout-map" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>';
+  const isMini = device.panelProfileId === MINI_PROFILE;
+  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '' });
+  root.innerHTML = `<div class="dashboard-composer ${isMini ? 'dashboard-composer--single' : ''}"><div class="dashboard-layout-map ${isMini ? 'dashboard-layout-map--single' : ''}" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>`;
   renderLayout(root); renderEditor(root);
 }
 

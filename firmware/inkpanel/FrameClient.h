@@ -18,6 +18,10 @@ void deviceId(char* out, size_t len);
  * Fetch a frame into `framebuffer`.
  * On NotModified or Failed the buffer is left untouched, so the panel keeps
  * whatever it is already showing.
+ *
+ * `panelProfileId` is optional for backwards compatibility. Existing 0.1.4
+ * large-panel firmware historically sent no profile header; Mini firmware sends
+ * its profile explicitly so a new device enrols with the correct wire format.
  */
 FetchOutcome fetchFrame(const char* serverUrl,
                         const char* id,
@@ -25,4 +29,5 @@ FetchOutcome fetchFrame(const char* serverUrl,
                         size_t bufferSize,
                         const char* currentEtag,
                         float batteryVolts,
-                        const char* wakeReason);
+                        const char* wakeReason,
+                        const char* panelProfileId);

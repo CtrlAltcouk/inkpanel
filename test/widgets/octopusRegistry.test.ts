@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CURRENT_DEVICE_STORE_SCHEMA_VERSION } from '../../src/devices/schema.ts';
 import { dashboardWidgetSchema } from '../../src/widgets/registry.ts';
 
-test('Octopus Agile is a V1 widget without a DeviceStore schema bump', () => {
-  assert.equal(CURRENT_DEVICE_STORE_SCHEMA_VERSION, 2);
+test('Octopus Agile remains a V1 widget-registry type', () => {
+  // DeviceStore V3 exists for physical display profiles; Octopus itself is
+  // still the same V1 runtime widget and needs no widget-specific migration.
   assert.deepEqual(dashboardWidgetSchema.parse({
     type: 'octopus',
     version: 1,

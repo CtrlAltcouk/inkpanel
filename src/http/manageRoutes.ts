@@ -14,7 +14,7 @@ import type { GoogleMapsCredentialStore } from '../sources/googleMapsCredentials
 import { validateGoogleMapsApiKey } from '../sources/googleMapsCredentials.ts';
 import { searchTransportApiBusStops } from '../sources/transportApiBus.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
-import { timezoneSchema } from '../devices/schema.ts';
+import { panelProfileIdV3Schema, timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 
 const stationCodeInputSchema = z
@@ -82,13 +82,8 @@ const patchSchema = z
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     locationLabel: z.string().max(120).optional(),
-    dashboardSections: z.tuple([
-      dashboardSectionInputSchema,
-      dashboardSectionInputSchema,
-      dashboardSectionInputSchema,
-      dashboardSectionInputSchema,
-    ]).optional(),
-    panelProfileId: z.string().refine((id) => id in PROFILES, 'unknown panel profile').optional(),
+    dashboardSections: z.array(dashboardSectionInputSchema).min(1).max(4).optional(),
+    panelProfileId: panelProfileIdV3Schema.optional(),
     quietHoursStart: z.number().int().min(0).max(23).optional(),
     quietHoursEnd: z.number().int().min(0).max(23).optional(),
     activeIntervalSeconds: z.number().int().min(60).max(86400).optional(),
@@ -244,7 +239,8 @@ export function manageRoutes(
   });
 
   router.put('/devices/:id', async (req, res) => {
-    if (!(await store.get(req.params.id))) {
+    const current = await store.get(req.params.id);
+    if (!current) {
       res.status(404).json({ error: 'unknown device' });
       return;
     }
@@ -253,6 +249,19 @@ export function manageRoutes(
       res.status(400).json({ error: 'invalid config', issues: parsed.error.issues });
       return;
     }
+
+    const profileId = parsed.data.panelProfileId ?? current.panelProfileId;
+    const profile = PROFILES[profileId];
+    const sections = parsed.data.dashboardSections ?? current.dashboardSections;
+    if (!profile || sections.length !== profile.dashboardSlots) {
+      res.status(400).json({
+        error: 'invalid dashboard layout for panel profile',
+        expectedSections: profile?.dashboardSlots ?? null,
+        actualSections: sections.length,
+      });
+      return;
+    }
+
     res.json(await store.update(req.params.id, parsed.data));
   });
 

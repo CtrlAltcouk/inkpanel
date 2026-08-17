@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CURRENT_DEVICE_STORE_SCHEMA_VERSION } from '../../src/devices/schema.ts';
 import { dashboardWidgetSchema } from '../../src/widgets/registry.ts';
 
-test('Bus and Traffic are runtime widget types without a DeviceStore schema bump', () => {
-  assert.equal(CURRENT_DEVICE_STORE_SCHEMA_VERSION, 2);
-
+test('Bus and Traffic remain runtime widget-registry types', () => {
+  // The DeviceStore is now V3 because physical display profiles introduced a
+  // real persistence change. Bus/Traffic themselves remain V1 widget-registry
+  // entries and still do not require their own store migration.
   assert.deepEqual(dashboardWidgetSchema.parse({
     type: 'bus', version: 1,
     config: { stopCode: '049000000001', stopLabel: 'Central Station', routeFilter: '6' },

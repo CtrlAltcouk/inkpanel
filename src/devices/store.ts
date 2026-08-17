@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { defaultDevice, type DeviceRecord } from './types.ts';
+import { defaultDevice, type DeviceRecord, type PanelProfileId } from './types.ts';
 import {
   CURRENT_DEVICE_STORE_SCHEMA_VERSION,
   currentDeviceRecordSchema,
@@ -180,16 +180,22 @@ export class DeviceStore {
     return (await this.read()).devices.find((d) => d.id === id) ?? null;
   }
 
-  async getOrCreate(id: string): Promise<DeviceRecord> {
-    return (await this.getOrCreateWithStatus(id)).device;
+  async getOrCreate(
+    id: string,
+    panelProfileId: PanelProfileId = 'wft0583-800x480-mono',
+  ): Promise<DeviceRecord> {
+    return (await this.getOrCreateWithStatus(id, panelProfileId)).device;
   }
 
   /** Atomically report whether this mutation created the returned record. */
-  async getOrCreateWithStatus(id: string): Promise<{ device: DeviceRecord; created: boolean }> {
+  async getOrCreateWithStatus(
+    id: string,
+    panelProfileId: PanelProfileId = 'wft0583-800x480-mono',
+  ): Promise<{ device: DeviceRecord; created: boolean }> {
     return this.mutate((file) => {
       const existing = file.devices.find((d) => d.id === id);
       if (existing) return { device: existing, created: false };
-      const validation = currentDeviceRecordSchema.safeParse(defaultDevice(id));
+      const validation = currentDeviceRecordSchema.safeParse(defaultDevice(id, panelProfileId));
       if (!validation.success) {
         throw new DeviceStoreError(
           'config_invalid',

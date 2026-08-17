@@ -1,0 +1,15 @@
+# InkPanel Mini - standard XIAO ESP32-S3 (8 MB)
+# Keep the same NVS/OTA/application offsets as the full-size firmware and reserve
+# the chip's final 4 KiB erase sector for the one-time WebFlash provisioning
+# record. The smaller SPIFFS region is the only size difference from the 16 MB
+# XIAO ESP32-S3 Plus map.
+#
+# SPIFFS ends at 0x7F0000. The 60 KiB guard before 0x7FF000 is intentionally
+# unused; provisioning occupies only 0x7FF000..0x7FFFFF.
+# Name,       Type, SubType, Offset,   Size,     Flags
+nvs,          data, nvs,     0x9000,   0x5000,
+otadata,      data, ota,     0xE000,   0x2000,
+app0,         app,  ota_0,   0x10000,  0x300000,
+app1,         app,  ota_1,   0x310000, 0x300000,
+spiffs,       data, spiffs,  0x610000, 0x1E0000,
+provision,    data, 0x40,    0x7FF000, 0x1000,
