@@ -181,6 +181,14 @@ function bins(section: Extract<DashboardSectionData, { type: 'bins' }>, data: Mi
     ${stale(section.health, data.timezone)}`;
 }
 
+function todo(section: Extract<DashboardSectionData, { type: 'todo' }>): string {
+  if (!section.configured || !section.data) return state('TO DO', 'Not set up');
+  if (section.data.items.length === 0) return state('TO DO', 'ALL DONE');
+  return `<div class="mini-head">TO DO</div><div class="mini-todo-list">${section.data.items.slice(0, 5).map((text) => `<div class="mini-todo-row"><span class="mini-todo-box"></span><span>${esc(text)}</span></div>`).join('')}</div>`;
+}
+
+const TODO_CSS = `.mini-todo-list{display:flex;flex-direction:column;gap:3px;padding-top:6px;overflow:hidden}.mini-todo-row{display:grid;grid-template-columns:13px minmax(0,1fr);gap:7px;align-items:center;height:25px;font-size:11px;font-weight:650;line-height:1.08}.mini-todo-row>span:last-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:24px;overflow:hidden}.mini-todo-box{width:11px;height:11px;border:2px solid #000}`;
+
 function renderWidget(section: DashboardSectionData, data: MiniDashboardData): string {
   switch (section.type) {
     case 'calendar': return calendar(section, data);
@@ -189,6 +197,7 @@ function renderWidget(section: DashboardSectionData, data: MiniDashboardData): s
     case 'bus': return bus(section, data);
     case 'traffic': return traffic(section, data);
     case 'octopus': return octopus(section, data);
+    case 'todo': return todo(section);
     case 'bins': return bins(section, data);
     case 'empty': return '<div class="empty-brand disp">INKPANEL<br>MINI</div>';
   }
@@ -218,5 +227,6 @@ body{font-family:"Inter",Arial,sans-serif;-webkit-font-smoothing:none}
 
 /** Dedicated 200×200 single-widget renderer. Never scales/crops the 800×480 dashboard. */
 export function renderMiniHtml(data: MiniDashboardData, profile: PanelProfile, fontCss: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
+  const todoCss = data.sections[0].type === 'todo' ? TODO_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}${todoCss}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
 }

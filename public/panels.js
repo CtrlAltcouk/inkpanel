@@ -187,12 +187,12 @@ async function renderDetail(root, device, serviceStatus) {
 
   const [{ renderCityPicker }, remembered] = await Promise.all([import('./cityPicker.js'), getJson(`/api/dashboard-editor/${encodeURIComponent(device.id)}`)]);
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
-  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered);
+  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps')]);
+  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists')]);
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi });
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists });
 }

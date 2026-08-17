@@ -16,6 +16,7 @@ import { searchTransportApiBusStops } from '../sources/transportApiBus.ts';
 import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { panelProfileIdV3Schema, timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
+import type { TodoStore } from '../todo/store.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -66,6 +67,12 @@ const dashboardSectionInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('octopus'), version: z.literal(1),
     config: z.strictObject({ tariffCode: octopusTariffCodeInputSchema }),
+  }),
+  z.strictObject({
+    type: z.literal('todo'), version: z.literal(1),
+    config: z.strictObject({
+      listId: z.string().regex(/^(?:|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/, 'invalid To Do list id'),
+    }),
   }),
   z.strictObject({
     type: z.literal('bins'), version: z.literal(1),
@@ -134,6 +141,7 @@ export function manageRoutes(
   busCredentials?: TransportApiCredentialStore,
   googleMapsCredentials?: GoogleMapsCredentialStore,
   transportApiBaseUrl?: string,
+  todoStore?: TodoStore,
 ): Router {
   const router = Router();
 
@@ -260,6 +268,14 @@ export function manageRoutes(
         actualSections: sections.length,
       });
       return;
+    }
+
+    for (const widget of sections) {
+      if (widget.type === 'todo' && widget.config.listId
+        && (!todoStore || !(await todoStore.get(widget.config.listId)))) {
+        res.status(400).json({ error: 'unknown To Do list', listId: widget.config.listId });
+        return;
+      }
     }
 
     res.json(await store.update(req.params.id, parsed.data));

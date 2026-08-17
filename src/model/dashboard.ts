@@ -62,6 +62,11 @@ export interface BatteryInfo {
   percent: number | null;
 }
 
+/** Renderer-visible To Do state. Persistence IDs and completed items stay local. */
+export interface TodoData {
+  items: string[];
+}
+
 export type DashboardSectionData =
   | { type: 'calendar'; data: CalendarData | null; health: SourceHealth }
   | { type: 'weather'; data: WeatherData | null; health: SourceHealth }
@@ -69,6 +74,7 @@ export type DashboardSectionData =
   | { type: 'bus'; data: BusData | null; health: SourceHealth | null }
   | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
   | { type: 'octopus'; data: OctopusAgileData | null; health: SourceHealth | null }
+  | { type: 'todo'; data: TodoData | null; configured: boolean; health: null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 

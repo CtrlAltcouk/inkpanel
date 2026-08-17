@@ -7,6 +7,7 @@ import type {
   DashboardSectionData,
   OctopusAgileData,
   SourceHealth,
+  TodoData,
   TrafficData,
   TrainData,
   TrainDeparture,
@@ -180,6 +181,17 @@ function binsCell(bins: BinsData | null, health: SourceHealth | null): string {
   return `<div class="bin-date disp">${esc(when)}</div>${list}`;
 }
 
+function todoCell(todo: TodoData | null, configured: boolean): string {
+  if (!configured || !todo) return emptySlot('To Do — not set up');
+  if (todo.items.length === 0) return emptySlot('All done');
+  return `<div class="todo-list">${todo.items.slice(0, 5).map((text) => `<div class="todo-row"><span class="todo-box"></span><span>${esc(text)}</span></div>`).join('')}</div>`;
+}
+
+const TODO_CSS = `.todo-list{display:flex;flex-direction:column;gap:5px;overflow:hidden;}
+.todo-row{display:grid;grid-template-columns:14px minmax(0,1fr);gap:9px;align-items:center;height:21px;font-size:15px;line-height:1.1;}
+.todo-row>span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.todo-box{width:13px;height:13px;border:2px solid #000;}`;
+
 function renderSection(section: DashboardSectionData, data: DashboardData, position: string): string {
   if (section.type === 'empty') return `<div class="cell cell--${position}"></div>`;
   let label: string;
@@ -209,6 +221,10 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
       label = 'Octopus Agile';
       content = octopusCell(section.data, section.health, data);
       break;
+    case 'todo':
+      label = 'To Do';
+      content = todoCell(section.data, section.configured);
+      break;
     case 'bins':
       label = 'Bins';
       content = binsCell(section.data, section.health);
@@ -219,5 +235,6 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
 
 export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: string): string {
   const positions = ['tl', 'tr', 'bl', 'br'];
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
+  const todoCss = data.sections.some((section) => section.type === 'todo') ? TODO_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}${todoCss}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
 }
