@@ -17,6 +17,9 @@ import { manageRoutes } from './manageRoutes.ts';
 import { systemRoutes } from './systemRoutes.ts';
 import { todoRoutes } from './todoRoutes.ts';
 import { TodoStore, TodoStoreError } from '../todo/store.ts';
+import { printerRoutes } from './printerRoutes.ts';
+import { MoonrakerClient } from '../printers/moonraker.ts';
+import { PrinterConnectionStore, PrinterStoreError } from '../printers/store.ts';
 
 const require = createRequire(import.meta.url);
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -56,6 +59,9 @@ export interface AppDeps {
   transportApiBaseUrl?: string;
   /** Shared with FrameService in production; optional for existing test embedders. */
   todoStore?: TodoStore;
+  /** Shared with FrameService in production; optional for existing test embedders. */
+  printerStore?: PrinterConnectionStore;
+  moonrakerClient?: MoonrakerClient;
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -118,6 +124,8 @@ export function createApp(deps: AppDeps): express.Express {
 
   const auth = createAuth(deps.auth);
   const todoStore = deps.todoStore ?? new TodoStore(join(deps.dataDir, '.todo-lists.json'));
+  const printerStore = deps.printerStore ?? new PrinterConnectionStore(join(deps.dataDir, '.printer-connections.json'));
+  const moonrakerClient = deps.moonrakerClient ?? new MoonrakerClient();
 
   // Login must be reachable before the gate. auth.ts's isExempt() does NOT
   // match it — only the device frame route is exempt — so this reachability
@@ -143,9 +151,11 @@ export function createApp(deps: AppDeps): express.Express {
     deps.googleMapsCredentials,
     deps.transportApiBaseUrl,
     todoStore,
+    printerStore,
   ));
   app.use('/api', editorPreferencesRoutes(deps.store, deps.dataDir));
   app.use('/api', todoRoutes(deps.store, todoStore));
+  app.use('/api', printerRoutes(deps.store, printerStore, moonrakerClient));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
@@ -162,6 +172,13 @@ export function createApp(deps: AppDeps): express.Express {
     if (err instanceof TodoStoreError) {
       res.status(503).json({
         status: 'error', component: 'todo-store', code: err.code, error: err.message,
+        backup: err.backupPath ? basename(err.backupPath) : null,
+      });
+      return;
+    }
+    if (err instanceof PrinterStoreError) {
+      res.status(503).json({
+        status: 'error', component: 'printer-store', code: err.code, error: err.message,
         backup: err.backupPath ? basename(err.backupPath) : null,
       });
       return;

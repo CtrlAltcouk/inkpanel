@@ -35,6 +35,8 @@ import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderProfileHtml } from './profileTemplate.ts';
 import { loadFontCss } from './fonts.ts';
 import type { TodoStore } from '../todo/store.ts';
+import { offlinePrinter, type MoonrakerClient } from '../printers/moonraker.ts';
+import type { PrinterConnectionStore } from '../printers/store.ts';
 
 const SOURCE_TIMEOUT_MS = 8000;
 
@@ -60,6 +62,9 @@ export interface FrameDeps {
   octopusSource?: Source<OctopusAgileConfig, OctopusRateWindow>;
   /** Local shared-list persistence. To Do deliberately bypasses SourceCache. */
   todoStore?: TodoStore;
+  /** Shared LAN connection registry and live-only Moonraker client. */
+  printerStore?: PrinterConnectionStore;
+  moonrakerClient?: MoonrakerClient;
 }
 
 export interface Frame {
@@ -241,6 +246,32 @@ export class FrameService {
               configured: list !== null,
               health: null,
             }));
+          }
+          break;
+        }
+        case 'printers': {
+          if (widget.config.printerIds.length === 0 || !this.deps.printerStore || !this.deps.moonrakerClient) {
+            request = Promise.resolve({ type: 'printers', data: null, configured: false, health: null });
+          } else {
+            request = Promise.all(widget.config.printerIds.map(async (id) => {
+              const connection = await this.deps.printerStore!.get(id);
+              if (!connection) return null;
+              try { return await this.deps.moonrakerClient!.query(connection); }
+              catch { return offlinePrinter(connection.name); }
+            })).then((results) => {
+              const printers = results.filter((result) => result !== null);
+              const offline = printers.some((printer) => printer.state === 'offline');
+              return {
+                type: 'printers' as const,
+                data: printers.length ? { printers } : null,
+                configured: printers.length === widget.config.printerIds.length,
+                health: {
+                  id: 'moonraker', status: offline ? 'error' as const : 'ok' as const,
+                  fetchedAt: new Date().toISOString(),
+                  error: offline ? 'one or more selected printers are offline' : null,
+                },
+              };
+            });
           }
           break;
         }

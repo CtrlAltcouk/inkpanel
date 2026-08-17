@@ -20,11 +20,41 @@ export function contentHash(data: ProfileDashboardData): string {
       : null;
   const visibleSection = (section: ProfileDashboardData['sections'][number]) => {
     if (section.type === 'empty') return section;
+    const printerData = section.type === 'printers' && section.data
+      ? {
+          printers: section.data.printers.map((printer) => {
+            const active = printer.state === 'printing' || printer.state === 'paused';
+            if (section.data!.printers.length > 1) {
+              return {
+                name: printer.name,
+                state: printer.state,
+                progressPercent: active ? printer.progressPercent : null,
+              };
+            }
+            const detailed = active;
+            return {
+              name: printer.name,
+              state: printer.state,
+              progressPercent: active
+                ? (data.sections.length === 1 ? (printer.progressPercent ?? 0) : printer.progressPercent)
+                : null,
+              ...(detailed ? {
+                filename: printer.filename,
+                remainingMinutes: printer.remainingSeconds === null ? null : Math.max(0, Math.round(printer.remainingSeconds / 60)),
+                currentLayer: printer.currentLayer,
+                totalLayers: printer.totalLayers,
+                nozzle: printer.nozzle,
+                bed: data.sections.length === 1 && !printer.nozzle ? null : printer.bed,
+              } : { message: printer.message }),
+            };
+          }),
+        }
+      : null;
     return {
       type: section.type,
       data: section.type === 'todo' && section.data
         ? { items: section.data.items.slice(0, 5) }
-        : section.data,
+        : section.type === 'printers' ? printerData : section.data,
       // These widgets visibly distinguish an absent configuration ("not set
       // up") from a configured source whose first/live fetch failed
       // ("unavailable"). Health details themselves remain diagnostic-only.
@@ -35,6 +65,8 @@ export function contentHash(data: ProfileDashboardData): string {
         || section.type === 'octopus'
         ? { configured: section.health !== null }
         : section.type === 'todo'
+          ? { configured: section.configured }
+        : section.type === 'printers'
           ? { configured: section.configured }
         : {}),
       displayedStaleTime: displayedStaleTime(section.health),

@@ -17,6 +17,7 @@ import { nextCheckIn } from '../devices/nextCheckIn.ts';
 import { panelProfileIdV3Schema, timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 import type { TodoStore } from '../todo/store.ts';
+import type { PrinterConnectionStore } from '../printers/store.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -72,6 +73,13 @@ const dashboardSectionInputSchema = z.discriminatedUnion('type', [
     type: z.literal('todo'), version: z.literal(1),
     config: z.strictObject({
       listId: z.string().regex(/^(?:|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/, 'invalid To Do list id'),
+    }),
+  }),
+  z.strictObject({
+    type: z.literal('printers'), version: z.literal(1),
+    config: z.strictObject({
+      printerIds: z.array(z.string().uuid('invalid printer id')).max(4)
+        .refine((ids) => new Set(ids).size === ids.length, 'printer IDs must be unique'),
     }),
   }),
   z.strictObject({
@@ -142,6 +150,7 @@ export function manageRoutes(
   googleMapsCredentials?: GoogleMapsCredentialStore,
   transportApiBaseUrl?: string,
   todoStore?: TodoStore,
+  printerStore?: PrinterConnectionStore,
 ): Router {
   const router = Router();
 
@@ -275,6 +284,18 @@ export function manageRoutes(
         && (!todoStore || !(await todoStore.get(widget.config.listId)))) {
         res.status(400).json({ error: 'unknown To Do list', listId: widget.config.listId });
         return;
+      }
+      if (widget.type === 'printers') {
+        if (profile.dashboardSlots === 1 && widget.config.printerIds.length > 1) {
+          res.status(400).json({ error: 'InkPanel Mini displays exactly one configured printer' });
+          return;
+        }
+        const known = printerStore ? new Set((await printerStore.list()).map((printer) => printer.id)) : new Set<string>();
+        const unknownIds = widget.config.printerIds.filter((id) => !known.has(id));
+        if (unknownIds.length > 0) {
+          res.status(400).json({ error: 'unknown printer connection', printerIds: unknownIds });
+          return;
+        }
       }
     }
 

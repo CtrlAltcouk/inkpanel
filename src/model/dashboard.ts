@@ -3,6 +3,7 @@ import type { BinsData } from '../sources/bins.ts';
 import type { BusData } from '../sources/transportApiBus.ts';
 import type { TrafficData } from '../sources/googleTraffic.ts';
 import type { OctopusAgileData } from '../sources/octopusAgile.ts';
+import type { PrinterStatus } from '../printers/moonraker.ts';
 
 export interface CalendarEvent {
   uid: string;
@@ -75,6 +76,7 @@ export type DashboardSectionData =
   | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
   | { type: 'octopus'; data: OctopusAgileData | null; health: SourceHealth | null }
   | { type: 'todo'; data: TodoData | null; configured: boolean; health: null }
+  | { type: 'printers'; data: { printers: PrinterStatus[] } | null; configured: boolean; health: SourceHealth | null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 
@@ -117,3 +119,4 @@ export type { BinsData, BinCollection, BinType } from '../sources/bins.ts';
 export type { BusData, BusDeparture, BusDepartureStatus } from '../sources/transportApiBus.ts';
 export type { TrafficData } from '../sources/googleTraffic.ts';
 export type { OctopusAgileData, OctopusRateSlot } from '../sources/octopusAgile.ts';
+export type { PrinterStatus, PrinterDisplayState, PrinterTemperature } from '../printers/moonraker.ts';

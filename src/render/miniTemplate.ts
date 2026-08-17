@@ -4,6 +4,7 @@ import type {
   DashboardSectionData,
   MiniDashboardData,
   OctopusAgileData,
+  PrinterStatus,
   SourceHealth,
   TrainDeparture,
 } from '../model/dashboard.ts';
@@ -189,6 +190,35 @@ function todo(section: Extract<DashboardSectionData, { type: 'todo' }>): string 
 
 const TODO_CSS = `.mini-todo-list{display:flex;flex-direction:column;gap:3px;padding-top:6px;overflow:hidden}.mini-todo-row{display:grid;grid-template-columns:13px minmax(0,1fr);gap:7px;align-items:center;height:25px;font-size:11px;font-weight:650;line-height:1.08}.mini-todo-row>span:last-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:24px;overflow:hidden}.mini-todo-box{width:11px;height:11px;border:2px solid #000}`;
 
+function miniDuration(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  const minutes = Math.max(0, Math.round(seconds / 60));
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours}h ${minutes % 60}m left` : `${minutes}m left`;
+}
+
+function miniPrinterHero(printer: PrinterStatus): string {
+  const active = printer.state === 'printing' || printer.state === 'paused';
+  if (!active) {
+    return `<div class="mini-printer-head"><strong>${esc(printer.name)}</strong><span>${esc(printer.state.toUpperCase())}</span></div><div class="mini-printer-state"><strong>${esc(printer.state.toUpperCase())}</strong><span>${esc(printer.message ?? (printer.state === 'idle' ? 'Ready' : ''))}</span></div>`;
+  }
+  const eta = miniDuration(printer.remainingSeconds);
+  const layer = printer.currentLayer !== null && printer.totalLayers !== null ? `L${printer.currentLayer} / ${printer.totalLayers}` : null;
+  return `<div class="mini-printer-head"><strong>${esc(printer.name)}</strong><span>${esc(printer.state.toUpperCase())}</span></div>
+    <div class="mini-printer-percent disp tnum">${printer.progressPercent ?? 0}%</div>
+    <div class="mini-printer-progress"><span style="width:${printer.progressPercent ?? 0}%"></span></div>
+    ${printer.filename ? `<div class="mini-printer-file">${esc(printer.filename)}</div>` : ''}
+    <div class="mini-printer-meta tnum">${[eta, layer].filter(Boolean).map((value) => `<span>${esc(value!)}</span>`).join('')}</div>
+    ${printer.nozzle ? `<div class="mini-printer-temp tnum">NOZZLE ${printer.nozzle.current}° / ${printer.nozzle.target}°${printer.bed ? ` · BED ${printer.bed.current}° / ${printer.bed.target}°` : ''}</div>` : ''}`;
+}
+
+function printers(section: Extract<DashboardSectionData, { type: 'printers' }>): string {
+  if (!section.configured || !section.data || section.data.printers.length !== 1) return state('3D PRINTER', 'Not set up');
+  return miniPrinterHero(section.data.printers[0]!);
+}
+
+const PRINTER_CSS = `.mini-printer-head{height:30px;border-bottom:2px solid #000;display:flex;flex-direction:column;justify-content:center;overflow:hidden}.mini-printer-head strong{font-size:13px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini-printer-head span{font-size:8px;font-weight:900;letter-spacing:.1em}.mini-printer-percent{text-align:center;font-size:48px;line-height:.9;margin-top:8px}.mini-printer-progress{height:15px;border:2px solid #000;padding:1px;margin-top:5px}.mini-printer-progress>span{display:block;height:100%;background:#000}.mini-printer-file{font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:7px}.mini-printer-meta{display:flex;justify-content:space-between;font-size:10px;font-weight:800;margin-top:7px}.mini-printer-temp{font-size:7px;font-weight:800;text-align:center;margin-top:7px;white-space:nowrap}.mini-printer-state{height:142px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.mini-printer-state strong{font-size:27px}.mini-printer-state span{font-size:10px;margin-top:7px;max-height:35px;overflow:hidden}`;
+
 function renderWidget(section: DashboardSectionData, data: MiniDashboardData): string {
   switch (section.type) {
     case 'calendar': return calendar(section, data);
@@ -198,6 +228,7 @@ function renderWidget(section: DashboardSectionData, data: MiniDashboardData): s
     case 'traffic': return traffic(section, data);
     case 'octopus': return octopus(section, data);
     case 'todo': return todo(section);
+    case 'printers': return printers(section);
     case 'bins': return bins(section, data);
     case 'empty': return '<div class="empty-brand disp">INKPANEL<br>MINI</div>';
   }
@@ -228,5 +259,6 @@ body{font-family:"Inter",Arial,sans-serif;-webkit-font-smoothing:none}
 /** Dedicated 200×200 single-widget renderer. Never scales/crops the 800×480 dashboard. */
 export function renderMiniHtml(data: MiniDashboardData, profile: PanelProfile, fontCss: string): string {
   const todoCss = data.sections[0].type === 'todo' ? TODO_CSS : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}${todoCss}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
+  const printerCss = data.sections[0].type === 'printers' ? PRINTER_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}${todoCss}${printerCss}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
 }

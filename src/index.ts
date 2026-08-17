@@ -25,6 +25,8 @@ import { GoogleMapsCredentialStore } from './sources/googleMapsCredentials.ts';
 import { createManagedGoogleTrafficSource } from './sources/googleTraffic.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 import { TodoStore } from './todo/store.ts';
+import { PrinterConnectionStore } from './printers/store.ts';
+import { MoonrakerClient } from './printers/moonraker.ts';
 
 export const version = '0.1.0';
 
@@ -78,6 +80,8 @@ export async function main(): Promise<void> {
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
   const todoStore = new TodoStore(join(dataDir, '.todo-lists.json'));
+  const printerStore = new PrinterConnectionStore(join(dataDir, '.printer-connections.json'));
+  const moonrakerClient = new MoonrakerClient();
   const renderer = new Renderer();
   const calendarSource = createIcalFeedSource(createCalendarTextFetcher({
     allowPrivateNetworks: allowPrivateCalendarNetworks,
@@ -128,6 +132,8 @@ export async function main(): Promise<void> {
     busSource,
     trafficSource,
     todoStore,
+    printerStore,
+    moonrakerClient,
   });
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
@@ -142,6 +148,8 @@ export async function main(): Promise<void> {
     googleMapsCredentials,
     transportApiBaseUrl,
     todoStore,
+    printerStore,
+    moonrakerClient,
   });
   const server = app.listen(port);
   await new Promise<void>((resolveListening, rejectListening) => {
