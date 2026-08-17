@@ -5,20 +5,24 @@ export type PanelProfileId = DeviceRecordV3['panelProfileId'];
 
 type DeviceCommon = Omit<DeviceRecordV3, 'panelProfileId' | 'dashboardSections'>;
 
-/** Existing 7.5-inch runtime shape. Keep its four widget slots strongly typed. */
+/** Profile-specific views for code that needs exact slot counts. */
 export type LargeDeviceRecord = DeviceCommon & {
   panelProfileId: 'wft0583-800x480-mono';
   dashboardSections: [DashboardWidget, DashboardWidget, DashboardWidget, DashboardWidget];
 };
 
-/** 1.54-inch Mini runtime shape: exactly one visible widget. */
 export type MiniDeviceRecord = DeviceCommon & {
   panelProfileId: 'ssd1681-200x200-mono';
   dashboardSections: [DashboardWidget];
 };
 
-/** Runtime device model mirrors the V3 cross-field schema as a discriminated union. */
-export type DeviceRecord = LargeDeviceRecord | MiniDeviceRecord;
+/**
+ * Generic store/API record. Cross-field profile/slot validation is enforced by
+ * the V3 schema; callers that require an exact tuple can use the profile views
+ * above. Keeping the generic alias avoids forcing unrelated store/update code
+ * to distribute Partial<> across a physical-device union.
+ */
+export type DeviceRecord = DeviceRecordV3;
 
 export function defaultDevice(id: string): LargeDeviceRecord;
 export function defaultDevice(id: string, panelProfileId: 'wft0583-800x480-mono'): LargeDeviceRecord;
@@ -28,7 +32,8 @@ export function defaultDevice(
   id: string,
   panelProfileId: PanelProfileId = 'wft0583-800x480-mono',
 ): DeviceRecord {
-  // defaultDeviceV3 performs the runtime schema validation; the discriminant
-  // and tuple length are therefore guaranteed together at this boundary.
+  // defaultDeviceV3 validates the profile/slot relation at runtime. These
+  // casts expose the corresponding exact tuple for callers that requested a
+  // concrete profile, while the general store model stays schema-shaped.
   return defaultDeviceV3(id, panelProfileId) as DeviceRecord;
 }
