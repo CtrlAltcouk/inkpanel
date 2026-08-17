@@ -6,7 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Cancel superseded runs on the same branch rather than queueing them.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -78,19 +77,23 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile existing 7.5-inch production firmware and manifest
+      - name: Build production firmware packages
         run: ./scripts/build-firmware.sh
 
-      - name: Compile 1.54-inch InkPanel Mini firmware
+      - name: Build Mini hardware validation artifact
         env:
           MINI_ARTIFACT_DIR: ${{ github.workspace }}/firmware/mini-validation-artifact
         run: bash scripts/compile-mini-firmware.sh
 
-      - name: Check expected full-size firmware outputs
+      - name: Check published full-size and Mini firmware outputs
         run: |
           test -s firmware/dist/manifest.json
           test -s firmware/dist/input.sha256
           test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
+          test -s firmware/dist/mini/manifest.json
+          test -n "$(find firmware/dist/mini -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
+          test "$(node -e "const m=require('./firmware/dist/manifest.json'); process.stdout.write(m.target)")" = "full"
+          test "$(node -e "const m=require('./firmware/dist/mini/manifest.json'); process.stdout.write(m.target)")" = "mini"
           test "$(cat firmware/dist/input.sha256)" = "$(bash scripts/firmware-input-hash.sh)"
 
       - name: Check Mini validation package
@@ -113,9 +116,6 @@ jobs:
 
   golden:
     name: Generate golden reference
-    # Manual only. Golden images are environment-specific, so the canonical one
-    # is whatever this Linux runner produces — download the artifact and commit
-    # it if you want layout regression cover.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
