@@ -82,7 +82,7 @@ jobs:
         run: ./scripts/build-firmware.sh
 
       - name: Compile 1.54-inch InkPanel Mini firmware
-        run: ./scripts/compile-mini-firmware.sh
+        run: bash scripts/compile-mini-firmware.sh
 
       - name: Check expected full-size firmware outputs
         run: |
