@@ -18,6 +18,7 @@ const ROUTES = {
   flash: renderFlash,
 };
 const FALLBACK_ROUTE = 'panels';
+const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
 
 let generation = 0;
 let shellSelectedPanelId = null;
@@ -83,6 +84,15 @@ window.addEventListener('inkpanel:panel-selected', (event) => {
 window.addEventListener('inkpanel:devices-changed', () => {
   void refreshSidebarPanels().catch(() => undefined);
 });
+
+// Device enrolment happens independently of the browser: a newly flashed panel
+// can join Wi-Fi and create itself through the frame endpoint while this page is
+// already open. Refresh the lightweight sidebar list while the tab is visible
+// so new panels appear automatically instead of requiring a manual page reload.
+window.setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  void refreshSidebarPanels().catch(() => undefined);
+}, SIDEBAR_REFRESH_INTERVAL_MS);
 
 async function route() {
   const myGeneration = ++generation;
