@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Build the firmware and stage it for the web flasher.
+# Build both production firmware targets and stage them for the web flasher.
 #
-# Run this by hand for local/non-LXC development. The Proxmox installer and
-# updater install the Arduino toolchain and call this automatically when
-# firmware build inputs change; CI also runs it against the production board
-# target so firmware changes cannot merge without compiling.
+# The legacy/full-size package remains at firmware/dist so every existing
+# caller keeps the same paths. InkPanel Mini is additive at firmware/dist/mini.
+# Both targets are built into one staging tree and published with one directory
+# swap, so a failed Mini compile can never replace a previously-good 7.5-inch
+# package (and vice versa).
 #
 # Requires arduino-cli with the esp32 core installed:
 #   arduino-cli core install esp32:esp32
@@ -17,41 +18,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKETCH="$ROOT/firmware/inkpanel"
 DIST="$ROOT/firmware/dist"
 
-# The board is a XIAO ESP32-S3 *Plus*, which is a different target from the
-# plain XIAO_ESP32S3: 16MB of flash rather than 8MB, so a different partition
-# scheme and flash configuration get baked into the bootloader image.
-#
-# This was originally set to the non-Plus board, and the failure it produced
-# was thoroughly misleading: arduino-cli compiled a perfectly valid image, the
-# manifest offsets were right, the web flasher wrote all three images and
-# reported success — and the board then sat in a boot loop printing
-# "invalid header: 0x00000000", because the ROM could not boot an image built
-# for a different flash layout. Nothing anywhere reported an error.
-#
-# Overridable so a different XIAO variant does not need a code change.
-# Case matters. FQBNs are case-sensitive, and the board's *display name* is
-# XIAO_ESP32S3_PLUS while its FQBN is XIAO_ESP32S3_Plus — so copying the name
-# out of a board list gives you something that looks right and is rejected.
-# This exact string came from `arduino-cli board listall` on the real machine.
+# Existing reference hardware: XIAO ESP32-S3 Plus, 16 MB flash.
+# Exact case matters: the FQBN is XIAO_ESP32S3_Plus.
 FQBN="${FQBN:-esp32:esp32:XIAO_ESP32S3_Plus}"
 
-# Capture the exact source/build-input state represented by this build. The
-# updater compares this stamp with the current checkout instead of looking only
-# at files changed by the most recent `git pull`. That distinction matters if a
-# previous build failed or an older updater skipped it: a stale binary must not
-# become permanently "current" just because a later pull contains no new
-# firmware changes.
-INPUT_HASH="$(FQBN="$FQBN" bash "$ROOT/scripts/firmware-input-hash.sh")"
+# InkPanel Mini reference hardware: standard XIAO ESP32-S3, 8 MB flash.
+MINI_FQBN="${MINI_FQBN:-esp32:esp32:XIAO_ESP32S3}"
 
-# Resolve arduino-cli by path, not by trusting PATH to contain it.
-#
-# This script is invoked several ways, and only an interactive shell is
-# guaranteed a normal login PATH: by hand, by CI, by the LXC installer, and by
-# inkpanel-update via `runuser -u inkpanel`. runuser resets the environment for
-# the target user, and the inkpanel service user has /usr/sbin/nologin as its
-# shell — so /usr/local/bin, where arduino-cli commonly installs, may not be on
-# PATH. Resolve the executable explicitly so an automatic rebuild cannot
-# quietly keep serving a stale firmware build.
+INPUT_HASH="$(FQBN="$FQBN" MINI_FQBN="$MINI_FQBN" bash "$ROOT/scripts/firmware-input-hash.sh")"
+
 ARDUINO_CLI="${ARDUINO_CLI:-$(command -v arduino-cli 2>/dev/null || true)}"
 if [[ -z "$ARDUINO_CLI" ]]; then
   for candidate in /usr/local/bin/arduino-cli /usr/bin/arduino-cli "$HOME/.local/bin/arduino-cli"; do
@@ -67,55 +42,66 @@ if [[ -z "$ARDUINO_CLI" ]]; then
   exit 1
 fi
 
-# Fail here, not three steps later on the bench. A wrong FQBN otherwise either
-# stops the build with a bare "board not found", or — far worse, and what
-# actually happened — builds cleanly for the wrong hardware and produces an
-# image that only fails once it is on a board.
-if ! "$ARDUINO_CLI" board details --fqbn "$FQBN" >/dev/null 2>&1; then
-  echo "unknown FQBN: $FQBN" >&2
-  echo "" >&2
-  echo "Installed XIAO boards:" >&2
-  "$ARDUINO_CLI" board listall 2>/dev/null | grep -i xiao >&2 || echo "  (none found — is the esp32 core installed?)" >&2
-  echo "" >&2
-  echo "Set FQBN=... to override, e.g. FQBN=esp32:esp32:XIAO_ESP32S3 $0" >&2
-  exit 1
-fi
+validate_fqbn() {
+  local fqbn="$1" label="$2"
+  if ! "$ARDUINO_CLI" board details --fqbn "$fqbn" >/dev/null 2>&1; then
+    echo "unknown $label FQBN: $fqbn" >&2
+    echo "" >&2
+    echo "Installed XIAO boards:" >&2
+    "$ARDUINO_CLI" board listall 2>/dev/null | grep -i xiao >&2 || echo "  (none found — is the esp32 core installed?)" >&2
+    exit 1
+  fi
+}
 
-# Never destroy the currently-served firmware before we know the replacement is
-# complete. Compile and generate the manifest in a sibling directory, then swap
-# it into place only after every step succeeds. This makes the updater's
-# "failed build keeps the previous good package" guarantee true in practice.
+validate_fqbn "$FQBN" "full-size"
+validate_fqbn "$MINI_FQBN" "Mini"
+
+# Never destroy the currently-served firmware before both replacement targets
+# are complete. Compile into a sibling tree, then atomically swap it into place.
 STAGE="$(mktemp -d "$ROOT/firmware/.dist-build.XXXXXX")"
+MINI_SKETCH_WORK="$(mktemp -d "$ROOT/firmware/.mini-sketch.XXXXXX")"
 OLD_DIST=""
 cleanup() {
   [[ -z "${STAGE:-}" || ! -e "$STAGE" ]] || rm -rf "$STAGE"
+  [[ -z "${MINI_SKETCH_WORK:-}" || ! -e "$MINI_SKETCH_WORK" ]] || rm -rf "$MINI_SKETCH_WORK"
   [[ -z "${OLD_DIST:-}" || ! -e "$OLD_DIST" ]] || rm -rf "$OLD_DIST"
 }
 trap cleanup EXIT
 
-echo "== compiling for $FQBN =="
-# --output-dir puts the binaries somewhere predictable; --json makes the
-# build report machine-readable so the bootloader offset can be read from it
-# directly (see firmware-manifest.mjs for why only that one offset).
+# ---------------------------------------------------------------- full-size
+
+echo "== compiling full-size InkPanel for $FQBN =="
 "$ARDUINO_CLI" compile \
   --fqbn "$FQBN" \
   --output-dir "$STAGE" \
   --json \
   "$SKETCH" >"$STAGE/build-report.json"
 
-# arduino-cli emits bootloader, partition-table, application and (for the
-# current ESP32 core) merged binaries. firmware-manifest.mjs exposes the merged
-# image for new installs/recovery and the three region images for NVS-safe
-# routine updates. The firmware version is read directly from config.h.
-node "$ROOT/scripts/firmware-manifest.mjs" "$STAGE" "$SKETCH"
+node "$ROOT/scripts/firmware-manifest.mjs" "$STAGE" "$SKETCH" full
 
-# Write this only after every build/manifest step succeeds. The updater uses it
-# to prove that the package on disk represents the current firmware sources.
+# ---------------------------------------------------------------- Mini
+
+MINI_SKETCH="$MINI_SKETCH_WORK/inkpanel"
+cp -a "$SKETCH" "$MINI_SKETCH"
+cp "$MINI_SKETCH/partitions-mini.csv" "$MINI_SKETCH/partitions.csv"
+MINI_DIST="$STAGE/mini"
+mkdir -p "$MINI_DIST"
+
+echo "== compiling InkPanel Mini for $MINI_FQBN =="
+"$ARDUINO_CLI" compile \
+  --fqbn "$MINI_FQBN" \
+  --build-property 'compiler.cpp.extra_flags=-DINKPANEL_MINI=1' \
+  --output-dir "$MINI_DIST" \
+  --json \
+  "$MINI_SKETCH" >"$MINI_DIST/build-report.json"
+
+node "$ROOT/scripts/firmware-manifest.mjs" "$MINI_DIST" "$MINI_SKETCH" mini
+
+# Write freshness only after both manifests succeeded. The updater therefore
+# never treats a package containing only one current target as complete.
 printf '%s\n' "$INPUT_HASH" >"$STAGE/input.sha256"
 
-# Same filesystem, so directory renames are atomic. There is a tiny interval
-# between moving the old directory aside and moving the new one into place, but
-# a failure in the second move restores the previous package immediately.
+# Same filesystem: replace the complete package set as one transaction.
 mkdir -p "$(dirname "$DIST")"
 if [[ -e "$DIST" ]]; then
   OLD_DIST="${DIST}.previous.$$"
@@ -138,6 +124,10 @@ else
   exit 1
 fi
 
-echo "== wrote $DIST/manifest.json =="
+echo "== wrote full-size $DIST/manifest.json =="
+echo "== wrote Mini $DIST/mini/manifest.json =="
 echo "== firmware input fingerprint: $INPUT_HASH =="
+echo "-- full-size manifest --"
 cat "$DIST/manifest.json"
+echo "-- Mini manifest --"
+cat "$DIST/mini/manifest.json"
