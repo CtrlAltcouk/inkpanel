@@ -98,13 +98,16 @@ jobs:
           test -s firmware/mini-validation-artifact/README_FIRST.txt
           test -s firmware/mini-validation-artifact/arduino/inkpanel/inkpanel.ino
           test -s firmware/mini-validation-artifact/arduino/inkpanel/MiniEPD.cpp
+          test -s firmware/mini-validation-artifact/driver-test/InkPanelMiniDriverTest/InkPanelMiniDriverTest.ino
           test -n "$(find firmware/mini-validation-artifact/binaries -maxdepth 1 -name '*.merged.bin' -type f -size +0c -print -quit)"
 
       - name: Upload Mini hardware validation package
         uses: actions/upload-artifact@v4
         with:
           name: inkpanel-mini-hardware-validation
-          path: firmware/mini-validation-artifact/
+          path: |
+            firmware/mini-validation-artifact/
+            !firmware/mini-validation-artifact/**/build/**
           if-no-files-found: error
           retention-days: 14
 
