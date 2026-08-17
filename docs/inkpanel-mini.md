@@ -145,6 +145,8 @@ During the draft phase CI publishes `inkpanel-mini-hardware-validation` for the 
 
 For Arduino IDE validation select the standard **XIAO ESP32S3**, not the Plus board. No extra compiler flags are required in the exported validation sketch.
 
+This validation artifact is never copied into `firmware/dist`; the existing full-size WebFlash/update package remains the only published production firmware until Mini hardware validation is complete.
+
 ## WebFlash and CI
 
 WebFlash will expose the hardware choice explicitly rather than guessing from USB:
@@ -162,6 +164,7 @@ The existing full-size firmware manifest/update behaviour remains the compatibil
 - [x] Studio single-widget mode and square preview.
 - [x] Production Mini firmware target added alongside the existing full-size target.
 - [x] CI compiles both standard XIAO Mini and XIAO ESP32-S3 Plus firmware targets.
+- [x] CI generates an isolated Mini hardware-validation package without replacing `firmware/dist`.
 - [ ] Real-hardware validation of the production Mini driver: orientation, polarity, full refresh and sleep.
 - [ ] End-to-end Mini frame/ETag/304 validation against the feature-branch server.
 - [ ] WebFlash multi-hardware selection/package.
