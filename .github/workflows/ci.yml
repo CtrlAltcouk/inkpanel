@@ -82,6 +82,8 @@ jobs:
         run: ./scripts/build-firmware.sh
 
       - name: Compile 1.54-inch InkPanel Mini firmware
+        env:
+          MINI_ARTIFACT_DIR: ${{ github.workspace }}/firmware/mini-validation-artifact
         run: bash scripts/compile-mini-firmware.sh
 
       - name: Check expected full-size firmware outputs
@@ -90,6 +92,21 @@ jobs:
           test -s firmware/dist/input.sha256
           test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
           test "$(cat firmware/dist/input.sha256)" = "$(bash scripts/firmware-input-hash.sh)"
+
+      - name: Check Mini validation package
+        run: |
+          test -s firmware/mini-validation-artifact/README_FIRST.txt
+          test -s firmware/mini-validation-artifact/arduino/inkpanel/inkpanel.ino
+          test -s firmware/mini-validation-artifact/arduino/inkpanel/MiniEPD.cpp
+          test -n "$(find firmware/mini-validation-artifact/binaries -maxdepth 1 -name '*.merged.bin' -type f -size +0c -print -quit)"
+
+      - name: Upload Mini hardware validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkpanel-mini-hardware-validation
+          path: firmware/mini-validation-artifact/
+          if-no-files-found: error
+          retention-days: 14
 
   golden:
     name: Generate golden reference
