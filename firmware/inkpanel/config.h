@@ -1,34 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-#ifdef INKPANEL_MINI
-
-// InkPanel Mini:
-//   Seeed Studio XIAO ESP32-S3 (standard 8 MB board)
-//   Seeed ePaper Driver Board for XIAO
-//   1.54-inch 200x200 monochrome SSD1681 panel
-//
-// Seeed's driver board routes the panel connector to XIAO D0/D1/D2/D3/D8/D10.
-// The raw GPIO values below are the standard XIAO ESP32-S3 pin mapping.
-namespace Hardware {
-constexpr int EPD_RST  = 1;  // XIAO D0
-constexpr int EPD_CS   = 2;  // XIAO D1
-constexpr int EPD_BUSY = 3;  // XIAO D2, SSD1681 BUSY is active HIGH
-constexpr int EPD_DC   = 4;  // XIAO D3
-constexpr int EPD_SCLK = 7;  // XIAO D8
-constexpr int EPD_MOSI = 9;  // XIAO D10
-
-constexpr uint32_t SPI_HZ = 4'000'000;
-}
-
-constexpr bool HAS_EPD_POWER_ENABLE = false;
-constexpr bool HAS_WAKE_BUTTON = false;
-constexpr bool HAS_FACTORY_RESET_BUTTON = false;
-constexpr bool HAS_BATTERY_ADC = false;
-constexpr const char* PANEL_PROFILE_ID = "ssd1681-200x200-mono";
-constexpr const char* FIRMWARE_VERSION = "0.2.0-mini.1";
-
-#else
+#ifndef INKPANEL_MINI
 
 // XIAO ePaper Display Board EE04 (ESP32-S3 Plus). Unchanged from the working
 // EE04_WFT0583CZ61_OldV2_Test sketch.
@@ -64,7 +37,37 @@ constexpr const char* PANEL_PROFILE_ID = nullptr;
 // Bumped whenever behaviour visible on the physical panel changes. Keeping
 // this distinct makes serial output a quick proof that WebFlash served the
 // build we intended rather than a stale firmware/dist package.
+//
+// Keep the full-size literal first in this file: firmware-manifest.mjs reads the
+// default production version without preprocessing config.h.
 constexpr const char* FIRMWARE_VERSION = "0.1.4";
+
+#else
+
+// InkPanel Mini:
+//   Seeed Studio XIAO ESP32-S3 (standard 8 MB board)
+//   Seeed ePaper Driver Board for XIAO
+//   1.54-inch 200x200 monochrome SSD1681 panel
+//
+// Seeed's driver board routes the panel connector to XIAO D0/D1/D2/D3/D8/D10.
+// The raw GPIO values below are the standard XIAO ESP32-S3 pin mapping.
+namespace Hardware {
+constexpr int EPD_RST  = 1;  // XIAO D0
+constexpr int EPD_CS   = 2;  // XIAO D1
+constexpr int EPD_BUSY = 3;  // XIAO D2, SSD1681 BUSY is active HIGH
+constexpr int EPD_DC   = 4;  // XIAO D3
+constexpr int EPD_SCLK = 7;  // XIAO D8
+constexpr int EPD_MOSI = 9;  // XIAO D10
+
+constexpr uint32_t SPI_HZ = 4'000'000;
+}
+
+constexpr bool HAS_EPD_POWER_ENABLE = false;
+constexpr bool HAS_WAKE_BUTTON = false;
+constexpr bool HAS_FACTORY_RESET_BUTTON = false;
+constexpr bool HAS_BATTERY_ADC = false;
+constexpr const char* PANEL_PROFILE_ID = "ssd1681-200x200-mono";
+constexpr const char* FIRMWARE_VERSION = "0.2.0-mini.1";
 
 #endif
 
