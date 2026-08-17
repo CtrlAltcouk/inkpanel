@@ -9,10 +9,13 @@ import {
   renderDashboardEditor,
 } from './dashboardEditor.js';
 
+const MINI_PROFILE = 'ssd1681-200x200-mono';
 let selectedId = null;
 let selectedPanelTab = 'dashboard';
 
 export function setSelectedPanel(id) { selectedId = id; }
+function isMini(device) { return device.panelProfileId === MINI_PROFILE; }
+function displayLabel(device) { return isMini(device) ? 'InkPanel Mini · 1.54 inch · 200 × 200' : 'InkPanel · 7.5 inch · 800 × 480'; }
 
 function panelHeader(device) {
   return `<div class="panel-workspace-header">
@@ -22,6 +25,7 @@ function panelHeader(device) {
     </div>
     <div class="panel-workspace-statuses">
       ${device.claimed ? pill('Claimed', 'status--claimed') : pill('Unclaimed', 'status--unclaimed')}
+      ${isMini(device) ? pill('Mini · 200×200') : pill('7.5″ · 800×480')}
       ${pill(`fw ${device.lastFirmwareVersion ?? 'unknown'}`)}
       ${pill(formatVolts(device.lastBatteryVolts))}
       ${pill(formatRelative(device.lastSeenAt))}
@@ -34,6 +38,7 @@ function stat(label, value) {
 }
 
 function detail(device) {
+  const mini = isMini(device);
   return `<div id="detail">
     ${panelHeader(device)}
     <div class="panel-tabs" role="tablist" aria-label="Panel settings">
@@ -44,11 +49,11 @@ function detail(device) {
 
     <form data-id="${esc(device.id)}">
       <section class="panel-view" data-panel-view="dashboard">
-        <div class="studio-grid">
+        <div class="studio-grid ${mini ? 'studio-grid--mini' : ''}">
           <div class="studio-card">
-            <div class="studio-card-head"><div><h2>Live e-ink preview</h2><p class="meta">800 × 480 · exactly what this panel will show</p></div></div>
-            <div class="panel-preview-wrap">
-              <img class="panel-preview-image" alt="What ${esc(device.name)} is showing" src="/api/devices/${encodeURIComponent(device.id)}/render.png">
+            <div class="studio-card-head"><div><h2>Live e-ink preview</h2><p class="meta">${esc(displayLabel(device))} · exactly what this panel will show</p></div></div>
+            <div class="panel-preview-wrap ${mini ? 'panel-preview-wrap--mini' : ''}">
+              <img class="panel-preview-image ${mini ? 'panel-preview-image--mini' : ''}" alt="What ${esc(device.name)} is showing" src="/api/devices/${encodeURIComponent(device.id)}/render.png">
             </div>
             <div class="actions">
               <button type="button" data-push="${esc(device.id)}">Push to display</button>
@@ -63,7 +68,7 @@ function detail(device) {
           </div>
 
           <div class="studio-card">
-            <div class="studio-card-head"><div><h3>Dashboard layout</h3><p class="meta">Select a section to configure it. Widget settings are remembered.</p></div></div>
+            <div class="studio-card-head"><div><h3>${mini ? 'Display content' : 'Dashboard layout'}</h3><p class="meta">${mini ? 'One widget fills this Mini display. Widget settings are remembered.' : 'Select a section to configure it. Widget settings are remembered.'}</p></div></div>
             <div class="dashboard-editor" id="dashboard-editor"></div>
           </div>
         </div>
@@ -82,6 +87,7 @@ function detail(device) {
             <div class="studio-card-head"><div><h2>Status</h2><p class="meta">Read-only information reported by the panel.</p></div></div>
             <div class="panel-stat-grid">
               ${stat('Device ID', device.id)}
+              ${stat('Display', mini ? 'Mini 200×200' : '7.5″ 800×480')}
               ${stat('Firmware', device.lastFirmwareVersion ?? 'unknown')}
               ${stat('Battery', formatVolts(device.lastBatteryVolts))}
               ${stat('Last seen', formatRelative(device.lastSeenAt))}
@@ -123,7 +129,7 @@ function showNotice(root, text) {
   if (error) error.hidden = true; if (notice) { notice.textContent = text; notice.hidden = false; }
 }
 function pushMessage(result) {
-  if (result.willAppearBy) return `Rendered. Will appear by ${new Date(result.willAppearBy).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — or press KEY1 for now.`;
+  if (result.willAppearBy) return `Rendered. Will appear by ${new Date(result.willAppearBy).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — or wake the panel for now.`;
   if (result.overdueSince) return 'Rendered. The panel will collect it when it next wakes.';
   return 'Rendered. Will appear at the panel’s next check-in.';
 }
