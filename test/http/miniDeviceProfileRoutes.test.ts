@@ -73,6 +73,24 @@ test('Mini firmware header enrols a one-widget 200x200 device', async () => {
   });
 });
 
+test('Mini frame contract returns 5000 bytes once then 304 for the same ETag', async () => {
+  await withServer(async (base) => {
+    const headers = { 'x-inkpanel-profile': 'ssd1681-200x200-mono' };
+    const first = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`, { headers });
+    assert.equal(first.status, 200);
+    assert.equal((await first.arrayBuffer()).byteLength, 5000);
+    const etag = first.headers.get('etag');
+    assert.ok(etag, 'first Mini frame must carry an ETag');
+
+    const second = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`, {
+      headers: { ...headers, 'if-none-match': etag },
+    });
+    assert.equal(second.status, 304);
+    assert.equal((await second.arrayBuffer()).byteLength, 0, '304 must not send a framebuffer body');
+    assert.equal(second.headers.get('x-inkpanel-profile'), 'ssd1681-200x200-mono');
+  });
+});
+
 test('an unknown advertised profile fails closed and creates no device', async () => {
   await withServer(async (base, store) => {
     const res = await fetch(`${base}/api/devices/esp32-a1b2c3/frame`, {
