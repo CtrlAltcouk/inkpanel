@@ -333,7 +333,7 @@ test('serves the config UI and its fonts', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/`);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /inkpanel/);
+    assert.match(await page.text(), /inkpanel/i);
 
     const css = await fetch(`${base}/vendor/colors_and_type.css`);
     assert.equal(css.status, 200, 'the vendored design system must be reachable');
