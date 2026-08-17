@@ -4,14 +4,28 @@ import { z } from 'zod';
 import type { DeviceStore } from '../devices/store.ts';
 import {
   DashboardEditorPreferencesStore,
+  dashboardEditorSlotSchema,
   dashboardEditorSlotsSchema,
+  emptyDashboardEditorSlots,
+  type DashboardEditorSlots,
 } from '../widgets/editorPreferences.ts';
 
-const putSchema = z.strictObject({ slots: dashboardEditorSlotsSchema });
+const incomingSlotsSchema = z.array(dashboardEditorSlotSchema).min(1).max(4);
+const putSchema = z.strictObject({ slots: incomingSlotsSchema });
+
+function persistedSlots(slots: z.infer<typeof incomingSlotsSchema>): DashboardEditorSlots {
+  const padded = emptyDashboardEditorSlots();
+  slots.forEach((slot, index) => { padded[index] = slot; });
+  return dashboardEditorSlotsSchema.parse(padded);
+}
 
 /**
  * Admin-only remembered widget drafts. These routes live behind the normal
  * /api authentication gate and never affect the device frame protocol.
+ *
+ * The HTTP boundary accepts the active display's one or four slot drafts. The
+ * owner-only persistence file remains the original fixed four-bucket V1 shape;
+ * Mini uses bucket zero and empty buckets are padded here.
  */
 export function editorPreferencesRoutes(store: DeviceStore, dataDir: string): Router {
   const router = Router();
@@ -41,7 +55,7 @@ export function editorPreferencesRoutes(store: DeviceStore, dataDir: string): Ro
       return;
     }
     await ready;
-    await preferences.set(req.params.id, parsed.data.slots);
+    await preferences.set(req.params.id, persistedSlots(parsed.data.slots));
     res.set('cache-control', 'no-store');
     res.json(preferences.get(req.params.id));
   });
