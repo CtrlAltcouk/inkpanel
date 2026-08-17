@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { packGrayscale } from '../../src/panel/quantise.ts';
 import type { PanelProfile } from '../../src/panel/profile.ts';
-import { WFT0583 } from '../../src/panel/profile.ts';
+import { SSD1681_200X200, WFT0583 } from '../../src/panel/profile.ts';
 
 // A tiny 8x1 profile so the expected byte can be worked out by hand.
 const TINY: PanelProfile = {
   id: 'tiny-8x1', width: 8, height: 1,
   bitDepth: 1, bitOrder: 'msb-first', inkBit: 1,
-  stride: 1, bytes: 1,
+  stride: 1, bytes: 1, dashboardSlots: 1,
 };
 
 test('packs MSB-first with 1 = black', () => {
@@ -33,8 +33,19 @@ test('WFT0583 profile matches the wire format the firmware expects', () => {
   assert.equal(WFT0583.height, 480);
   assert.equal(WFT0583.stride, 100);
   assert.equal(WFT0583.bytes, 48000);
+  assert.equal(WFT0583.dashboardSlots, 4);
   assert.equal(WFT0583.inkBit, 1);
   assert.equal(WFT0583.bitOrder, 'msb-first');
+});
+
+test('SSD1681 Mini profile is one 200x200 packed framebuffer', () => {
+  assert.equal(SSD1681_200X200.width, 200);
+  assert.equal(SSD1681_200X200.height, 200);
+  assert.equal(SSD1681_200X200.stride, 25);
+  assert.equal(SSD1681_200X200.bytes, 5000);
+  assert.equal(SSD1681_200X200.dashboardSlots, 1);
+  const gray = new Uint8Array(200 * 200).fill(255);
+  assert.equal(packGrayscale(gray, SSD1681_200X200).length, 5000);
 });
 
 test('produces exactly one full buffer for the real panel', () => {
