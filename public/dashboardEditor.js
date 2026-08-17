@@ -163,6 +163,10 @@ function markDashboardChanged(root) {
   root.closest('form')?.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function notifyTodoContentChanged(root) {
+  root.dispatchEvent(new CustomEvent('inkpanel:todo-content-changed', { bubbles: true }));
+}
+
 function bindTodoEditor(root, state, slot, panel) {
   const config = slot.drafts.todo ?? defaultConfig('todo');
   slot.drafts.todo = config;
@@ -172,13 +176,14 @@ function bindTodoEditor(root, state, slot, panel) {
     output.textContent = err?.message ?? String(err);
     output.hidden = false;
   };
-  const mutate = async (button, operation, after = () => {}) => {
+  const mutate = async (button, operation, { after = () => {}, configChanged = false, contentChanged = false } = {}) => {
     button.disabled = true;
     try {
       const result = await operation();
       state.todoLists = (await getJson('/api/todo-lists')).lists;
       after(result);
-      markDashboardChanged(root);
+      if (configChanged) markDashboardChanged(root);
+      if (contentChanged) notifyTodoContentChanged(root);
       renderLayout(root);
       renderEditor(root);
     } catch (err) {
@@ -195,7 +200,18 @@ function bindTodoEditor(root, state, slot, panel) {
   });
   panel.querySelector('[data-todo-create]').addEventListener('click', (event) => {
     const name = panel.querySelector('[data-todo-new-list]').value.trim();
-    void mutate(event.currentTarget, () => sendJson('POST', '/api/todo-lists', { name }), (created) => { config.listId = created.id; });
+    void mutate(event.currentTarget, () => sendJson('POST', '/api/todo-lists', { name }), {
+      after: (created) => { config.listId = created.id; },
+      configChanged: true,
+    });
+  });
+
+  // These fields edit the separately persisted shared list, not DeviceStore.
+  // Stop their native events before the enclosing panel form's generic dirty
+  // listeners see them. The list selector is deliberately excluded.
+  panel.querySelectorAll('[data-todo-new-list], [data-todo-rename], [data-todo-new-task], [data-todo-text], [data-todo-completed]').forEach((control) => {
+    control.addEventListener('input', (event) => event.stopPropagation());
+    control.addEventListener('change', (event) => event.stopPropagation());
   });
 
   const selected = () => state.todoLists.find((list) => list.id === config.listId);
@@ -205,23 +221,26 @@ function bindTodoEditor(root, state, slot, panel) {
   });
   panel.querySelector('[data-todo-delete-list]')?.addEventListener('click', (event) => {
     if (!globalThis.confirm(`Delete the “${selected()?.name ?? 'selected'}” To Do list?`)) return;
-    void mutate(event.currentTarget, () => sendJson('DELETE', `/api/todo-lists/${encodeURIComponent(config.listId)}`), () => { config.listId = ''; });
+    void mutate(event.currentTarget, () => sendJson('DELETE', `/api/todo-lists/${encodeURIComponent(config.listId)}`), {
+      after: () => { config.listId = ''; },
+      configChanged: true,
+    });
   });
   panel.querySelector('[data-todo-add]')?.addEventListener('click', (event) => {
     const text = panel.querySelector('[data-todo-new-task]').value.trim();
-    void mutate(event.currentTarget, () => sendJson('POST', `/api/todo-lists/${encodeURIComponent(config.listId)}/items`, { text }));
+    void mutate(event.currentTarget, () => sendJson('POST', `/api/todo-lists/${encodeURIComponent(config.listId)}/items`, { text }), { contentChanged: true });
   });
 
   panel.querySelectorAll('[data-todo-item]').forEach((row) => {
     const itemId = row.dataset.todoItem;
     row.querySelector('[data-todo-completed]').addEventListener('change', (event) => {
-      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`, { completed: event.currentTarget.checked }));
+      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`, { completed: event.currentTarget.checked }), { contentChanged: true });
     });
     row.querySelector('[data-todo-text]').addEventListener('change', (event) => {
-      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`, { text: event.currentTarget.value.trim() }));
+      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`, { text: event.currentTarget.value.trim() }), { contentChanged: true });
     });
     row.querySelector('[data-todo-delete-item]').addEventListener('click', (event) => {
-      void mutate(event.currentTarget, () => sendJson('DELETE', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`));
+      void mutate(event.currentTarget, () => sendJson('DELETE', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/${encodeURIComponent(itemId)}`), { contentChanged: true });
     });
     row.querySelectorAll('[data-todo-move]').forEach((button) => button.addEventListener('click', (event) => {
       const list = selected();
@@ -229,7 +248,7 @@ function bindTodoEditor(root, state, slot, panel) {
       const target = index + Number(event.currentTarget.dataset.todoMove);
       const itemIds = list.items.map((item) => item.id);
       [itemIds[index], itemIds[target]] = [itemIds[target], itemIds[index]];
-      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/order`, { itemIds }));
+      void mutate(event.currentTarget, () => sendJson('PUT', `/api/todo-lists/${encodeURIComponent(config.listId)}/items/order`, { itemIds }), { contentChanged: true });
     }));
   });
 }

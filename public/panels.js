@@ -134,6 +134,15 @@ function pushMessage(result) {
   return 'Rendered. Will appear at the panel’s next check-in.';
 }
 
+export function refreshPanelPreview(root, deviceId) {
+  const img = root.querySelector('.panel-preview-image');
+  if (img) img.src = `/api/devices/${encodeURIComponent(deviceId)}/render.png?t=${Date.now()}`;
+}
+
+export function bindTodoPreviewRefresh(editor, root, deviceId) {
+  editor.addEventListener('inkpanel:todo-content-changed', () => refreshPanelPreview(root, deviceId));
+}
+
 async function save(event, root) {
   event.preventDefault();
   const form = event.target; const raw = Object.fromEntries(new FormData(form));
@@ -178,7 +187,7 @@ async function renderDetail(root, device, serviceStatus) {
     try {
       const result = await sendJson('POST', `/api/devices/${encodeURIComponent(button.dataset.push)}/push`);
       showNotice(root, pushMessage(result));
-      const img = root.querySelector('.panel-preview-image'); if (img) img.src = `/api/devices/${encodeURIComponent(button.dataset.push)}/render.png?t=${Date.now()}`;
+      refreshPanelPreview(root, button.dataset.push);
     } catch (err) { if (err?.status !== 401) showError(root, err); }
     finally { button.disabled = false; button.textContent = 'Push to display'; }
   });
@@ -187,7 +196,9 @@ async function renderDetail(root, device, serviceStatus) {
 
   const [{ renderCityPicker }, remembered] = await Promise.all([import('./cityPicker.js'), getJson(`/api/dashboard-editor/${encodeURIComponent(device.id)}`)]);
   renderCityPicker(detailEl.querySelector('#city-picker'), device);
-  renderDashboardEditor(detailEl.querySelector('#dashboard-editor'), device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists);
+  const dashboardEditor = detailEl.querySelector('#dashboard-editor');
+  bindTodoPreviewRefresh(dashboardEditor, root, device.id);
+  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists);
 }
 
 export async function renderPanels(root) {
