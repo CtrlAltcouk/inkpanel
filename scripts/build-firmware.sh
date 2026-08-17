@@ -45,7 +45,11 @@ fi
 validate_fqbn() {
   local fqbn="$1" label="$2"
   if ! "$ARDUINO_CLI" board details --fqbn "$fqbn" >/dev/null 2>&1; then
-    echo "unknown $label FQBN: $fqbn" >&2
+    if [[ "$label" == "full-size" ]]; then
+      echo "unknown FQBN: $fqbn" >&2
+    else
+      echo "unknown $label FQBN: $fqbn" >&2
+    fi
     echo "" >&2
     echo "Installed XIAO boards:" >&2
     "$ARDUINO_CLI" board listall 2>/dev/null | grep -i xiao >&2 || echo "  (none found — is the esp32 core installed?)" >&2
