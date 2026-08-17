@@ -73,7 +73,19 @@ test('full-size printer selection dirties config while shared connection edits s
     const previewBefore = await page.locator('.panel-preview-image').getAttribute('src');
     const firstConnection = page.locator('[data-printer-connection]').first();
     await firstConnection.locator('[data-printer-edit]').click();
+    const fieldStyle = (selector) => firstConnection.locator(selector).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        height: style.height, padding: style.padding, border: style.border,
+        background: style.backgroundColor, color: style.color,
+        fontFamily: style.fontFamily, fontSize: style.fontSize,
+      };
+    });
+    assert.deepEqual(await fieldStyle('[data-printer-edit-url]'), await fieldStyle('[data-printer-edit-name]'));
     await firstConnection.locator('[data-printer-edit-name]').fill('Voron 2.4');
+    await firstConnection.locator('[data-printer-edit-url]').fill(' 192.168.1.171:7125 ');
+    await firstConnection.locator('[data-printer-edit-url]').blur();
+    assert.equal(await firstConnection.locator('[data-printer-edit-url]').inputValue(), 'http://192.168.1.171:7125');
     await firstConnection.locator('[data-printer-edit-key]').fill('new-secret');
     assert.equal(await page.locator('#save-state').textContent(), 'All changes saved');
     await firstConnection.locator('[data-printer-save]').click();
@@ -81,6 +93,7 @@ test('full-size printer selection dirties config while shared connection edits s
     assert.equal(await page.locator('#save-state').textContent(), 'All changes saved');
     assert.notEqual(await page.locator('.panel-preview-image').getAttribute('src'), previewBefore);
     assert.equal(updateBody.apiKey, 'new-secret');
+    assert.equal(updateBody.baseUrl, 'http://192.168.1.171:7125');
     assert.doesNotMatch(await page.content(), /new-secret/);
 
     await page.locator('[data-printer-connection]').first().locator('[data-printer-test]').click();

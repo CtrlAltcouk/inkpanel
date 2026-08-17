@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrinterConnectionStore, PrinterStoreError } from '../../src/printers/store.ts';
+import { normalizeMoonrakerUrl, PrinterConnectionStore, PrinterStoreError } from '../../src/printers/store.ts';
 
 async function withStore(fn: (store: PrinterConnectionStore, path: string, dir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-printers-'));
@@ -29,6 +29,13 @@ test('printer CRUD normalizes URLs, keeps stable IDs, and writes atomically at 0
   });
 });
 
+test('Moonraker URLs default to HTTP without changing explicit HTTP or HTTPS', () => {
+  assert.equal(normalizeMoonrakerUrl(' 192.168.1.171:7125 '), 'http://192.168.1.171:7125');
+  assert.equal(normalizeMoonrakerUrl('printer.local:7125'), 'http://printer.local:7125');
+  assert.equal(normalizeMoonrakerUrl('http://printer.local:7125'), 'http://printer.local:7125');
+  assert.equal(normalizeMoonrakerUrl('https://printer.local'), 'https://printer.local');
+});
+
 test('API keys can be preserved, replaced, and explicitly cleared', async () => {
   await withStore(async (store) => {
     const printer = await store.create({ name: 'Mini', baseUrl: 'https://printer.local', apiKey: 'first' });
@@ -42,6 +49,8 @@ test('API keys can be preserved, replaced, and explicitly cleared', async () => 
 test('invalid URLs, embedded credentials, duplicate names, and capacity fail closed', async () => {
   await withStore(async (store) => {
     await assert.rejects(() => store.create({ name: 'Bad', baseUrl: 'ftp://printer.local' }), /HTTP or HTTPS/);
+    await assert.rejects(() => store.create({ name: 'Bad', baseUrl: 'file://printer.local' }), /HTTP or HTTPS/);
+    await assert.rejects(() => store.create({ name: 'Bad', baseUrl: 'javascript:alert(1)' }), /HTTP or HTTPS/);
     await assert.rejects(() => store.create({ name: 'Bad', baseUrl: 'http://user:pass@printer.local' }), /must not contain credentials/);
     await store.create({ name: 'Voron', baseUrl: 'http://voron.local' });
     await assert.rejects(() => store.create({ name: ' voron ', baseUrl: 'http://other.local' }), (err: unknown) => err instanceof PrinterStoreError && err.code === 'printer_conflict');

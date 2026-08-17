@@ -9,9 +9,16 @@ export const printerNameSchema = z.string().trim().min(1).max(64);
 export const printerApiKeySchema = z.string().trim().max(512);
 
 export function normalizeMoonrakerUrl(value: string): string {
+  const trimmed = value.trim();
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed);
+  const schemeSuffix = scheme ? trimmed.slice(scheme[0].length) : '';
+  const explicitScheme = Boolean(scheme && !/^\d+(?:$|[/?#])/.test(schemeSuffix));
+  const normalizedInput = /^https?:\/\//i.test(trimmed) || explicitScheme
+    ? trimmed
+    : `http://${trimmed}`;
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(normalizedInput);
   } catch {
     throw new Error('invalid Moonraker URL');
   }
