@@ -30,7 +30,7 @@ jobs:
 
       - name: Shell syntax
         run: |
-          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/firmware-input-hash.sh; do
+          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/compile-mini-firmware.sh scripts/firmware-input-hash.sh; do
             echo "checking $script"
             bash -n "$script"
           done
@@ -56,7 +56,7 @@ jobs:
         run: npm run test:tz
 
   firmware:
-    name: Compile XIAO ESP32-S3 Plus firmware
+    name: Compile InkPanel firmware targets
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -78,10 +78,13 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile production firmware and manifest
+      - name: Compile existing 7.5-inch production firmware and manifest
         run: ./scripts/build-firmware.sh
 
-      - name: Check expected firmware outputs
+      - name: Compile 1.54-inch InkPanel Mini firmware
+        run: ./scripts/compile-mini-firmware.sh
+
+      - name: Check expected full-size firmware outputs
         run: |
           test -s firmware/dist/manifest.json
           test -s firmware/dist/input.sha256
