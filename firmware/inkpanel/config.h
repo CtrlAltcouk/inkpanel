@@ -59,6 +59,11 @@ constexpr int EPD_DC   = 4;  // XIAO D3
 constexpr int EPD_SCLK = 7;  // XIAO D8
 constexpr int EPD_MOSI = 9;  // XIAO D10
 
+// Compatibility-only symbol: Arduino compiles every .cpp in the sketch folder,
+// including the unused OldV2EPD translation unit. The Mini execution path never
+// touches this value because it has no software-controlled EPD power rail.
+constexpr int EPD_ENABLE = -1;
+
 constexpr uint32_t SPI_HZ = 4'000'000;
 }
 
