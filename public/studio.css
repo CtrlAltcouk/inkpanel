@@ -341,6 +341,31 @@ body {
 .dashboard-config-panel select { margin-bottom: var(--sp-2); }
 .dashboard-config-panel .meta { line-height: 1.5; }
 .dashboard-config-panel .station-picker { margin-bottom: var(--sp-3); }
+.todo-editor-create,
+.todo-editor-add,
+.todo-editor-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: end;
+  margin: var(--sp-2) 0;
+}
+.todo-editor-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; margin-top: var(--sp-3); }
+.todo-editor-create button,
+.todo-editor-add button,
+.todo-editor-toolbar button { margin-top: 0; white-space: nowrap; }
+.todo-editor-items { display: grid; gap: 6px; margin: var(--sp-3) 0; }
+.todo-editor-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 32px 32px 32px;
+  gap: 5px;
+  align-items: center;
+}
+.todo-editor-row input { margin: 0; }
+.todo-editor-row--done input[type="text"] { color: var(--fg-3); text-decoration: line-through; }
+.todo-editor-row .todo-editor-move,
+.todo-editor-row .todo-editor-delete { min-height: 32px; margin: 0; padding: 4px; }
+.todo-editor-row .todo-editor-delete { color: var(--danger); }
 
 .device-settings-grid,
 .schedule-settings-grid {

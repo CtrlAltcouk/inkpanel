@@ -34,6 +34,7 @@ import type { Renderer } from './browser.ts';
 import { renderEnrolmentHtml } from './enrolment.ts';
 import { renderProfileHtml } from './profileTemplate.ts';
 import { loadFontCss } from './fonts.ts';
+import type { TodoStore } from '../todo/store.ts';
 
 const SOURCE_TIMEOUT_MS = 8000;
 
@@ -57,6 +58,8 @@ export interface FrameDeps {
   /** Google Routes data is live-only and never persisted to SourceCache. */
   trafficSource?: Source<TrafficSourceConfig, TrafficData>;
   octopusSource?: Source<OctopusAgileConfig, OctopusRateWindow>;
+  /** Local shared-list persistence. To Do deliberately bypasses SourceCache. */
+  todoStore?: TodoStore;
 }
 
 export interface Frame {
@@ -219,6 +222,24 @@ export class FrameService {
               type: 'octopus',
               data: outcome.data ? cheapestUpcomingOctopus(outcome.data) : null,
               health: outcome.health,
+            }));
+          }
+          break;
+        }
+        case 'todo': {
+          if (!widget.config.listId || !this.deps.todoStore) {
+            request = Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
+          } else {
+            request = this.deps.todoStore.get(widget.config.listId).then((list) => ({
+              type: 'todo' as const,
+              data: list ? {
+                items: list.items
+                  .filter((item) => !item.completed)
+                  .slice(0, 5)
+                  .map((item) => item.text),
+              } : null,
+              configured: list !== null,
+              health: null,
             }));
           }
           break;

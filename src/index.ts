@@ -24,6 +24,7 @@ import { createManagedTransportApiBusSource } from './sources/transportApiBus.ts
 import { GoogleMapsCredentialStore } from './sources/googleMapsCredentials.ts';
 import { createManagedGoogleTrafficSource } from './sources/googleTraffic.ts';
 import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
+import { TodoStore } from './todo/store.ts';
 
 export const version = '0.1.0';
 
@@ -76,6 +77,7 @@ export async function main(): Promise<void> {
   );
 
   const store = new DeviceStore(join(dataDir, 'config.json'));
+  const todoStore = new TodoStore(join(dataDir, '.todo-lists.json'));
   const renderer = new Renderer();
   const calendarSource = createIcalFeedSource(createCalendarTextFetcher({
     allowPrivateNetworks: allowPrivateCalendarNetworks,
@@ -125,6 +127,7 @@ export async function main(): Promise<void> {
     trainSource,
     busSource,
     trafficSource,
+    todoStore,
   });
 
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
@@ -138,6 +141,7 @@ export async function main(): Promise<void> {
     busCredentials,
     googleMapsCredentials,
     transportApiBaseUrl,
+    todoStore,
   });
   const server = app.listen(port);
   await new Promise<void>((resolveListening, rejectListening) => {

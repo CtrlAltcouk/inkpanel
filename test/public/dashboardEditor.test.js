@@ -44,6 +44,7 @@ test('cell HTML exposes the correct controls for every widget type and position'
   assert.match(html, /data-bins-uprn/);
   assert.match(html, /<input type="text" data-bins-uprn/);
   assert.match(html, /dashboard section will be blank/);
+  assert.match(html, /<option value="todo"/);
   assert.equal((dashboardCellHtml('panel-a', 0, { type: 'empty', drafts: { empty: {} } }).match(/data-widget-type/g) ?? []).length, 1);
 });
 

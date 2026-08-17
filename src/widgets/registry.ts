@@ -41,6 +41,10 @@ export const octopusWidgetConfigV1Schema = z.strictObject({
   tariffCode: octopusTariffCodeSchema,
 });
 
+export const todoWidgetConfigV1Schema = z.strictObject({
+  listId: z.string().regex(/^(?:|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/, 'invalid To Do list id'),
+});
+
 export const binsWidgetConfigV1Schema = z.strictObject({
   uprn: z.string().regex(/^\d{0,12}$/, 'UPRN must be up to 12 digits'),
 });
@@ -77,6 +81,11 @@ export const octopusWidgetV1Schema = z.strictObject({
   version: z.literal(1),
   config: octopusWidgetConfigV1Schema,
 });
+export const todoWidgetV1Schema = z.strictObject({
+  type: z.literal('todo'),
+  version: z.literal(1),
+  config: todoWidgetConfigV1Schema,
+});
 export const binsWidgetV1Schema = z.strictObject({
   type: z.literal('bins'),
   version: z.literal(1),
@@ -95,6 +104,7 @@ export type DashboardWidget =
   | z.infer<typeof busWidgetV1Schema>
   | z.infer<typeof trafficWidgetV1Schema>
   | z.infer<typeof octopusWidgetV1Schema>
+  | z.infer<typeof todoWidgetV1Schema>
   | z.infer<typeof binsWidgetV1Schema>
   | z.infer<typeof emptyWidgetV1Schema>;
 
@@ -106,6 +116,7 @@ export const widgetRegistry = {
   bus: { 1: busWidgetV1Schema },
   traffic: { 1: trafficWidgetV1Schema },
   octopus: { 1: octopusWidgetV1Schema },
+  todo: { 1: todoWidgetV1Schema },
   bins: { 1: binsWidgetV1Schema },
   empty: { 1: emptyWidgetV1Schema },
 } as const;

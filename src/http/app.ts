@@ -15,6 +15,8 @@ import { editorPreferencesRoutes } from './editorPreferencesRoutes.ts';
 import { firmwareRoutes } from './firmwareRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
 import { systemRoutes } from './systemRoutes.ts';
+import { todoRoutes } from './todoRoutes.ts';
+import { TodoStore, TodoStoreError } from '../todo/store.ts';
 
 const require = createRequire(import.meta.url);
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -52,6 +54,8 @@ export interface AppDeps {
   googleMapsCredentials?: GoogleMapsCredentialStore;
   /** Optional TransportAPI endpoint override used by production/test wiring. */
   transportApiBaseUrl?: string;
+  /** Shared with FrameService in production; optional for existing test embedders. */
+  todoStore?: TodoStore;
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -113,6 +117,7 @@ export function createApp(deps: AppDeps): express.Express {
   });
 
   const auth = createAuth(deps.auth);
+  const todoStore = deps.todoStore ?? new TodoStore(join(deps.dataDir, '.todo-lists.json'));
 
   // Login must be reachable before the gate. auth.ts's isExempt() does NOT
   // match it — only the device frame route is exempt — so this reachability
@@ -137,8 +142,10 @@ export function createApp(deps: AppDeps): express.Express {
     deps.busCredentials,
     deps.googleMapsCredentials,
     deps.transportApiBaseUrl,
+    todoStore,
   ));
   app.use('/api', editorPreferencesRoutes(deps.store, deps.dataDir));
+  app.use('/api', todoRoutes(deps.store, todoStore));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
@@ -150,6 +157,13 @@ export function createApp(deps: AppDeps): express.Express {
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (err instanceof DeviceStoreError) {
       res.status(503).json(deviceStoreErrorBody(err));
+      return;
+    }
+    if (err instanceof TodoStoreError) {
+      res.status(503).json({
+        status: 'error', component: 'todo-store', code: err.code, error: err.message,
+        backup: err.backupPath ? basename(err.backupPath) : null,
+      });
       return;
     }
     next(err);

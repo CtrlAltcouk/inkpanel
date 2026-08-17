@@ -26,6 +26,7 @@ test('remembered drafts persist per panel while useful values become shared fall
     slots[1] = [
       { type: 'trains', version: 1, config: { originCrs: '', destinationCrs: '' } },
       { type: 'octopus', version: 1, config: { tariffCode: 'E-1R-AGILE-24-10-01-C' } },
+      { type: 'todo', version: 1, config: { listId: 'home' } },
     ];
     await first.set('esp32-a', slots);
 
@@ -38,6 +39,7 @@ test('remembered drafts persist per panel while useful values become shared fall
     assert.ok(other.shared.some((widget) => widget.type === 'calendar'));
     assert.ok(other.shared.some((widget) => widget.type === 'bins'));
     assert.ok(other.shared.some((widget) => widget.type === 'octopus'));
+    assert.deepEqual(other.shared.find((widget) => widget.type === 'todo')?.config, { listId: 'home' });
     assert.equal(other.shared.some((widget) => widget.type === 'trains'), false, 'incomplete routes are not promoted as shared defaults');
 
     const reloaded = new DashboardEditorPreferencesStore(path);

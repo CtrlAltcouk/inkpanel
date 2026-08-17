@@ -66,6 +66,7 @@ function meaningful(widget: DashboardWidget): boolean {
     case 'bus': return Boolean(widget.config.stopCode);
     case 'traffic': return Boolean(widget.config.origin.trim() && widget.config.destination.trim());
     case 'octopus': return Boolean(widget.config.tariffCode);
+    case 'todo': return Boolean(widget.config.listId);
     case 'bins': return Boolean(widget.config.uprn);
     case 'weather':
     case 'empty':

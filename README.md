@@ -136,6 +136,7 @@ Additional provider notes:
 - [National Rail](docs/national-rail.md)
 - [Bus and Traffic](docs/bus-traffic.md)
 - [Octopus Agile](docs/octopus-agile.md)
+- [To Do](docs/todo.md)
 - [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
 
 ## Hardware
@@ -209,6 +210,7 @@ docs/         current deployment, flashing, provider and hardware documentation
 - [National Rail](docs/national-rail.md)
 - [Bus and Traffic](docs/bus-traffic.md)
 - [Octopus Agile](docs/octopus-agile.md)
+- [To Do](docs/todo.md)
 - [Widget setup and remembered settings](docs/widget-setup-and-remembered-settings.md)
 - [Hardware verification](docs/hardware/verification.md)
 

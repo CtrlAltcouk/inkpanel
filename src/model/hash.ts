@@ -22,7 +22,9 @@ export function contentHash(data: ProfileDashboardData): string {
     if (section.type === 'empty') return section;
     return {
       type: section.type,
-      data: section.data,
+      data: section.type === 'todo' && section.data
+        ? { items: section.data.items.slice(0, 5) }
+        : section.data,
       // These widgets visibly distinguish an absent configuration ("not set
       // up") from a configured source whose first/live fetch failed
       // ("unavailable"). Health details themselves remain diagnostic-only.
@@ -32,6 +34,8 @@ export function contentHash(data: ProfileDashboardData): string {
         || section.type === 'traffic'
         || section.type === 'octopus'
         ? { configured: section.health !== null }
+        : section.type === 'todo'
+          ? { configured: section.configured }
         : {}),
       displayedStaleTime: displayedStaleTime(section.health),
     };
