@@ -149,11 +149,13 @@ function octopus(section: Extract<DashboardSectionData, { type: 'octopus' }>, da
   if (!section.data) return state('OCTOPUS AGILE', 'Unavailable');
   const from = hhmm(section.data.cheapest.validFrom, data.timezone);
   const to = hhmm(section.data.cheapest.validTo, data.timezone);
+  const price = `${section.data.cheapest.pencePerKwh.toFixed(2)}p`;
+  const priceSize = price.length >= 9 ? ' octopus-price-tight' : price.length >= 7 ? ' octopus-price-compact' : '';
   return `<div class="mini-head">OCTOPUS AGILE</div>
     <div class="octopus-kicker">CHEAPEST UPCOMING</div>
-    <div class="octopus-time disp tnum">${esc(from)}&ndash;${esc(to)}</div>
+    <div class="octopus-time disp tnum"><span>${esc(from)}</span><span class="octopus-dash">&ndash;</span><span>${esc(to)}</span></div>
     <div class="octopus-day">${esc(octopusDayLabel(section.data, data))}</div>
-    <div class="octopus-price"><span class="disp tnum">${esc(section.data.cheapest.pencePerKwh.toFixed(2))}p</span><span>/kWh</span></div>
+    <div class="octopus-price"><span class="disp tnum${priceSize}">${esc(price)}</span><span>/kWh</span></div>
     ${stale(section.health, data.timezone)}`;
 }
 
@@ -165,12 +167,16 @@ function bins(section: Extract<DashboardSectionData, { type: 'bins' }>, data: Mi
   if (!section.health) return state('BINS', 'Not set up');
   if (!section.data) return state('BINS', 'Unavailable');
   if (!section.data.next) return state('BINS', 'No collection scheduled');
-  const when = new Intl.DateTimeFormat('en-GB', BIN_DATE_FORMAT)
-    .format(new Date(`${section.data.next.date}T12:00:00.000Z`)).toUpperCase();
+  const dateParts = new Intl.DateTimeFormat('en-GB', BIN_DATE_FORMAT)
+    .formatToParts(new Date(`${section.data.next.date}T12:00:00.000Z`));
+  const datePart = (type: Intl.DateTimeFormatPartTypes) =>
+    dateParts.find((part) => part.type === type)?.value.toUpperCase() ?? '';
+  const primaryDate = `${datePart('weekday')} ${datePart('day')}`;
+  const month = datePart('month');
   const labels = section.data.rawLabels.length > 0
     ? section.data.rawLabels
     : section.data.next.types.map((type) => type.toUpperCase());
-  return `<div class="mini-head">BINS</div><div class="bin-date disp">${esc(when)}</div>
+  return `<div class="mini-head">BINS</div><div class="bin-date disp"><span class="bin-date-primary">${esc(primaryDate)}</span><span class="bin-date-month">${esc(month)}</span></div>
     <div class="bin-list">${labels.slice(0, 4).map((label) => `<div class="bin-row"><span class="box"></span><span>${esc(label)}</span></div>`).join('')}</div>
     ${stale(section.health, data.timezone)}`;
 }
@@ -205,8 +211,8 @@ body{font-family:"Inter",Arial,sans-serif;-webkit-font-smoothing:none}
 .route-name{font-size:10px;font-weight:700;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.departures{margin-top:5px}.departure{height:41px;border-top:1px solid #000;display:grid;grid-template-columns:72px 1fr;align-items:center}.dep-time{font-family:"Dela Gothic One",Arial Black,sans-serif;font-size:20px}.dep-state{font-size:9px;font-weight:800;text-align:right}.cancelled{text-decoration:line-through}
 .bus-list{margin-top:3px}.bus-row{display:grid;grid-template-columns:30px 48px 1fr;gap:4px;align-items:center;height:39px;border-top:1px solid #000}.bus-line{font-family:"Dela Gothic One",Arial Black,sans-serif;font-size:15px}.bus-time{font-weight:900;font-size:13px}.bus-dest{font-size:9px;font-weight:650;line-height:1.05;max-height:20px;overflow:hidden}.provider{position:absolute;left:11px;bottom:6px;font-size:6px;font-weight:700}.google{font-size:8px;font-weight:800}
 .traffic-time{text-align:center;font-size:43px;line-height:1;margin-top:18px}.traffic-label{text-align:center;font-size:9px;font-weight:900;letter-spacing:.08em;margin-top:3px}.traffic-static{text-align:center;font-size:10px;line-height:1.3;margin-top:13px}.traffic-static strong{font-size:16px}.traffic-route{text-align:center;font-size:8px;line-height:1.1;margin:8px 8px 0;max-height:18px;overflow:hidden}
-.octopus-kicker{font-size:9px;font-weight:900;letter-spacing:.08em;margin-top:12px}.octopus-time{font-size:31px;line-height:1.05;margin-top:6px;white-space:nowrap}.octopus-day{font-size:12px;font-weight:900;margin-top:3px}.octopus-price{display:flex;align-items:baseline;gap:5px;margin-top:15px}.octopus-price .disp{font-size:34px}.octopus-price>span:last-child{font-size:11px;font-weight:800}
-.bin-date{font-size:29px;line-height:1.05;margin-top:12px;white-space:nowrap}.bin-list{margin-top:9px}.bin-row{display:grid;grid-template-columns:11px 1fr;gap:7px;align-items:center;font-size:10px;font-weight:650;min-height:24px}.box{width:9px;height:9px;border:2px solid #000}.empty-brand{height:170px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:29px;line-height:1.1}
+.octopus-kicker{text-align:center;font-size:8px;font-weight:900;letter-spacing:.08em;margin-top:9px}.octopus-time{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;width:100%;font-size:23px;line-height:1.05;margin-top:7px;white-space:nowrap;text-align:center;letter-spacing:-.06em}.octopus-time>span{min-width:0}.octopus-dash{padding:0 2px}.octopus-day{text-align:center;font-size:11px;font-weight:900;letter-spacing:.06em;margin-top:2px}.octopus-price{margin-top:10px;text-align:center}.octopus-price .disp{display:block;font-size:40px;line-height:.95;white-space:nowrap}.octopus-price .octopus-price-compact{font-size:34px}.octopus-price .octopus-price-tight{font-size:29px}.octopus-price>span:last-child{display:block;font-size:11px;font-weight:800;line-height:1;margin-top:3px}
+.bin-date{line-height:.94;margin-top:8px}.bin-date span{display:block;white-space:nowrap}.bin-date-primary{font-size:30px}.bin-date-month{font-size:23px;margin-top:2px}.bin-list{margin-top:5px}.bin-row{display:grid;grid-template-columns:11px 1fr;gap:7px;align-items:center;font-size:10px;font-weight:650;min-height:20px}.box{width:9px;height:9px;border:2px solid #000}.empty-brand{height:170px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:29px;line-height:1.1}
 `;
 }
 
