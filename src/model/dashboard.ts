@@ -72,12 +72,16 @@ export type DashboardSectionData =
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };
 
+/** Frozen four-cell shape used by the existing 800×480 dashboard. */
 export type DashboardSectionDataTuple = [
   DashboardSectionData,
   DashboardSectionData,
   DashboardSectionData,
   DashboardSectionData,
 ];
+
+/** Runtime section collection; profile validation decides whether it has 1 or 4 entries. */
+export type DashboardSectionDataList = DashboardSectionData[];
 
 export interface DashboardData {
   /** When this object was built. Excluded from the content hash. */
@@ -88,7 +92,7 @@ export interface DashboardData {
   today: TodayInfo;
   headerWeather: WeatherData | null;
   headerWeatherHealth: SourceHealth;
-  sections: DashboardSectionDataTuple;
+  sections: DashboardSectionDataList;
   battery: BatteryInfo;
 }
 
