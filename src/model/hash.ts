@@ -7,7 +7,9 @@ import type { ProfileDashboardData } from './dashboard.ts';
  * generatedAt, contentChangedAt and per-source fetchedAt are deliberately
  * excluded: including them would make every render unique, so the ETag would
  * always change, 304 would never fire, and the panel would flash on every
- * wake. Battery volts are excluded because only the rounded percent is drawn.
+ * wake. Battery volts are excluded because only the rounded percent is drawn
+ * on the existing large-panel banner. Mini has no global banner, so its hash
+ * intentionally omits global weather/battery fields altogether.
  */
 export function contentHash(data: ProfileDashboardData): string {
   const displayedStaleTime = (source: ProfileDashboardData['headerWeatherHealth'] | null) =>
@@ -34,12 +36,24 @@ export function contentHash(data: ProfileDashboardData): string {
       displayedStaleTime: displayedStaleTime(section.health),
     };
   };
-  const visible = {
-    timezone: data.timezone,
-    today: data.today,
-    headerWeather: data.headerWeather,
-    sections: data.sections.map(visibleSection),
-    batteryPercent: data.battery.percent,
-  };
+
+  let visible: unknown;
+  if (data.sections.length === 1) {
+    const section = data.sections[0];
+    visible = {
+      ...(section.type === 'empty' ? {} : { timezone: data.timezone }),
+      ...(section.type === 'octopus' ? { today: data.today } : {}),
+      sections: [visibleSection(section)],
+    };
+  } else {
+    // Keep the established large-panel hash shape byte-for-byte equivalent.
+    visible = {
+      timezone: data.timezone,
+      today: data.today,
+      headerWeather: data.headerWeather,
+      sections: data.sections.map(visibleSection),
+      batteryPercent: data.battery.percent,
+    };
+  }
   return createHash('sha256').update(JSON.stringify(visible)).digest('hex').slice(0, 32);
 }
