@@ -30,6 +30,14 @@ function defaultConfig(type) {
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function widgetsByType(widgets = []) { return Object.fromEntries(widgets.map((widget) => [widget.type, clone(widget.config)])); }
 
+export function normalizePrinterUrlValue(value) {
+  const trimmed = value.trim();
+  if (!trimmed || /^https?:\/\//i.test(trimmed)) return trimmed;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed);
+  const schemeSuffix = scheme ? trimmed.slice(scheme[0].length) : '';
+  return scheme && !/^\d+(?:$|[/?#])/.test(schemeSuffix) ? trimmed : `http://${trimmed}`;
+}
+
 export function createDashboardDraftState(sections, remembered = {}) {
   const shared = widgetsByType(remembered.shared ?? []);
   const rememberedSlots = remembered.slots ?? [[], [], [], []];
@@ -140,11 +148,11 @@ function printerConnectionHtml(printer) {
 function printerControlsHtml(config, printers, isMini) {
   const selected = config.printerIds ?? [];
   const selection = isMini
-    ? `<label>Printer</label><select data-printer-single><option value="">Choose a printer</option>${printers.map((printer) => `<option value="${esc(printer.id)}" ${selected[0] === printer.id ? 'selected' : ''}>${esc(printer.name)}</option>`).join('')}</select><p class="meta">InkPanel Mini displays one printer.</p>`
+    ? `<label>Printer</label><select data-printer-single><option value="">Choose a printer</option>${printers.map((printer) => `<option value="${esc(printer.id)}" ${selected[0] === printer.id ? 'selected' : ''}>${esc(printer.name)}</option>`).join('')}</select><p class="meta" data-printer-assignment-help>InkPanel Mini displays one printer. Setup: add and save a connection below, test it, select it in the Printer dropdown, then click Save changes. The selected printer is what this Mini will display.</p>`
     : `<label>Printers shown</label><div class="printer-selection">${printers.map((printer) => {
         const index = selected.indexOf(printer.id);
         return `<div class="printer-selection-row"><label class="checkbox"><input type="checkbox" data-printer-select data-printer-position="${index >= 0 ? index : 999}" value="${esc(printer.id)}" ${index >= 0 ? 'checked' : ''}> ${esc(printer.name)}</label>${index >= 0 ? `<span><button type="button" class="ghost" data-printer-order="-1" data-printer-id="${esc(printer.id)}" ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="ghost" data-printer-order="1" data-printer-id="${esc(printer.id)}" ${index === selected.length - 1 ? 'disabled' : ''}>&darr;</button></span>` : ''}</div>`;
-      }).join('') || '<p class="meta">Add a printer connection below.</p>'}</div><p class="meta">Select up to four printers. Order controls the overview.</p>`;
+      }).join('') || '<p class="meta">Add a printer connection below.</p>'}</div><p class="meta" data-printer-assignment-help>Select up to four printers. Setup: add and save connections below, test them, select the printers here, then click Save changes. The selected printers are what this panel will display; their order controls the overview.</p>`;
   return `${selection}<div class="printer-management"><h4>Configured printers</h4>${printers.map(printerConnectionHtml).join('') || '<p class="meta">No printer connections yet.</p>'}
     <div class="printer-connection-create"><input type="text" data-printer-new-name maxlength="64" placeholder="Printer name"><input type="url" data-printer-new-url placeholder="http://192.168.1.50"><input type="password" data-printer-new-key maxlength="512" placeholder="Optional API key" autocomplete="new-password"><button type="button" data-printer-create>Add printer</button></div>
     <p class="error" data-printer-error hidden></p></div>`;
@@ -325,6 +333,9 @@ function bindPrinterEditor(root, state, slot, panel) {
     control.addEventListener('input', (event) => event.stopPropagation());
     control.addEventListener('change', (event) => event.stopPropagation());
   });
+  panel.querySelectorAll('[data-printer-new-url], [data-printer-edit-url]').forEach((input) => {
+    input.addEventListener('blur', () => { input.value = normalizePrinterUrlValue(input.value); });
+  });
 
   panel.querySelector('[data-printer-single]')?.addEventListener('change', (event) => {
     config.printerIds = event.currentTarget.value ? [event.currentTarget.value] : [];
@@ -356,7 +367,9 @@ function bindPrinterEditor(root, state, slot, panel) {
 
   panel.querySelector('[data-printer-create]').addEventListener('click', (event) => {
     const name = panel.querySelector('[data-printer-new-name]').value.trim();
-    const baseUrl = panel.querySelector('[data-printer-new-url]').value.trim();
+    const urlInput = panel.querySelector('[data-printer-new-url]');
+    const baseUrl = normalizePrinterUrlValue(urlInput.value);
+    urlInput.value = baseUrl;
     const apiKey = panel.querySelector('[data-printer-new-key]').value.trim();
     void mutate(event.currentTarget, () => sendJson('POST', '/api/printers', { name, baseUrl, apiKey }));
   });
@@ -368,9 +381,12 @@ function bindPrinterEditor(root, state, slot, panel) {
     });
     connection.querySelector('[data-printer-save]').addEventListener('click', (event) => {
       const apiKey = connection.querySelector('[data-printer-edit-key]').value.trim();
+      const urlInput = connection.querySelector('[data-printer-edit-url]');
+      const baseUrl = normalizePrinterUrlValue(urlInput.value);
+      urlInput.value = baseUrl;
       void mutate(event.currentTarget, () => sendJson('PUT', `/api/printers/${encodeURIComponent(id)}`, {
         name: connection.querySelector('[data-printer-edit-name]').value.trim(),
-        baseUrl: connection.querySelector('[data-printer-edit-url]').value.trim(),
+        baseUrl,
         apiKey,
         clearApiKey: Boolean(connection.querySelector('[data-printer-clear-key]')?.checked),
       }), { contentChanged: true });
