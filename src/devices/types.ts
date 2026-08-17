@@ -1,13 +1,8 @@
-import {
-  defaultDeviceV3,
-  type DeviceRecordV3,
-  type panelProfileIdV3Schema,
-} from './schema.ts';
-import type { z } from 'zod';
+import { defaultDeviceV3, type DeviceRecordV3 } from './schema.ts';
 
 /** Runtime model alias. Advance this with the current persisted schema. */
 export type DeviceRecord = DeviceRecordV3;
-export type PanelProfileId = z.infer<typeof panelProfileIdV3Schema>;
+export type PanelProfileId = DeviceRecord['panelProfileId'];
 
 export function defaultDevice(
   id: string,
