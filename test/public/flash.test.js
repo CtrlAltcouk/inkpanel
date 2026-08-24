@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   serialSupported,
   httpsUrl,
+  safeWebFlashUrl,
   unsupportedNotice,
   noBuildNotice,
   readyPanel,
@@ -107,9 +108,9 @@ test('serialSupported reads navigator.serial, not just truthiness of navigator',
   });
 });
 
-test('httpsUrl uses the server port and preserves pathname, query and hash', async () => {
+test('httpsUrl uses the server port but leaves an Ingress path for the direct Studio root', async () => {
   await withWindow({ location: { href: 'http://192.168.1.50:8080/manage?mode=new#flash' } }, () => {
-    assert.equal(httpsUrl(9443), 'https://192.168.1.50:9443/manage?mode=new#flash');
+    assert.equal(httpsUrl(9443), 'https://192.168.1.50:9443/#flash');
   });
 });
 
@@ -140,7 +141,7 @@ test('an insecure HTTP context on a Chromium browser gets the HTTPS-redirect not
     withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () => {
       const html = unsupportedNotice(9443);
       assert.equal(occurrences(html, '<h3>Flashing needs a secure connection</h3>'), 1);
-      assert.equal(occurrences(html, '<a href="https://192.168.1.50:9443/#flash">Open inkpanel over HTTPS</a>'), 1);
+      assert.equal(occurrences(html, 'href="https://192.168.1.50:9443/#flash"'), 1);
       assert.equal(occurrences(html, 'This browser cannot flash boards'), 0);
     }),
   );
@@ -171,6 +172,17 @@ test('a secure context with no WebSerial support gets the unsupported-browser no
   });
 });
 
+test('a secure Home Assistant Ingress context gets the direct WebFlash fallback', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: true, location: { href: 'https://ha.local/api/hassio_ingress/token/#flash' } }, () => {
+      const html = unsupportedNotice(null, 'https://192.168.1.50:8443/#flash');
+      assert.match(html, /Flashing needs the direct secure Studio/);
+      assert.match(html, /href="https:\/\/192\.168\.1\.50:8443\/#flash"/);
+      assert.doesNotMatch(html, /This browser cannot flash boards/);
+    }),
+  );
+});
+
 test('the HTTPS notice link target is escaped rather than interpolated raw', async () => {
   // The URL API itself percent-encodes `<`, `>` and `"` in a fragment, so a
   // hash built from those alone would look "safe" even with esc() missing —
@@ -179,11 +191,13 @@ test('the HTTPS notice link target is escaped rather than interpolated raw', asy
   // distinguishes an escaped link from a raw one here.
   await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow(
-      { isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash&reload=1' } },
+      { isSecureContext: false, location: { href: 'http://ingress.local/api/hassio_ingress/token/#flash' } },
       () => {
-        const html = unsupportedNotice(9443);
-        assert.equal(occurrences(html, 'href="https://192.168.1.50:9443/#flash&amp;reload=1"'), 1);
-        assert.equal(html.includes('href="https://192.168.1.50:9443/#flash&reload=1"'), false);
+        const html = unsupportedNotice(null, 'https://192.168.1.50:8443/#flash&reload=1');
+        assert.equal(occurrences(html, 'href="https://192.168.1.50:8443/#flash&amp;reload=1"'), 1);
+        assert.equal(html.includes('href="https://192.168.1.50:8443/#flash&reload=1"'), false);
+        assert.equal(safeWebFlashUrl('javascript:alert(1)'), null);
+        assert.equal(safeWebFlashUrl('https://user:pass@panel.local/'), null);
       },
     ),
   );
@@ -251,8 +265,34 @@ test('renderFlash shows the HTTPS-redirect notice when a Chromium browser lacks 
           const root = { innerHTML: '' };
           await renderFlash(root);
           assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 1);
-          assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:9443/path?q=1#flash'), 1);
+          assert.equal(occurrences(root.innerHTML, 'https://192.168.1.50:9443/#flash'), 1);
           assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 0);
+        },
+      ),
+    ),
+  );
+});
+
+test('renderFlash loads the direct WebFlash URL when Chromium is inside secure Ingress', async () => {
+  await withNavigator({ userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: true, location: {
+      href: 'https://ha.local/api/hassio_ingress/token/#flash',
+      pathname: '/api/hassio_ingress/token/',
+    } }, () =>
+      withFetch(
+        async (path) => {
+          assert.equal(path, '/api/hassio_ingress/token/api/runtime-config');
+          return {
+            status: 200,
+            ok: true,
+            json: async () => ({ httpsPort: 8443, webFlashUrl: 'https://192.168.1.50:8443/#flash' }),
+          };
+        },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.match(root.innerHTML, /Flashing needs the direct secure Studio/);
+          assert.match(root.innerHTML, /https:\/\/192\.168\.1\.50:8443\/#flash/);
         },
       ),
     ),

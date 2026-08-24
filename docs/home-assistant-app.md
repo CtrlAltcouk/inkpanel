@@ -43,7 +43,7 @@ The App will:
 - expose a LAN-reachable panel endpoint separately from the Ingress browser path;
 - not ask the user to copy a Home Assistant long-lived token.
 
-The App packaging should support `amd64` and `aarch64` if the Chromium/Playwright production image is verified on both architectures.
+The App image is built for `amd64` and `aarch64` from the same Playwright base used by standalone InkPanel.
 
 ## Critical network boundary: Ingress is not the panel URL
 
@@ -231,33 +231,38 @@ Current Home Assistant requires `repository.yaml` at the repository root for an 
 
 Preferred production distribution is a pre-built multi-architecture image in GHCR rather than asking every Home Assistant host to compile Chromium and Node dependencies locally.
 
-Conceptual shape:
+Repository shape:
 
 ```
 repository.yaml
 home-assistant/
-  inkpanel/
-    config.yaml
-    README.md
-    DOCS.md
-    CHANGELOG.md
-    icon.png
-    logo.png
+  config.yaml
+  README.md
+  DOCS.md
+  CHANGELOG.md
 
-Dockerfile
+Dockerfile.home-assistant
 src/
 public/
 firmware/
 ...
 ```
 
-The App `config.yaml` can reference a pre-built generic multi-arch GHCR image. The existing root Dockerfile should remain usable for normal Docker deployments; Home Assistant-specific startup/config translation should be implemented without duplicating the InkPanel application source tree.
+The App `config.yaml` references `ghcr.io/ctrlaltcouk/inkpanel-home-assistant`. The existing root Dockerfile remains the standalone image; `Dockerfile.home-assistant` and the startup adapter add App packaging without duplicating the application source tree.
+
+The App starts three deliberately separate listeners:
+
+- internal port `8099` is the Ingress Studio and accepts only Supervisor proxy traffic;
+- LAN HTTP port `8080` retains InkPanel password/session authentication and serves physical panel frames;
+- LAN HTTPS port `8443` retains the secure WebFlash Studio.
+
+The App options adapter requires `panel_base_url` and `lan_password`, sets `/data` persistence, and obtains Home Assistant API authority exclusively from the runtime `SUPERVISOR_TOKEN`.
 
 ## WebFlash note
 
 Home Assistant Ingress does not remove WebSerial's browser secure-context requirement. The existing InkPanel HTTPS/WebFlash path must be validated on a real Home Assistant installation before it is declared supported through Ingress.
 
-The first Home Assistant App milestone must not break the current external HTTPS flashing path. If necessary, WebFlash may remain an explicitly separate LAN URL while the normal Studio uses Ingress.
+The Ingress Flash tab remains present. When WebSerial is unavailable there, it links to the active direct HTTPS Studio root instead of trying to flash inside Ingress or guessing an address. Both existing firmware targets remain available through that direct Studio.
 
 ## Acceptance gates
 

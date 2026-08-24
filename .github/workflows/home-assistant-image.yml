@@ -1,0 +1,82 @@
+name: Home Assistant App image
+
+on:
+  push:
+    branches: [Home-Assistant]
+    paths:
+      - Dockerfile.home-assistant
+      - home-assistant/**
+      - repository.yaml
+      - package*.json
+      - public/**
+      - scripts/home-assistant-start.mjs
+      - src/**
+      - .github/workflows/home-assistant-image.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile.home-assistant
+      - home-assistant/**
+      - repository.yaml
+      - package*.json
+      - public/**
+      - scripts/home-assistant-start.mjs
+      - src/**
+      - .github/workflows/home-assistant-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  IMAGE_NAME: inkpanel-home-assistant
+  VERSION: 0.1.0-ha.1
+  ARCHITECTURES: '["amd64", "aarch64"]'
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.prepare.outputs.matrix }}
+    steps:
+      - id: prepare
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@4de35182ce1e329181bffcbcc84d33db5e2c7e10
+        with:
+          architectures: ${{ env.ARCHITECTURES }}
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ghcr.io/ctrlaltcouk
+
+  build:
+    needs: init
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/builder/actions/build-image@4de35182ce1e329181bffcbcc84d33db5e2c7e10
+        with:
+          image: ${{ matrix.image }}
+          arch: ${{ matrix.arch }}
+          version: ${{ env.VERSION }}
+          image-tags: ${{ env.VERSION }}
+          context: .
+          file: Dockerfile.home-assistant
+          push: ${{ github.event_name == 'push' }}
+          cosign: ${{ github.event_name == 'push' }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: home-assistant/builder/actions/publish-multi-arch-manifest@4de35182ce1e329181bffcbcc84d33db5e2c7e10
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          image-tags: ${{ env.VERSION }}
+          architectures: ${{ env.ARCHITECTURES }}
+          registry-prefix: ghcr.io/ctrlaltcouk
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}

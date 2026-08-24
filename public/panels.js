@@ -1,4 +1,5 @@
 import { getJson, sendJson } from './api.js';
+import { appPath } from './paths.js';
 import { esc, formatRelative, formatVolts, field, pill } from './components.js';
 import {
   collectBusApiCredentials,
@@ -53,7 +54,7 @@ function detail(device) {
           <div class="studio-card">
             <div class="studio-card-head"><div><h2>Live e-ink preview</h2><p class="meta">${esc(displayLabel(device))} · exactly what this panel will show</p></div></div>
             <div class="panel-preview-wrap ${mini ? 'panel-preview-wrap--mini' : ''}">
-              <img class="panel-preview-image ${mini ? 'panel-preview-image--mini' : ''}" alt="What ${esc(device.name)} is showing" src="/api/devices/${encodeURIComponent(device.id)}/render.png">
+              <img class="panel-preview-image ${mini ? 'panel-preview-image--mini' : ''}" alt="What ${esc(device.name)} is showing" src="${appPath(`/api/devices/${encodeURIComponent(device.id)}/render.png`)}">
             </div>
             <div class="actions">
               <button type="button" data-push="${esc(device.id)}">Push to display</button>
@@ -136,7 +137,7 @@ function pushMessage(result) {
 
 export function refreshPanelPreview(root, deviceId) {
   const img = root.querySelector('.panel-preview-image');
-  if (img) img.src = `/api/devices/${encodeURIComponent(deviceId)}/render.png?t=${Date.now()}`;
+  if (img) img.src = appPath(`/api/devices/${encodeURIComponent(deviceId)}/render.png?t=${Date.now()}`);
 }
 
 export function bindTodoPreviewRefresh(editor, root, deviceId) {

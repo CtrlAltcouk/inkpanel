@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { hostname, networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createApp } from './http/app.ts';
+import { createApp, type AppDeps } from './http/app.ts';
 import { loadOrCreateSecret } from './http/auth.ts';
 import { activateHttpsListener } from './https.ts';
 import { DeviceStore } from './devices/store.ts';
@@ -27,8 +27,29 @@ import { createRuntimeState, resolveHttpsPort } from './runtimeConfig.ts';
 import { TodoStore } from './todo/store.ts';
 import { PrinterConnectionStore } from './printers/store.ts';
 import { MoonrakerClient } from './printers/moonraker.ts';
+import { HomeAssistantClient, isHomeAssistantMode } from './homeAssistant/client.ts';
 
 export const version = '0.1.0';
+
+export function resolveHomeAssistantIngressPort(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 8099;
+  if (!/^\d+$/.test(raw.trim())) throw new Error('HOME_ASSISTANT_INGRESS_PORT must be an integer');
+  const port = Number(raw);
+  if (port < 1 || port > 65535) throw new Error('HOME_ASSISTANT_INGRESS_PORT must be between 1 and 65535');
+  return port;
+}
+
+async function waitUntilListening(server: ReturnType<ReturnType<typeof createApp>['listen']>): Promise<void> {
+  await new Promise<void>((resolveListening, rejectListening) => {
+    if (server.listening) return resolveListening();
+    const onError = (err: Error) => rejectListening(err);
+    server.once('error', onError);
+    server.once('listening', () => {
+      server.off('error', onError);
+      resolveListening();
+    });
+  });
+}
 
 export function parseTrustProxy(raw: string | undefined): boolean | number | string | undefined {
   if (raw === undefined) return undefined;
@@ -74,6 +95,7 @@ export async function main(): Promise<void> {
   const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${detectedLanAddress}:${port}`;
   const resolvedHttps = resolveHttpsPort(process.env.HTTPS_PORT);
   const runtimeState = createRuntimeState();
+  const homeAssistantMode = isHomeAssistantMode(process.env.HOME_ASSISTANT_MODE);
   const allowPrivateCalendarNetworks = parseCalendarAllowPrivateNetworks(
     process.env.CALENDAR_ALLOW_PRIVATE_NETWORKS,
   );
@@ -139,8 +161,13 @@ export async function main(): Promise<void> {
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
   const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  const homeAssistantClient = new HomeAssistantClient({
+    enabled: homeAssistantMode,
+    baseUrl: process.env.HOME_ASSISTANT_BASE_URL,
+    token: process.env.SUPERVISOR_TOKEN,
+  });
 
-  const app = createApp({
+  const sharedDeps: AppDeps = {
     store, frames, publicBaseUrl, runtimeState,
     dataDir, firmwareDir, auth: { password, secret }, trustProxy,
     trainCredentials,
@@ -150,20 +177,33 @@ export async function main(): Promise<void> {
     todoStore,
     printerStore,
     moonrakerClient,
-  });
+    homeAssistantClient,
+    homeAssistantMode,
+  };
+  const app = createApp({ ...sharedDeps, access: { mode: 'lan' } });
   const server = app.listen(port);
-  await new Promise<void>((resolveListening, rejectListening) => {
-    if (server.listening) {
-      resolveListening();
-      return;
+  await waitUntilListening(server);
+
+  let ingressServer: ReturnType<typeof app.listen> | null = null;
+  if (homeAssistantMode) {
+    const ingressPort = resolveHomeAssistantIngressPort(process.env.HOME_ASSISTANT_INGRESS_PORT);
+    if (ingressPort === port) {
+      server.close();
+      throw new Error('HOME_ASSISTANT_INGRESS_PORT must differ from PORT');
     }
-    const onError = (err: Error) => rejectListening(err);
-    server.once('error', onError);
-    server.once('listening', () => {
-      server.off('error', onError);
-      resolveListening();
+    const ingressApp = createApp({
+      ...sharedDeps,
+      access: { mode: 'home-assistant-ingress' },
     });
-  });
+    ingressServer = ingressApp.listen(ingressPort);
+    try {
+      await waitUntilListening(ingressServer);
+    } catch (err) {
+      server.close();
+      throw err;
+    }
+    console.log(`Home Assistant Ingress listening internally on port ${ingressPort}`);
+  }
   console.log(`inkpanel ${version} listening on ${publicBaseUrl}`);
   console.log(`data directory: ${dataDir}`);
   console.log(password ? 'authentication: enabled' : 'authentication: disabled (no INKPANEL_PASSWORD)');
@@ -171,6 +211,7 @@ export async function main(): Promise<void> {
   console.log(`National Rail live departures: ${trainCredentials.status().configured ? 'configured' : 'not configured'}`);
   console.log(`TransportAPI bus departures: ${busCredentials.status().configured ? 'configured' : 'not configured'}`);
   console.log(`Google traffic routes: ${googleMapsCredentials.status().configured ? 'configured' : 'not configured'}`);
+  console.log(`Home Assistant mode: ${homeAssistantMode ? 'enabled' : 'standalone'}`);
 
   const httpsServer = resolvedHttps.httpsPort === null
     ? null
@@ -197,6 +238,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async () => {
     server.close();
+    ingressServer?.close();
     httpsServer?.close();
     await renderer.close();
     process.exit(0);

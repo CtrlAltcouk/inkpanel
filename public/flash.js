@@ -8,6 +8,7 @@
 import { getJson } from './api.js';
 import { esc } from './components.js';
 import { addFlashProvisioning } from './flashProvisioningImage.js';
+import { appPath } from './paths.js';
 
 const USB_BAUD = 115200;
 const PROVISION_READY = 'INKPANEL_READY_V1';
@@ -27,7 +28,21 @@ export function httpsUrl(httpsPort, href = window.location.href) {
   const url = new URL(href);
   url.protocol = 'https:';
   url.port = String(httpsPort);
+  url.pathname = '/';
+  url.search = '';
+  url.hash = '#flash';
   return url.toString();
+}
+
+export function safeWebFlashUrl(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function looksLikeChromiumFamily() {
@@ -35,12 +50,23 @@ function looksLikeChromiumFamily() {
   return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
 }
 
-export function unsupportedNotice(httpsPort) {
-  if (window.isSecureContext === false && looksLikeChromiumFamily()) {
+export function unsupportedNotice(httpsPort, webFlashUrl = null) {
+  const directUrl = safeWebFlashUrl(webFlashUrl);
+  if (looksLikeChromiumFamily() && (window.isSecureContext === false || directUrl)) {
     const hasPort = Number.isInteger(httpsPort) && httpsPort >= 1 && httpsPort <= 65535;
-    const link = hasPort
-      ? `<p><a href="${esc(httpsUrl(httpsPort))}">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
+    const secureUrl = directUrl ?? (hasPort ? httpsUrl(httpsPort) : null);
+    const link = secureUrl
+      ? `<p><a href="${esc(secureUrl)}" target="_blank" rel="noopener">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
       : `<p class="notice">InkPanel could not load its secure-connection settings. Reload this page or check the server logs; no HTTPS address has been guessed.</p>`;
+    if (window.isSecureContext !== false && directUrl) {
+      return `<div class="card">
+        <h3>Flashing needs the direct secure Studio</h3>
+        <p>Home Assistant Ingress cannot provide the direct browser-to-USB connection used by WebSerial.</p>
+        ${link}
+        <p class="meta">The certificate is self-signed, so your browser will warn you once.
+           That is expected on a local network.</p>
+      </div>`;
+    }
     return `<div class="card">
       <h3>Flashing needs a secure connection</h3>
       <p>Browsers only allow USB access over HTTPS. This page is on plain HTTP,
@@ -73,7 +99,7 @@ export async function fetchBinary(name, targetId = 'full') {
   const targetPath = targetId === 'full'
     ? `/api/firmware/bin/${encodedName}`
     : `/api/firmware/targets/${encodeURIComponent(targetId)}/bin/${encodedName}`;
-  const res = await fetch(targetPath);
+  const res = await fetch(appPath(targetPath));
   if (!res.ok) throw new Error(`could not download ${name} (${res.status})`);
   const bytes = new Uint8Array(await res.arrayBuffer());
 
@@ -430,18 +456,20 @@ function newBoardConfigFromUi(root) {
 export async function renderFlash(root) {
   if (!serialSupported()) {
     let httpsPort;
-    if (window.isSecureContext === false && looksLikeChromiumFamily()) {
+    let webFlashUrl;
+    if (looksLikeChromiumFamily()) {
       try {
         const runtime = await getJson('/api/runtime-config');
         if (Number.isInteger(runtime?.httpsPort) &&
             runtime.httpsPort >= 1 && runtime.httpsPort <= 65535) {
           httpsPort = runtime.httpsPort;
         }
+        webFlashUrl = safeWebFlashUrl(runtime?.webFlashUrl);
       } catch {
         // The notice below explains that no secure URL could be determined.
       }
     }
-    root.innerHTML = unsupportedNotice(httpsPort);
+    root.innerHTML = unsupportedNotice(httpsPort, webFlashUrl);
     return;
   }
 

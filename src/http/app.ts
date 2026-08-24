@@ -20,6 +20,8 @@ import { TodoStore, TodoStoreError } from '../todo/store.ts';
 import { printerRoutes } from './printerRoutes.ts';
 import { MoonrakerClient } from '../printers/moonraker.ts';
 import { PrinterConnectionStore, PrinterStoreError } from '../printers/store.ts';
+import { HomeAssistantClient } from '../homeAssistant/client.ts';
+import { homeAssistantRoutes } from './homeAssistantRoutes.ts';
 
 const require = createRequire(import.meta.url);
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -62,6 +64,14 @@ export interface AppDeps {
   /** Shared with FrameService in production; optional for existing test embedders. */
   printerStore?: PrinterConnectionStore;
   moonrakerClient?: MoonrakerClient;
+  /** Shared Supervisor API client. Standalone tests/embedders may omit it. */
+  homeAssistantClient?: HomeAssistantClient;
+  homeAssistantMode?: boolean;
+  /** Selects the request trust boundary without duplicating application routes. */
+  access?: {
+    mode: 'lan' | 'home-assistant-ingress';
+    isTrustedRequest?: (req: Request) => boolean;
+  };
   /**
    * Required, not optional. A default would mean inventing a fallback HMAC key
    * that is never used — the kind of line every future reader has to re-derive
@@ -80,10 +90,38 @@ export interface AppDeps {
   enrolmentLimiter?: DeviceEnrolmentLimiter;
 }
 
+export function isSupervisorIngressRequest(req: Request): boolean {
+  const remote = req.socket.remoteAddress ?? '';
+  return remote === '172.30.32.2' || remote === '::ffff:172.30.32.2';
+}
+
+export function directWebFlashUrl(publicBaseUrl: string, httpsPort: number | null): string | null {
+  if (httpsPort === null) return null;
+  try {
+    const url = new URL(publicBaseUrl);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return null;
+    url.protocol = 'https:';
+    url.port = String(httpsPort);
+    url.pathname = '/';
+    url.search = '';
+    url.hash = '#flash';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable('x-powered-by');
   if (deps.trustProxy !== undefined) app.set('trust proxy', deps.trustProxy);
+  if (deps.access?.mode === 'home-assistant-ingress') {
+    const trusted = deps.access.isTrustedRequest ?? isSupervisorIngressRequest;
+    app.use((req, res, next) => {
+      if (trusted(req)) return next();
+      res.status(403).json({ error: 'Home Assistant Ingress proxy required' });
+    });
+  }
   app.use(express.json());
 
   app.get('/health', async (_req, res) => {
@@ -119,21 +157,29 @@ export function createApp(deps: AppDeps): express.Express {
   // is intentionally public and mounted before the authenticated API gate.
   app.get('/api/runtime-config', (_req, res) => {
     res.set('cache-control', 'no-store');
-    res.json({ httpsPort: deps.runtimeState.httpsPort });
+    res.json({
+      httpsPort: deps.runtimeState.httpsPort,
+      ...(deps.homeAssistantMode
+        ? { webFlashUrl: directWebFlashUrl(deps.publicBaseUrl, deps.runtimeState.httpsPort) }
+        : {}),
+    });
   });
 
-  const auth = createAuth(deps.auth);
   const todoStore = deps.todoStore ?? new TodoStore(join(deps.dataDir, '.todo-lists.json'));
   const printerStore = deps.printerStore ?? new PrinterConnectionStore(join(deps.dataDir, '.printer-connections.json'));
   const moonrakerClient = deps.moonrakerClient ?? new MoonrakerClient();
+  const homeAssistantClient = deps.homeAssistantClient ?? new HomeAssistantClient({ enabled: false });
 
   // Login must be reachable before the gate. auth.ts's isExempt() does NOT
   // match it — only the device frame route is exempt — so this reachability
   // depends entirely on auth.router being mounted before auth.middleware
   // here. This ordering is load-bearing: reverse it and login starts
   // requiring a session to reach the endpoint that creates one.
-  app.use('/api', auth.router);
-  app.use('/api', auth.middleware);
+  if (deps.access?.mode !== 'home-assistant-ingress') {
+    const auth = createAuth(deps.auth);
+    app.use('/api', auth.router);
+    app.use('/api', auth.middleware);
+  }
 
   // Device routes first: both mount under /api and :id/frame must win.
   app.use('/api', deviceRoutes(
@@ -156,6 +202,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', editorPreferencesRoutes(deps.store, deps.dataDir));
   app.use('/api', todoRoutes(deps.store, todoStore));
   app.use('/api', printerRoutes(deps.store, printerStore, moonrakerClient));
+  app.use('/api', homeAssistantRoutes(homeAssistantClient));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
