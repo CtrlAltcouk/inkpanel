@@ -7,6 +7,7 @@ import {
   httpsUrl,
   safeWebFlashUrl,
   unsupportedNotice,
+  directWebFlashNotice,
   noBuildNotice,
   readyPanel,
   renderFlash,
@@ -175,12 +176,19 @@ test('a secure context with no WebSerial support gets the unsupported-browser no
 test('a secure Home Assistant Ingress context gets the direct WebFlash fallback', async () => {
   await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow({ isSecureContext: true, location: { href: 'https://ha.local/api/hassio_ingress/token/#flash' } }, () => {
-      const html = unsupportedNotice(null, 'https://192.168.1.50:8443/#flash');
+      const html = directWebFlashNotice('https://192.168.1.50:8443/#flash');
       assert.match(html, /Flashing needs the direct secure Studio/);
       assert.match(html, /href="https:\/\/192\.168\.1\.50:8443\/#flash"/);
       assert.doesNotMatch(html, /This browser cannot flash boards/);
     }),
   );
+});
+
+test('the explicit Ingress notice validates its direct WebFlash URL', () => {
+  assert.match(directWebFlashNotice('https://192.168.1.50:8443/#flash'), /Open inkpanel over HTTPS/);
+  const unsafe = directWebFlashNotice('https://user:pass@panel.local:8443/#flash');
+  assert.match(unsafe, /no HTTPS address has been guessed/);
+  assert.doesNotMatch(unsafe, /user:pass/);
 });
 
 test('the HTTPS notice link target is escaped rather than interpolated raw', async () => {
@@ -232,19 +240,19 @@ test('readyPanel escapes manifest fields rather than interpolating them raw', ()
 // "Firefox + HTTPS" quadrant: secure context, but the browser itself lacks
 // WebSerial, so no URL change can help.
 test('renderFlash shows the unsupported-browser notice and never calls the manifest API when WebSerial is simply absent', async () => {
-  let fetchCalled = false;
+  const fetched = [];
   await withNavigator({ userAgent: FIREFOX_UA }, () =>
     withWindow({ isSecureContext: true }, () =>
       withFetch(
-        async () => {
-          fetchCalled = true;
-          throw new Error('renderFlash must not fetch the manifest when WebSerial is unavailable');
+        async (path) => {
+          fetched.push(path);
+          return { status: 200, ok: true, json: async () => ({ httpsPort: 8443 }) };
         },
         async () => {
           const root = { innerHTML: '' };
           await renderFlash(root);
           assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 1);
-          assert.equal(fetchCalled, false);
+          assert.deepEqual(fetched, ['/api/runtime-config']);
         },
       ),
     ),
@@ -253,8 +261,8 @@ test('renderFlash shows the unsupported-browser notice and never calls the manif
 
 // "Chrome + HTTP" quadrant: the browser would support WebSerial, but the
 // origin is not a secure context, so the fix is the HTTPS link.
-test('renderFlash shows the HTTPS-redirect notice when a Chromium browser lacks serial because the page is on plain HTTP', async () => {
-  await withNavigator({ userAgent: CHROME_UA }, () =>
+test('direct HTTP LAN shows the HTTPS redirect even if Chromium exposes navigator.serial', async () => {
+  await withNavigator({ userAgent: CHROME_UA, serial: {} }, () =>
     withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/path?q=1#flash' } }, () =>
       withFetch(
         async (path) => {
@@ -273,7 +281,8 @@ test('renderFlash shows the HTTPS-redirect notice when a Chromium browser lacks 
   );
 });
 
-test('renderFlash loads the direct WebFlash URL when Chromium is inside secure Ingress', async () => {
+test('HA Ingress with navigator.serial absent always shows direct WebFlash and never loads firmware', async () => {
+  const fetched = [];
   await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow({ isSecureContext: true, location: {
       href: 'https://ha.local/api/hassio_ingress/token/#flash',
@@ -281,11 +290,16 @@ test('renderFlash loads the direct WebFlash URL when Chromium is inside secure I
     } }, () =>
       withFetch(
         async (path) => {
+          fetched.push(path);
           assert.equal(path, '/api/hassio_ingress/token/api/runtime-config');
           return {
             status: 200,
             ok: true,
-            json: async () => ({ httpsPort: 8443, webFlashUrl: 'https://192.168.1.50:8443/#flash' }),
+            json: async () => ({
+              httpsPort: 8443,
+              accessMode: 'home-assistant-ingress',
+              webFlashUrl: 'https://192.168.1.50:8443/#flash',
+            }),
           };
         },
         async () => {
@@ -293,6 +307,39 @@ test('renderFlash loads the direct WebFlash URL when Chromium is inside secure I
           await renderFlash(root);
           assert.match(root.innerHTML, /Flashing needs the direct secure Studio/);
           assert.match(root.innerHTML, /https:\/\/192\.168\.1\.50:8443\/#flash/);
+          assert.deepEqual(fetched, ['/api/hassio_ingress/token/api/runtime-config']);
+        },
+      ),
+    ),
+  );
+});
+
+test('HA Ingress with navigator.serial present still shows direct WebFlash and never activates the flasher', async () => {
+  const fetched = [];
+  await withNavigator({ serial: { requestPort: async () => { throw new Error('must not activate WebSerial'); } }, userAgent: CHROME_UA }, () =>
+    withWindow({ isSecureContext: true, location: {
+      href: 'https://ha.local/api/hassio_ingress/token/#flash',
+      pathname: '/api/hassio_ingress/token/',
+    } }, () =>
+      withFetch(
+        async (path) => {
+          fetched.push(path);
+          return {
+            status: 200,
+            ok: true,
+            json: async () => ({
+              httpsPort: 8443,
+              accessMode: 'home-assistant-ingress',
+              webFlashUrl: 'https://192.168.1.50:8443/#flash',
+            }),
+          };
+        },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.match(root.innerHTML, /Flashing needs the direct secure Studio/);
+          assert.doesNotMatch(root.innerHTML, /Flash or configure a panel/);
+          assert.deepEqual(fetched, ['/api/hassio_ingress/token/api/runtime-config']);
         },
       ),
     ),
@@ -337,35 +384,46 @@ test('inactive HTTPS runtime state shows no dead redirect', async () => {
 // false and the browser lacks WebSerial, but only the unsupported-browser
 // notice is correct — an HTTPS link would not give Firefox WebSerial.
 test('renderFlash shows the unsupported-browser notice, not the HTTPS-redirect notice, for Firefox on plain HTTP', async () => {
-  let fetchCalled = false;
+  const fetched = [];
   await withNavigator({ userAgent: FIREFOX_UA }, () =>
     withWindow({ isSecureContext: false, location: { href: 'http://192.168.1.50:8080/#flash' } }, () =>
       withFetch(
-        async () => {
-          fetchCalled = true;
-          throw new Error('renderFlash must not fetch the manifest when WebSerial is unavailable');
+        async (path) => {
+          fetched.push(path);
+          return { status: 200, ok: true, json: async () => ({ httpsPort: 8443 }) };
         },
         async () => {
           const root = { innerHTML: '' };
           await renderFlash(root);
           assert.equal(occurrences(root.innerHTML, 'This browser cannot flash boards'), 1);
           assert.equal(occurrences(root.innerHTML, 'Flashing needs a secure connection'), 0);
-          assert.equal(fetchCalled, false);
+          assert.deepEqual(fetched, ['/api/runtime-config']);
         },
       ),
     ),
   );
 });
 
-test('renderFlash shows the no-firmware notice when the manifest reports unavailable', async () => {
+test('direct HTTPS LAN with navigator.serial present renders the normal WebFlash flow', async () => {
+  const fetched = [];
   await withNavigator({ serial: {} }, () =>
-    withFetch(
-      async () => ({ status: 200, ok: true, json: async () => ({ available: false }) }),
-      async () => {
-        const root = { innerHTML: '' };
-        await renderFlash(root);
-        assert.equal(occurrences(root.innerHTML, 'No firmware has been built'), 1);
-      },
+    withWindow({ isSecureContext: true, location: { href: 'https://192.168.1.50:8443/#flash', pathname: '/' } }, () =>
+      withFetch(
+        async (path) => {
+          fetched.push(path);
+          const body = path === '/api/runtime-config'
+            ? { httpsPort: 8443, accessMode: 'lan', webFlashUrl: 'https://192.168.1.50:8443/#flash' }
+            : { available: false };
+          return { status: 200, ok: true, json: async () => body };
+        },
+        async () => {
+          const root = { innerHTML: '' };
+          await renderFlash(root);
+          assert.equal(occurrences(root.innerHTML, 'No firmware has been built'), 1);
+          assert.doesNotMatch(root.innerHTML, /direct secure Studio/);
+          assert.deepEqual(fetched, ['/api/runtime-config', '/api/firmware/manifest']);
+        },
+      ),
     ),
   );
 });

@@ -11,7 +11,7 @@ test('repository and immediate App metadata parse and describe the HA-1 boundary
   const repository = parse(await readFile(join(root, 'repository.yaml'), 'utf8'));
   const config = parse(await readFile(join(root, 'home-assistant', 'config.yaml'), 'utf8'));
   assert.equal(repository.url, 'https://github.com/CtrlAltcouk/inkpanel');
-  assert.equal(config.version, '0.1.0-ha.1');
+  assert.equal(config.version, '0.1.0-ha.2');
   assert.equal(config.image, 'ghcr.io/ctrlaltcouk/inkpanel-home-assistant');
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
   assert.equal(config.ingress, true);
@@ -31,6 +31,8 @@ test('the dedicated image preserves the Playwright version and /data startup ada
   assert.match(dockerfile, new RegExp(`playwright:v${pkg.dependencies.playwright.replace(/^[\\^~]/, '')}-noble`));
   assert.match(dockerfile, /CMD \["node", "scripts\/home-assistant-start\.mjs"\]/);
   assert.match(dockerfile, /VOLUME \["\/data"\]/);
+  assert.match(dockerfile, /io\.hass\.type="app"/);
+  assert.doesNotMatch(dockerfile, /io\.hass\.type="addon"/);
 });
 
 test('the image workflow uses the current pinned Home Assistant Buildx actions', async () => {
@@ -42,6 +44,7 @@ test('the image workflow uses the current pinned Home Assistant Buildx actions',
   assert.match(workflow, /build-image@4de35182/);
   assert.match(workflow, /publish-multi-arch-manifest@4de35182/);
   assert.match(workflow, /\["amd64", "aarch64"\]/);
+  assert.match(workflow, /VERSION: 0\.1\.0-ha\.2/);
   assert.match(workflow, /matrix: \$\{\{ steps\.prepare\.outputs\.matrix \}\}/);
   assert.match(workflow, /runs-on: \$\{\{ matrix\.os \}\}/);
   assert.match(workflow, /registry-prefix: ghcr\.io\/ctrlaltcouk/);

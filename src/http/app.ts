@@ -160,7 +160,12 @@ export function createApp(deps: AppDeps): express.Express {
     res.json({
       httpsPort: deps.runtimeState.httpsPort,
       ...(deps.homeAssistantMode
-        ? { webFlashUrl: directWebFlashUrl(deps.publicBaseUrl, deps.runtimeState.httpsPort) }
+        ? {
+            accessMode: deps.access?.mode === 'home-assistant-ingress'
+              ? 'home-assistant-ingress'
+              : 'lan',
+            webFlashUrl: directWebFlashUrl(deps.publicBaseUrl, deps.runtimeState.httpsPort),
+          }
         : {}),
     });
   });

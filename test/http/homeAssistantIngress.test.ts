@@ -74,10 +74,14 @@ test('the production Ingress boundary rejects direct non-Supervisor connections'
 
 test('HA runtime config exposes only the active direct HTTPS root for WebFlash', async () => {
   assert.deepEqual((await requestJson(app('trusted-ingress'), '/api/runtime-config')).body, {
-    httpsPort: null, webFlashUrl: null,
+    httpsPort: null, accessMode: 'home-assistant-ingress', webFlashUrl: null,
   });
   assert.deepEqual((await requestJson(app('trusted-ingress', 8443), '/api/runtime-config')).body, {
-    httpsPort: 8443, webFlashUrl: 'https://192.168.1.20:8443/#flash',
+    httpsPort: 8443, accessMode: 'home-assistant-ingress',
+    webFlashUrl: 'https://192.168.1.20:8443/#flash',
+  });
+  assert.deepEqual((await requestJson(app('lan', 8443), '/api/runtime-config')).body, {
+    httpsPort: 8443, accessMode: 'lan', webFlashUrl: 'https://192.168.1.20:8443/#flash',
   });
   assert.equal(directWebFlashUrl('http://panel.local:8080/path', 8443), 'https://panel.local:8443/#flash');
   assert.equal(directWebFlashUrl('http://user:pass@panel.local:8080/', 8443), null);

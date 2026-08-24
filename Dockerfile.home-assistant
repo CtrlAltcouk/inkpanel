@@ -6,7 +6,7 @@ ARG BUILD_VERSION
 ARG BUILD_ARCH
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.arch="${BUILD_ARCH}" \
-      io.hass.type="addon"
+      io.hass.type="app"
 
 WORKDIR /app
 

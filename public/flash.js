@@ -50,23 +50,28 @@ function looksLikeChromiumFamily() {
   return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua);
 }
 
+export function directWebFlashNotice(webFlashUrl) {
+  const directUrl = safeWebFlashUrl(webFlashUrl);
+  const link = directUrl
+    ? `<p><a href="${esc(directUrl)}" target="_blank" rel="noopener">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
+    : `<p class="notice">InkPanel could not load its secure-connection settings. Reload this page or check the server logs; no HTTPS address has been guessed.</p>`;
+  return `<div class="card">
+    <h3>Flashing needs the direct secure Studio</h3>
+    <p>Home Assistant Ingress cannot provide the direct browser-to-USB connection used by WebSerial.</p>
+    ${link}
+    <p class="meta">The certificate is self-signed, so your browser will warn you once.
+       That is expected on a local network.</p>
+  </div>`;
+}
+
 export function unsupportedNotice(httpsPort, webFlashUrl = null) {
   const directUrl = safeWebFlashUrl(webFlashUrl);
-  if (looksLikeChromiumFamily() && (window.isSecureContext === false || directUrl)) {
+  if (window.isSecureContext === false && looksLikeChromiumFamily()) {
     const hasPort = Number.isInteger(httpsPort) && httpsPort >= 1 && httpsPort <= 65535;
     const secureUrl = directUrl ?? (hasPort ? httpsUrl(httpsPort) : null);
     const link = secureUrl
       ? `<p><a href="${esc(secureUrl)}" target="_blank" rel="noopener">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
       : `<p class="notice">InkPanel could not load its secure-connection settings. Reload this page or check the server logs; no HTTPS address has been guessed.</p>`;
-    if (window.isSecureContext !== false && directUrl) {
-      return `<div class="card">
-        <h3>Flashing needs the direct secure Studio</h3>
-        <p>Home Assistant Ingress cannot provide the direct browser-to-USB connection used by WebSerial.</p>
-        ${link}
-        <p class="meta">The certificate is self-signed, so your browser will warn you once.
-           That is expected on a local network.</p>
-      </div>`;
-    }
     return `<div class="card">
       <h3>Flashing needs a secure connection</h3>
       <p>Browsers only allow USB access over HTTPS. This page is on plain HTTP,
@@ -454,21 +459,27 @@ function newBoardConfigFromUi(root) {
 }
 
 export async function renderFlash(root) {
-  if (!serialSupported()) {
+  let runtime = null;
+  try {
+    runtime = await getJson('/api/runtime-config');
+  } catch {
+    // Standalone flashing can continue when already on direct HTTPS. On HTTP,
+    // the notice below explains that no secure URL could be determined.
+  }
+
+  if (runtime?.accessMode === 'home-assistant-ingress') {
+    root.innerHTML = directWebFlashNotice(runtime.webFlashUrl);
+    return;
+  }
+
+  const insecureContext = globalThis.window?.isSecureContext === false;
+  if (!serialSupported() || insecureContext) {
     let httpsPort;
-    let webFlashUrl;
-    if (looksLikeChromiumFamily()) {
-      try {
-        const runtime = await getJson('/api/runtime-config');
-        if (Number.isInteger(runtime?.httpsPort) &&
-            runtime.httpsPort >= 1 && runtime.httpsPort <= 65535) {
-          httpsPort = runtime.httpsPort;
-        }
-        webFlashUrl = safeWebFlashUrl(runtime?.webFlashUrl);
-      } catch {
-        // The notice below explains that no secure URL could be determined.
-      }
+    if (Number.isInteger(runtime?.httpsPort) &&
+        runtime.httpsPort >= 1 && runtime.httpsPort <= 65535) {
+      httpsPort = runtime.httpsPort;
     }
+    const webFlashUrl = insecureContext ? safeWebFlashUrl(runtime?.webFlashUrl) : null;
     root.innerHTML = unsupportedNotice(httpsPort, webFlashUrl);
     return;
   }

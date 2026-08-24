@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-ha.2
+
+- Use the current Home Assistant App image label.
+- Always move WebFlash from Ingress to the direct secure InkPanel Studio.
+
 ## 0.1.0-ha.1
 
 - Add the first Home Assistant App package for amd64 and aarch64.
