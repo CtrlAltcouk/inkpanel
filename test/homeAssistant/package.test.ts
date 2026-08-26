@@ -61,7 +61,8 @@ test('the image workflow builds, verifies and embeds production firmware before 
   assert.match(workflow, /name: inkpanel-production-firmware-\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /path: firmware\/dist\/?/);
   assert.match(workflow, /load: \$\{\{ github\.event_name == 'pull_request' \}\}/);
-  assert.match(workflow, /\/app\/scripts\/verify-firmware-package\.sh \/app\/firmware\/dist/);
+  assert.match(workflow, /expected_hash="\$\(bash scripts\/firmware-input-hash\.sh\)"/);
+  assert.match(workflow, /\/app\/scripts\/verify-firmware-package\.sh \/app\/firmware\/dist "\$expected_hash"/);
   assert.match(workflow, /docker pull "\$IMAGE_REF"/);
   assert.doesNotMatch(workflow, /fixtures?/i, 'release images must use real compiled firmware');
   assert.doesNotMatch(workflow, /github-token:/);
@@ -77,6 +78,8 @@ test('the shared firmware verifier enforces complete, current full-size and Mini
   assert.match(verifier, /= "mini"/);
   assert.match(verifier, /input\.sha256/);
   assert.match(verifier, /firmware-input-hash\.sh/);
+  assert.match(verifier, /EXPECTED_INPUT_HASH="\$\{2:-\}"/,
+    'an independently calculated hash can validate an image that intentionally has no .git directory');
   assert.match(ci, /bash scripts\/verify-firmware-package\.sh/,
     'normal firmware CI and the Home Assistant release use the same package invariant');
 });
