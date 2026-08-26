@@ -53,14 +53,13 @@ function looksLikeChromiumFamily() {
 export function directWebFlashNotice(webFlashUrl) {
   const directUrl = safeWebFlashUrl(webFlashUrl);
   const link = directUrl
-    ? `<p><a href="${esc(directUrl)}" target="_blank" rel="noopener">Open inkpanel over HTTPS</a> and come back to this tab.</p>`
+    ? `<p><a class="button-link" href="${esc(directUrl)}" target="_blank" rel="noopener">Open WebFlash</a></p>`
     : `<p class="notice">InkPanel could not load its secure-connection settings. Reload this page or check the server logs; no HTTPS address has been guessed.</p>`;
   return `<div class="card">
-    <h3>Flashing needs the direct secure Studio</h3>
-    <p>Home Assistant Ingress cannot provide the direct browser-to-USB connection used by WebSerial.</p>
+    <h3>WebFlash opens in a secure window</h3>
+    <p>USB flashing needs a direct secure InkPanel connection outside Home Assistant.</p>
     ${link}
-    <p class="meta">The certificate is self-signed, so your browser will warn you once.
-       That is expected on a local network.</p>
+    <p class="meta">Your browser may show the local certificate warning the first time.</p>
   </div>`;
 }
 

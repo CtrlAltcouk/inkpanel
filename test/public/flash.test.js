@@ -177,18 +177,28 @@ test('a secure Home Assistant Ingress context gets the direct WebFlash fallback'
   await withNavigator({ userAgent: CHROME_UA }, () =>
     withWindow({ isSecureContext: true, location: { href: 'https://ha.local/api/hassio_ingress/token/#flash' } }, () => {
       const html = directWebFlashNotice('https://192.168.1.50:8443/#flash');
-      assert.match(html, /Flashing needs the direct secure Studio/);
+      assert.match(html, /WebFlash opens in a secure window/);
+      assert.match(html, /USB flashing needs a direct secure InkPanel connection outside Home Assistant\./);
+      assert.match(html, />Open WebFlash<\/a>/);
+      assert.match(html, /Your browser may show the local certificate warning the first time\./);
       assert.match(html, /href="https:\/\/192\.168\.1\.50:8443\/#flash"/);
+      assert.match(html, /target="_blank" rel="noopener"/);
+      assert.doesNotMatch(html, /come back/i);
       assert.doesNotMatch(html, /This browser cannot flash boards/);
     }),
   );
 });
 
 test('the explicit Ingress notice validates its direct WebFlash URL', () => {
-  assert.match(directWebFlashNotice('https://192.168.1.50:8443/#flash'), /Open inkpanel over HTTPS/);
+  const safe = directWebFlashNotice('https://192.168.1.50:8443/#flash');
+  assert.match(safe, /class="button-link"/);
+  assert.match(safe, /Open WebFlash/);
+  assert.doesNotMatch(safe.replace(/href="[^"]+"/, ''), /192\.168\.1\.50/,
+    'the private address is only exposed as the validated link destination');
   const unsafe = directWebFlashNotice('https://user:pass@panel.local:8443/#flash');
   assert.match(unsafe, /no HTTPS address has been guessed/);
   assert.doesNotMatch(unsafe, /user:pass/);
+  assert.doesNotMatch(unsafe, /<a /);
 });
 
 test('the HTTPS notice link target is escaped rather than interpolated raw', async () => {
@@ -305,7 +315,7 @@ test('HA Ingress with navigator.serial absent always shows direct WebFlash and n
         async () => {
           const root = { innerHTML: '' };
           await renderFlash(root);
-          assert.match(root.innerHTML, /Flashing needs the direct secure Studio/);
+          assert.match(root.innerHTML, /WebFlash opens in a secure window/);
           assert.match(root.innerHTML, /https:\/\/192\.168\.1\.50:8443\/#flash/);
           assert.deepEqual(fetched, ['/api/hassio_ingress/token/api/runtime-config']);
         },
@@ -337,7 +347,7 @@ test('HA Ingress with navigator.serial present still shows direct WebFlash and n
         async () => {
           const root = { innerHTML: '' };
           await renderFlash(root);
-          assert.match(root.innerHTML, /Flashing needs the direct secure Studio/);
+          assert.match(root.innerHTML, /WebFlash opens in a secure window/);
           assert.doesNotMatch(root.innerHTML, /Flash or configure a panel/);
           assert.deepEqual(fetched, ['/api/hassio_ingress/token/api/runtime-config']);
         },

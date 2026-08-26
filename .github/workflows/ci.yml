@@ -29,7 +29,7 @@ jobs:
 
       - name: Shell syntax
         run: |
-          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/compile-mini-firmware.sh scripts/firmware-input-hash.sh; do
+          for script in scripts/proxmox/inkpanel-lxc.sh scripts/proxmox/files/inkpanel-update scripts/build-firmware.sh scripts/compile-mini-firmware.sh scripts/firmware-input-hash.sh scripts/verify-firmware-package.sh; do
             echo "checking $script"
             bash -n "$script"
           done
@@ -86,15 +86,7 @@ jobs:
         run: bash scripts/compile-mini-firmware.sh
 
       - name: Check published full-size and Mini firmware outputs
-        run: |
-          test -s firmware/dist/manifest.json
-          test -s firmware/dist/input.sha256
-          test -n "$(find firmware/dist -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
-          test -s firmware/dist/mini/manifest.json
-          test -n "$(find firmware/dist/mini -maxdepth 1 -name '*.bin' -type f -size +0c -print -quit)"
-          test "$(node -e "const m=require('./firmware/dist/manifest.json'); process.stdout.write(m.target)")" = "full"
-          test "$(node -e "const m=require('./firmware/dist/mini/manifest.json'); process.stdout.write(m.target)")" = "mini"
-          test "$(cat firmware/dist/input.sha256)" = "$(bash scripts/firmware-input-hash.sh)"
+        run: bash scripts/verify-firmware-package.sh
 
       - name: Check Mini validation package
         run: |

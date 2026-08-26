@@ -9,6 +9,12 @@ on:
       - repository.yaml
       - package*.json
       - public/**
+      - arduino/**
+      - firmware/**
+      - scripts/build-firmware.sh
+      - scripts/compile-mini-firmware.sh
+      - scripts/firmware-input-hash.sh
+      - scripts/verify-firmware-package.sh
       - scripts/home-assistant-start.mjs
       - src/**
       - .github/workflows/home-assistant-image.yml
@@ -20,6 +26,12 @@ on:
       - repository.yaml
       - package*.json
       - public/**
+      - arduino/**
+      - firmware/**
+      - scripts/build-firmware.sh
+      - scripts/compile-mini-firmware.sh
+      - scripts/firmware-input-hash.sh
+      - scripts/verify-firmware-package.sh
       - scripts/home-assistant-start.mjs
       - src/**
       - .github/workflows/home-assistant-image.yml
@@ -32,7 +44,7 @@ permissions:
 
 env:
   IMAGE_NAME: inkpanel-home-assistant
-  VERSION: 0.1.0-ha.2
+  VERSION: 0.1.0-ha.3
   ARCHITECTURES: '["amd64", "aarch64"]'
 
 jobs:
@@ -48,14 +60,64 @@ jobs:
           image-name: ${{ env.IMAGE_NAME }}
           registry-prefix: ghcr.io/ctrlaltcouk
 
+  firmware:
+    name: Build production firmware packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Cache Arduino ESP32 core
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-esp32-${{ runner.os }}-v1
+
+      - name: Install ESP32 board core
+        run: |
+          arduino-cli config init --overwrite --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Build production firmware packages
+        run: ./scripts/build-firmware.sh
+
+      - name: Verify full-size and Mini packages
+        run: bash scripts/verify-firmware-package.sh
+
+      - name: Upload production firmware packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkpanel-production-firmware-${{ github.sha }}
+          path: firmware/dist/
+          if-no-files-found: error
+          retention-days: 1
+
   build:
-    needs: init
+    needs: [init, firmware]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download production firmware packages
+        uses: actions/download-artifact@v4
+        with:
+          name: inkpanel-production-firmware-${{ github.sha }}
+          path: firmware/dist
+
+      - name: Verify firmware build context
+        run: bash scripts/verify-firmware-package.sh
+
       - uses: home-assistant/builder/actions/build-image@4de35182ce1e329181bffcbcc84d33db5e2c7e10
         with:
           image: ${{ matrix.image }}
@@ -65,8 +127,15 @@ jobs:
           context: .
           file: Dockerfile.home-assistant
           push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name == 'pull_request' }}
           cosign: ${{ github.event_name == 'push' }}
           container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify firmware packages in pull-request image
+        if: github.event_name == 'pull_request'
+        env:
+          IMAGE_REF: ${{ matrix.image }}:${{ env.VERSION }}
+        run: docker run --rm --entrypoint bash "$IMAGE_REF" /app/scripts/verify-firmware-package.sh /app/firmware/dist
 
   publish:
     if: github.event_name == 'push'
@@ -80,3 +149,19 @@ jobs:
           architectures: ${{ env.ARCHITECTURES }}
           registry-prefix: ghcr.io/ctrlaltcouk
           container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  inspect-published:
+    name: Inspect published Home Assistant App image
+    if: github.event_name == 'push'
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull generic multi-architecture tag anonymously
+        env:
+          IMAGE_REF: ghcr.io/ctrlaltcouk/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+        run: docker pull "$IMAGE_REF"
+
+      - name: Verify production firmware packages in published image
+        env:
+          IMAGE_REF: ghcr.io/ctrlaltcouk/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+        run: docker run --rm --entrypoint bash "$IMAGE_REF" /app/scripts/verify-firmware-package.sh /app/firmware/dist

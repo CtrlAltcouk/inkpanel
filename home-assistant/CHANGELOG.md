@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-ha.3
+
+- Include verified full-size and Mini production firmware packages in the App image.
+- Make the Home Assistant Ingress WebFlash handoff clearer.
+
 ## 0.1.0-ha.2
 
 - Use the current Home Assistant App image label.
