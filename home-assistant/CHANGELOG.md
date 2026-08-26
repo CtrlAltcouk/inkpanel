@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-ha.4
+
+- Let Home Assistant own App updates: remove the standalone updater UI and reject its mutation endpoint.
+- Show update ownership in Settings without changing standalone deployments.
+
 ## 0.1.0-ha.3
 
 - Include verified full-size and Mini production firmware packages in the App image.

@@ -28,6 +28,7 @@ import { TodoStore } from './todo/store.ts';
 import { PrinterConnectionStore } from './printers/store.ts';
 import { MoonrakerClient } from './printers/moonraker.ts';
 import { HomeAssistantClient, isHomeAssistantMode } from './homeAssistant/client.ts';
+import { updateModeForDeployment } from './system/updateOwnership.ts';
 
 export const version = '0.1.0';
 
@@ -96,6 +97,7 @@ export async function main(): Promise<void> {
   const resolvedHttps = resolveHttpsPort(process.env.HTTPS_PORT);
   const runtimeState = createRuntimeState();
   const homeAssistantMode = isHomeAssistantMode(process.env.HOME_ASSISTANT_MODE);
+  const updateMode = updateModeForDeployment(homeAssistantMode);
   const allowPrivateCalendarNetworks = parseCalendarAllowPrivateNetworks(
     process.env.CALENDAR_ALLOW_PRIVATE_NETWORKS,
   );
@@ -178,7 +180,7 @@ export async function main(): Promise<void> {
     printerStore,
     moonrakerClient,
     homeAssistantClient,
-    homeAssistantMode,
+    updateMode,
   };
   const app = createApp({ ...sharedDeps, access: { mode: 'lan' } });
   const server = app.listen(port);

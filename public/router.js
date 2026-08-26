@@ -11,3 +11,17 @@ export function resolveRouteName(hash, routes, fallbackName) {
   const requested = (hash || '').replace(/^#/, '') || fallbackName;
   return Object.prototype.hasOwnProperty.call(routes, requested) ? requested : fallbackName;
 }
+
+export function routesForUpdateMode(routes, updateMode) {
+  if (updateMode !== 'home-assistant') return routes;
+  const { updates: _updates, ...availableRoutes } = routes;
+  return availableRoutes;
+}
+
+export function fallbackRouteForUpdateMode(hash, updateMode, fallbackName = 'panels') {
+  return updateMode === 'home-assistant' && hash === '#updates' ? 'settings' : fallbackName;
+}
+
+export function removeManagedUpdateNavigation(root, updateMode) {
+  if (updateMode === 'home-assistant') root.querySelector('[data-tab="updates"]')?.remove();
+}

@@ -38,11 +38,11 @@ test('/api/runtime-config reads current active HTTPS state before the auth gate'
   const runtimeState = createRuntimeState();
   const app = makeApp(undefined, undefined, frames, runtimeState, 'hunter2');
   const before = await requestJson(app, '/api/runtime-config');
-  assert.deepEqual(before.body, { httpsPort: null });
+  assert.deepEqual(before.body, { httpsPort: null, updateMode: 'self' });
   runtimeState.httpsPort = 9443;
   const after = await requestJson(app, '/api/runtime-config');
   assert.equal(after.status, 200);
-  assert.deepEqual(after.body, { httpsPort: 9443 });
+  assert.deepEqual(after.body, { httpsPort: 9443, updateMode: 'self' });
   assert.equal((await requestJson(app, '/api/devices')).status, 401,
     'the password must genuinely be enabled while runtime config remains public');
 });

@@ -5,14 +5,34 @@ import type { FrameService } from '../render/frameService.ts';
 import { readVersion } from '../system/version.ts';
 import { checkForUpdate } from '../system/updateCheck.ts';
 import { readUpdateStatus, requestUpdate } from '../system/updateStatus.ts';
+import {
+  HOME_ASSISTANT_UPDATE_ERROR,
+  managedUpdateInfo,
+  type UpdateMode,
+} from '../system/updateOwnership.ts';
 
-export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: string): Router {
+export interface SystemRouteOptions {
+  updateMode?: UpdateMode;
+  /** Injectable so ownership tests can prove managed deployments never invoke Git. */
+  updateChecker?: typeof checkForUpdate;
+}
+
+export function systemRoutes(
+  store: DeviceStore,
+  frames: FrameService,
+  dataDir: string,
+  options: SystemRouteOptions = {},
+): Router {
   const router = Router();
+  const updateMode = options.updateMode ?? 'self';
+  const updateChecker = options.updateChecker ?? checkForUpdate;
 
   router.get('/system/info', async (req, res) => {
     const [version, update, devices] = await Promise.all([
       readVersion(),
-      checkForUpdate(req.query.refresh === '1'),
+      updateMode === 'self'
+        ? updateChecker(req.query.refresh === '1')
+        : Promise.resolve(managedUpdateInfo()),
       store.list(),
     ]);
 
@@ -46,6 +66,11 @@ export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: 
   });
 
   router.post('/system/update', async (_req, res) => {
+    if (updateMode === 'home-assistant') {
+      res.status(409).json({ error: HOME_ASSISTANT_UPDATE_ERROR });
+      return;
+    }
+
     const running = await readUpdateStatus(dataDir);
     if (running.state === 'running') {
       res.status(409).json({ error: 'an update is already running' });
@@ -61,7 +86,11 @@ export function systemRoutes(store: DeviceStore, frames: FrameService, dataDir: 
   });
 
   router.get('/system/update/status', async (_req, res) => {
-    res.set('Cache-Control', 'no-store').json(await readUpdateStatus(dataDir));
+    res.set('Cache-Control', 'no-store').json(
+      updateMode === 'home-assistant'
+        ? managedUpdateInfo()
+        : await readUpdateStatus(dataDir),
+    );
   });
 
   return router;

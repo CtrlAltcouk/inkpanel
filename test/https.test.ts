@@ -390,14 +390,14 @@ test('active HTTPS port is published only after a successful listener start', as
       },
     );
 
-    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null },
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null, updateMode: 'self' },
       'a requested port must not be advertised while listener startup is still pending');
     releaseStart();
     const server = await activation;
     assert.ok(server?.listening);
-    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: 9443 });
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: 9443, updateMode: 'self' });
     await new Promise<void>((resolve) => listener.close(() => resolve()));
-    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null },
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null, updateMode: 'self' },
       'a stopped listener must no longer be advertised');
   } finally {
     releaseStart();
@@ -439,7 +439,7 @@ test('HTTP and HTTPS port collision keeps HTTP healthy and HTTPS undisclosed', a
       runtimeState,
     );
     assert.equal(httpsServer, null, 'the already-bound HTTP port must reject the HTTPS listener');
-    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null });
+    assert.deepEqual((await getPlainJson(httpPort, '/api/runtime-config')).body, { httpsPort: null, updateMode: 'self' });
     assert.equal((await getPlainJson(httpPort, '/health')).status, 200,
       'optional HTTPS failure must not affect the primary HTTP service');
   } finally {

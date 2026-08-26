@@ -22,6 +22,7 @@ import { MoonrakerClient } from '../printers/moonraker.ts';
 import { PrinterConnectionStore, PrinterStoreError } from '../printers/store.ts';
 import { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { homeAssistantRoutes } from './homeAssistantRoutes.ts';
+import type { UpdateMode } from '../system/updateOwnership.ts';
 
 const require = createRequire(import.meta.url);
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -66,7 +67,8 @@ export interface AppDeps {
   moonrakerClient?: MoonrakerClient;
   /** Shared Supervisor API client. Standalone tests/embedders may omit it. */
   homeAssistantClient?: HomeAssistantClient;
-  homeAssistantMode?: boolean;
+  /** Deployment capability shared by runtime UI and mutation routes. Defaults to standalone. */
+  updateMode?: UpdateMode;
   /** Selects the request trust boundary without duplicating application routes. */
   access?: {
     mode: 'lan' | 'home-assistant-ingress';
@@ -113,6 +115,7 @@ export function directWebFlashUrl(publicBaseUrl: string, httpsPort: number | nul
 
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
+  const updateMode = deps.updateMode ?? 'self';
   app.disable('x-powered-by');
   if (deps.trustProxy !== undefined) app.set('trust proxy', deps.trustProxy);
   if (deps.access?.mode === 'home-assistant-ingress') {
@@ -159,7 +162,8 @@ export function createApp(deps: AppDeps): express.Express {
     res.set('cache-control', 'no-store');
     res.json({
       httpsPort: deps.runtimeState.httpsPort,
-      ...(deps.homeAssistantMode
+      updateMode,
+      ...(updateMode === 'home-assistant'
         ? {
             accessMode: deps.access?.mode === 'home-assistant-ingress'
               ? 'home-assistant-ingress'
@@ -208,7 +212,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', todoRoutes(deps.store, todoStore));
   app.use('/api', printerRoutes(deps.store, printerStore, moonrakerClient));
   app.use('/api', homeAssistantRoutes(homeAssistantClient));
-  app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir));
+  app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir, { updateMode }));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
   // A corrupt/unreadable device store is a deliberate fail-closed condition,

@@ -3,7 +3,12 @@ import { renderPanels, setSelectedPanel } from './panels.js';
 import { renderSettings, renderUpdates } from './settings.js';
 import { renderFlash } from './flash.js';
 import { esc } from './components.js';
-import { resolveRouteName } from './router.js';
+import {
+  fallbackRouteForUpdateMode,
+  removeManagedUpdateNavigation,
+  resolveRouteName,
+  routesForUpdateMode,
+} from './router.js';
 
 const view = document.getElementById('view');
 const sidebarPanels = document.getElementById('sidebar-panels');
@@ -22,6 +27,8 @@ const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
 
 let generation = 0;
 let shellSelectedPanelId = null;
+let updateMode = 'self';
+let availableRoutes = ROUTES;
 
 function panelButton(device) {
   const selected = device.id === shellSelectedPanelId ? ' on' : '';
@@ -96,8 +103,9 @@ window.setInterval(() => {
 
 async function route() {
   const myGeneration = ++generation;
-  const name = resolveRouteName(location.hash, ROUTES, FALLBACK_ROUTE);
-  const render = ROUTES[name];
+  const fallback = fallbackRouteForUpdateMode(location.hash, updateMode, FALLBACK_ROUTE);
+  const name = resolveRouteName(location.hash, availableRoutes, fallback);
+  const render = availableRoutes[name];
 
   document.querySelectorAll('[data-tab]').forEach((tab) => {
     tab.classList.toggle('on', tab.dataset.tab === name);
@@ -124,6 +132,16 @@ window.addEventListener('hashchange', () => {
   closeMobileSidebar();
   void route();
 });
+
+try {
+  const runtime = await getJson('/api/runtime-config');
+  updateMode = runtime?.updateMode === 'home-assistant' ? 'home-assistant' : 'self';
+  availableRoutes = routesForUpdateMode(ROUTES, updateMode);
+  removeManagedUpdateNavigation(document, updateMode);
+} catch {
+  // A failed capability read must not stop the standalone Studio loading.
+  // Server-side ownership still prevents a managed update mutation.
+}
 
 try {
   await refreshSidebarPanels();

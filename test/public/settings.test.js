@@ -16,11 +16,17 @@ test('Settings reports standalone, connected and safely unavailable Home Assista
   assert.match(connected, /Connected/);
   assert.match(connected, /Core 2026\.8\.1/);
   assert.match(connected, /Europe\/London/);
+  assert.match(connected, /Updates are managed by Home Assistant\./);
   const unavailable = settingsView(info, {
     mode: 'home-assistant-app', available: false, error: 'Home Assistant request failed (401)',
   });
   assert.match(unavailable, /Unavailable/);
   assert.match(unavailable, /request failed \(401\)/);
+  assert.match(unavailable, /Updates are managed by Home Assistant\./);
+  assert.doesNotMatch(
+    settingsView(info, { mode: 'standalone', available: false }),
+    /Updates are managed by Home Assistant\./,
+  );
 });
 
 test('a status with no startedAt is not current — including the idle default', () => {

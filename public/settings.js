@@ -42,14 +42,16 @@ function homeAssistantSection(status) {
   }
   if (!status.available) {
     return `<h3>Home Assistant</h3><div class="health"><span class="pill">Unavailable</span></div>
-      <p class="meta">${esc(status.error || 'Could not reach the Home Assistant Core API.')}</p>`;
+      <p class="meta">${esc(status.error || 'Could not reach the Home Assistant Core API.')}</p>
+      <p class="meta">Updates are managed by Home Assistant.</p>`;
   }
   return `<h3>Home Assistant</h3><div class="health">
     <span class="pill">Connected</span>
     <span class="pill">Core ${esc(status.version)}</span>
     <span class="pill">${esc(status.locationName)}</span>
     <span class="pill">${esc(status.timeZone)}</span>
-  </div>`;
+  </div>
+  <p class="meta">Updates are managed by Home Assistant.</p>`;
 }
 
 export function settingsView(info, homeAssistantStatus) {

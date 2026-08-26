@@ -11,7 +11,7 @@ test('repository and immediate App metadata parse and describe the HA-1 boundary
   const repository = parse(await readFile(join(root, 'repository.yaml'), 'utf8'));
   const config = parse(await readFile(join(root, 'home-assistant', 'config.yaml'), 'utf8'));
   assert.equal(repository.url, 'https://github.com/CtrlAltcouk/inkpanel');
-  assert.equal(config.version, '0.1.0-ha.3');
+  assert.equal(config.version, '0.1.0-ha.4');
   assert.equal(config.image, 'ghcr.io/ctrlaltcouk/inkpanel-home-assistant');
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
   assert.equal(config.ingress, true);
@@ -48,7 +48,7 @@ test('the image workflow builds, verifies and embeds production firmware before 
   assert.match(workflow, /build-image@4de35182/);
   assert.match(workflow, /publish-multi-arch-manifest@4de35182/);
   assert.match(workflow, /\["amd64", "aarch64"\]/);
-  assert.match(workflow, /VERSION: 0\.1\.0-ha\.3/);
+  assert.match(workflow, /VERSION: 0\.1\.0-ha\.4/);
   assert.match(workflow, /matrix: \$\{\{ steps\.prepare\.outputs\.matrix \}\}/);
   assert.match(workflow, /runs-on: \$\{\{ matrix\.os \}\}/);
   assert.match(workflow, /registry-prefix: ghcr\.io\/ctrlaltcouk/);
