@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { isValidTimezone } from '../devices/schema.ts';
+import { todoEntityIdSchema, homeAssistantTodoListsSchema, homeAssistantTodoResponseSchema } from './todoSchemas.ts';
+import type { TodoData } from '../model/dashboard.ts';
 import {
   calendarEntityIdSchema, homeAssistantCalendarListSchema, homeAssistantCalendarEventsSchema,
   type HomeAssistantCalendarEvent,
@@ -15,6 +17,13 @@ export interface HomeAssistantCalendarDiscovery {
 }
 
 export type HomeAssistantMode = 'standalone' | 'home-assistant-app';
+
+export interface HomeAssistantTodoDiscovery {
+  supported: boolean;
+  available: boolean;
+  lists: Array<{ entityId: string; name: string }>;
+  error: string | null;
+}
 
 export interface HomeAssistantStatus {
   available: boolean;
@@ -120,7 +129,9 @@ export class HomeAssistantClient {
       ? createHash('sha256').update(this.baseUrl.href).digest('hex') : null;
   }
 
-  private async request<T>(path: string, schema: z.ZodType<T>, label: string, externalSignal?: AbortSignal): Promise<HomeAssistantResult<T>> {
+  private async request<T>(path: string, schema: z.ZodType<T>, label: string, externalSignal?: AbortSignal,
+    options: { method: 'POST'; body: Record<string, unknown> } | { method?: 'GET' } = {},
+  ): Promise<HomeAssistantResult<T>> {
     if (!this.enabled) return { available: false, error: 'Home Assistant is not enabled' };
     if (!this.baseUrl) return { available: false, error: this.configurationError ?? 'Home Assistant configuration is invalid' };
     if (!this.token) return { available: false, error: 'Supervisor token is unavailable' };
@@ -128,12 +139,14 @@ export class HomeAssistantClient {
     const signal = externalSignal ? AbortSignal.any([externalSignal, timeout]) : timeout;
     try {
       const response = await this.fetchImpl(new URL(path, this.baseUrl), {
-        method: 'GET',
+        method: options.method ?? 'GET',
         redirect: 'error',
         headers: {
           accept: 'application/json',
           authorization: `Bearer ${this.token}`,
+          ...(options.method === 'POST' ? { 'content-type': 'application/json' } : {}),
         },
+        ...(options.method === 'POST' ? { body: JSON.stringify(options.body) } : {}),
         signal,
       });
       if (!response.ok) return { available: false, error: `Home Assistant request failed (${response.status})` };
@@ -193,6 +206,21 @@ export class HomeAssistantClient {
     }
     const query = new URLSearchParams({ start, end });
     return this.request(`calendars/${encodeURIComponent(entityId)}?${query}`, homeAssistantCalendarEventsSchema, 'calendar events', signal);
+  }
+
+  async listTodoLists(signal?: AbortSignal): Promise<HomeAssistantTodoDiscovery> {
+    const result = await this.request('states', homeAssistantTodoListsSchema, 'To Do discovery', signal);
+    return { supported: this.enabled, available: result.available,
+      lists: result.available ? result.data : [],
+      error: result.available || !this.enabled ? null : result.error };
+  }
+
+  async getTodoItems(entityId: string, signal?: AbortSignal): Promise<HomeAssistantResult<TodoData>> {
+    if (!todoEntityIdSchema.safeParse(entityId).success) {
+      return { available: false, error: 'invalid Home Assistant To Do entity ID' };
+    }
+    return this.request('services/todo/get_items?return_response', homeAssistantTodoResponseSchema(entityId),
+      'To Do items', signal, { method: 'POST', body: { entity_id: entityId, status: 'needs_action' } });
   }
 }
 

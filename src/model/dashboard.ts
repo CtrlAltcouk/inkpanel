@@ -75,7 +75,7 @@ export type DashboardSectionData =
   | { type: 'bus'; data: BusData | null; health: SourceHealth | null }
   | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
   | { type: 'octopus'; data: OctopusAgileData | null; health: SourceHealth | null }
-  | { type: 'todo'; data: TodoData | null; configured: boolean; health: null }
+  | { type: 'todo'; data: TodoData | null; configured: boolean; health: SourceHealth | null }
   | { type: 'printers'; data: { printers: PrinterStatus[] } | null; configured: boolean; health: SourceHealth | null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };

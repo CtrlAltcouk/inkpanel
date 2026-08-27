@@ -9,19 +9,25 @@ import {
 
 const MAX_WIDGET_TYPES = Object.keys(widgetRegistry).length;
 
+function draftKey(widget: DashboardWidget): string {
+  const provider = widget.type === 'calendar' ? ('provider' in widget.config ? widget.config.provider : 'ical')
+    : widget.type === 'todo' ? ('provider' in widget.config ? widget.config.provider : 'local') : '';
+  return `${widget.type}:${provider}`;
+}
+
 export const dashboardEditorSlotSchema = z.array(dashboardWidgetSchema)
-  .max(MAX_WIDGET_TYPES)
+  .max(MAX_WIDGET_TYPES + 2) // Calendar and To Do each have two provider drafts.
   .superRefine((widgets, ctx) => {
     const seen = new Set<string>();
     widgets.forEach((widget, index) => {
-      if (seen.has(widget.type)) {
+      if (seen.has(draftKey(widget))) {
         ctx.addIssue({
           code: 'custom',
           path: [index, 'type'],
           message: `duplicate remembered widget type: ${widget.type}`,
         });
       }
-      seen.add(widget.type);
+      seen.add(draftKey(widget));
     });
   });
 
@@ -67,7 +73,7 @@ function meaningful(widget: DashboardWidget): boolean {
     case 'bus': return Boolean(widget.config.stopCode);
     case 'traffic': return Boolean(widget.config.origin.trim() && widget.config.destination.trim());
     case 'octopus': return Boolean(widget.config.tariffCode);
-    case 'todo': return Boolean(widget.config.listId);
+    case 'todo': return Boolean('entityId' in widget.config ? widget.config.entityId : widget.config.listId);
     case 'printers': return widget.config.printerIds.length > 0;
     case 'bins': return Boolean(widget.config.uprn);
     case 'weather':
@@ -77,13 +83,18 @@ function meaningful(widget: DashboardWidget): boolean {
 }
 
 function mergeShared(current: DashboardWidget[], slots: DashboardEditorSlots): DashboardWidget[] {
-  const byType = new Map(current.map((widget) => [widget.type, clone(widget)]));
+  // Entries are active-first; process in reverse so the active provider ends
+  // up first again, and the most recently saved useful selection wins.
+  const byDraft = new Map([...current].reverse().map((widget) => [draftKey(widget), clone(widget)]));
   for (const slot of slots) {
-    for (const widget of slot) {
-      if (meaningful(widget)) byType.set(widget.type, clone(widget));
+    for (const widget of [...slot].reverse()) {
+      if (meaningful(widget)) {
+        byDraft.delete(draftKey(widget));
+        byDraft.set(draftKey(widget), clone(widget));
+      }
     }
   }
-  return [...byType.values()];
+  return [...byDraft.values()].reverse();
 }
 
 /**
@@ -91,7 +102,7 @@ function mergeShared(current: DashboardWidget[], slots: DashboardEditorSlots): D
  *
  * DeviceStore continues to describe only what a panel is actively rendering.
  * This owner-only file remembers inactive widget drafts for each panel/slot and
- * one last-useful config per type as a fallback for other panels. Calendar URLs
+ * one last-useful config per type/provider as a fallback for other panels. Calendar URLs
  * and route addresses can be sensitive, so it uses the same 0600 atomic file
  * helper as managed provider credentials.
  *

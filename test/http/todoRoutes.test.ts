@@ -71,6 +71,31 @@ test('To Do management CRUD is authenticated and preserves task order/completion
   });
 });
 
+test('V2 local saves validate list existence; HA IDs persist offline without migrating V1', async () => {
+  await withServer(async (base, cookie, devices, todos) => {
+    assert.equal((await fetch(`${base}/api/home-assistant/todo-lists`)).status, 401);
+    assert.deepEqual(await (await request(base, cookie, 'GET', '/api/home-assistant/todo-lists')).json(), {
+      supported: false, available: false, lists: [], error: null,
+    });
+    const device = await devices.getOrCreate('esp32-provider', 'ssd1681-200x200-mono');
+    const list = await todos.create('Home');
+    const save = (widget: unknown) => request(base, cookie, 'PUT', `/api/devices/${device.id}`, { dashboardSections: [widget] });
+    const local = { type: 'todo', version: 2, config: { provider: 'local', listId: list.id } };
+    assert.equal((await save({ ...local, config: { provider: 'local', listId: 'missing' } })).status, 400);
+    assert.equal((await save(local)).status, 200);
+    assert.equal((await request(base, cookie, 'DELETE', `/api/todo-lists/${list.id}`)).status, 409);
+    const ha = { type: 'todo', version: 2, config: { provider: 'home-assistant', entityId: 'todo.removed' } };
+    assert.equal((await save(ha)).status, 200, 'syntax is sufficient; discovery need not be available');
+    assert.deepEqual((await devices.get(device.id))?.dashboardSections, [ha]);
+    assert.equal((await request(base, cookie, 'DELETE', `/api/todo-lists/${list.id}`)).status, 204, 'HA config is not a local list reference');
+    const legacy = await todos.create('Legacy');
+    const v1 = { type: 'todo', version: 1, config: { listId: legacy.id } };
+    assert.equal((await save(v1)).status, 200);
+    assert.equal((await request(base, cookie, 'PUT', `/api/devices/${device.id}`, { name: 'Renamed' })).status, 200);
+    assert.deepEqual((await devices.get(device.id))?.dashboardSections, [v1]);
+  });
+});
+
 test('invalid and stale To Do requests return useful client errors', async () => {
   await withServer(async (base, cookie, devices) => {
     assert.equal((await request(base, cookie, 'POST', '/api/todo-lists', { name: '' })).status, 400);

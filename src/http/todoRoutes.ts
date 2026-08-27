@@ -50,7 +50,7 @@ export function todoRoutes(devices: DeviceStore, todos: TodoStore): Router {
     if (!id.success) return invalid(res, id);
     const referencedBy = (await devices.list())
       .filter((device) => device.dashboardSections.some(
-        (widget) => widget.type === 'todo' && widget.config.listId === id.data,
+        (widget) => widget.type === 'todo' && 'listId' in widget.config && widget.config.listId === id.data,
       ))
       .map((device) => ({ id: device.id, name: device.name }));
     if (referencedBy.length > 0) {

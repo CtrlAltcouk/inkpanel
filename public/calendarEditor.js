@@ -1,4 +1,5 @@
 import { esc } from './components.js';
+import { switchProviderDraft } from './providerDrafts.js';
 
 export function calendarControlsHtml(config, discovery = {}) {
   const provider = config.provider ?? 'ical';
@@ -26,13 +27,5 @@ export function rememberCalendarConfig(panel, slot) {
 /** Provider switches upgrade explicitly; loading a V1 widget never does. */
 export function switchCalendarProvider(slot, provider) {
   if (!['ical', 'home-assistant'].includes(provider)) return;
-  const current = slot.drafts.calendar;
-  slot.calendarProviderDrafts ??= {};
-  slot.calendarProviderDrafts[current.provider ?? 'ical'] = structuredClone(current);
-  const restored = slot.calendarProviderDrafts[provider];
-  slot.drafts.calendar = provider === 'ical'
-    ? { provider, calendarUrls: [...(restored?.calendarUrls ?? [])] }
-    : { provider, entityIds: [...(restored?.entityIds ?? [])] };
-  slot.versions ??= {};
-  slot.versions.calendar = 2;
+  switchProviderDraft(slot, 'calendar', provider, provider === 'ical' ? { calendarUrls: [] } : { entityIds: [] });
 }

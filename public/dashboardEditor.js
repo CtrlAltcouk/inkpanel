@@ -3,6 +3,8 @@ import { renderStationPicker } from './stationPicker.js';
 import { renderBusStopPicker } from './busStopPicker.js';
 import { getJson, sendJson } from './api.js';
 import { calendarControlsHtml, rememberCalendarConfig, switchCalendarProvider } from './calendarEditor.js';
+import { todoProviderHtml, homeAssistantTodoControlsHtml, rememberTodoConfig, switchTodoProvider } from './todoEditor.js';
+import { providerDraftState, rememberedProviderDrafts } from './providerDrafts.js';
 
 const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'printers', 'todo', 'bins', 'empty'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
@@ -29,8 +31,8 @@ function defaultConfig(type) {
 }
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
-function widgetsByType(widgets = []) { return Object.fromEntries(widgets.map((widget) => [widget.type, clone(widget.config)])); }
-function versionsByType(widgets = []) { return Object.fromEntries(widgets.map((widget) => [widget.type, widget.version])); }
+function widgetsByType(widgets = []) { return Object.fromEntries([...widgets].reverse().map((widget) => [widget.type, clone(widget.config)])); }
+function versionsByType(widgets = []) { return Object.fromEntries([...widgets].reverse().map((widget) => [widget.type, widget.version])); }
 
 export function normalizePrinterUrlValue(value) {
   const trimmed = value.trim();
@@ -49,8 +51,7 @@ export function createDashboardDraftState(sections, remembered = {}) {
     type: widget.type,
     drafts: { ...clone(shared), ...widgetsByType(rememberedSlots[index] ?? []), [widget.type]: clone(widget.config) },
     versions: { ...versionsByType(remembered.shared), ...versionsByType(rememberedSlots[index]), [widget.type]: widget.version },
-    calendarProviderDrafts: Object.fromEntries([...(remembered.shared ?? []), ...(rememberedSlots[index] ?? []), widget]
-      .filter((entry) => entry.type === 'calendar').map((entry) => [entry.config.provider ?? 'ical', clone(entry.config)])),
+    providerDrafts: providerDraftState([...(remembered.shared ?? []), ...(rememberedSlots[index] ?? []), widget]),
   }));
 }
 
@@ -93,7 +94,7 @@ function rememberCell(cell, slot, type = slot.type) {
   } else if (type === 'octopus') {
     slot.drafts[type] = { tariffCode: cell.querySelector('[data-octopus-tariff]')?.value.trim().toUpperCase() ?? '' };
   } else if (type === 'todo') {
-    slot.drafts[type] = { listId: cell.querySelector('[data-todo-list]')?.value ?? '' };
+    slot.drafts[type] = rememberTodoConfig(cell, slot);
   } else if (type === 'printers') {
     const mini = cell.querySelector('[data-printer-single]');
     slot.drafts[type] = {
@@ -166,7 +167,7 @@ function printerControlsHtml(config, printers, isMini) {
     <p class="error" data-printer-error hidden></p></div>`;
 }
 
-function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini, haCalendars) {
+function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini, haCalendars, haTodos) {
   if (type === 'calendar') return calendarControlsHtml(config, haCalendars);
   if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
@@ -174,14 +175,15 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   if (type === 'trains') return trainControlsHtml(trainConfigured, trainKey);
   if (type === 'bus') return busControlsHtml(config, busConfigured, busId, busKey);
   if (type === 'traffic') return trafficControlsHtml(config, trafficConfigured, trafficKey);
-  if (type === 'todo') return todoControlsHtml(config, todoLists);
+  if (type === 'todo') return todoProviderHtml(config, haTodos) + (config.provider === 'home-assistant'
+    ? homeAssistantTodoControlsHtml(config, haTodos) : todoControlsHtml(config, todoLists));
   if (type === 'printers') return printerControlsHtml(config, printers, isMini);
   return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
-export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false, haCalendars = {}) {
+export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false, haCalendars = {}, haTodos = {}) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini, haCalendars)}</div>`;
+  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini, haCalendars, haTodos)}</div>`;
 }
 
 function summary(type, config, locationLabel, todoLists = []) {
@@ -191,7 +193,8 @@ function summary(type, config, locationLabel, todoLists = []) {
   if (type === 'bus') return config.stopLabel || config.stopCode || 'Not set up';
   if (type === 'traffic') return config.origin && config.destination ? `${config.origin} → ${config.destination}` : 'Not set up';
   if (type === 'octopus') return config.tariffCode || 'Not set up';
-  if (type === 'todo') return todoLists.find((list) => list.id === config.listId)?.name || 'Not set up';
+  if (type === 'todo') return config.provider === 'home-assistant'
+    ? config.entityId || 'Not set up' : todoLists.find((list) => list.id === config.listId)?.name || 'Not set up';
   if (type === 'printers') return config.printerIds?.length ? `${config.printerIds.length} printer${config.printerIds.length === 1 ? '' : 's'}` : 'Not set up';
   if (type === 'bins') return config.uprn ? `UPRN ${config.uprn}` : 'Not set up';
   return 'Blank section';
@@ -429,7 +432,7 @@ function renderEditor(root) {
     { configured: state.trainApiConfigured, keyDraft: state.trainApiKeyDraft },
     { configured: state.busApiConfigured, appIdDraft: state.busAppIdDraft, appKeyDraft: state.busAppKeyDraft },
     { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft },
-    slotPosition(state, index), state.todoLists, state.printers, state.isMini, state.haCalendars);
+    slotPosition(state, index), state.todoLists, state.printers, state.isMini, state.haCalendars, state.haTodos);
 
   panel.querySelector('[data-widget-type]').addEventListener('change', (event) => {
     const previous = slot.type;
@@ -462,16 +465,25 @@ function renderEditor(root) {
   } else if (slot.type === 'traffic') {
     panel.querySelector('[data-traffic-api-key]').addEventListener('input', (e) => { state.trafficApiKeyDraft = e.currentTarget.value; });
   } else if (slot.type === 'todo') {
-    bindTodoEditor(root, state, slot, panel);
+    panel.querySelector('[data-todo-provider]')?.addEventListener('change', (event) => {
+      rememberCell(panel, slot);
+      switchTodoProvider(slot, event.target.value);
+      renderLayout(root); renderEditor(root); markDashboardChanged(root);
+    });
+    if (config.provider === 'home-assistant') {
+      panel.querySelector('[data-ha-todo-list]').addEventListener('change', () => {
+        rememberCell(panel, slot); renderLayout(root); markDashboardChanged(root);
+      });
+    } else bindTodoEditor(root, state, slot, panel);
   } else if (slot.type === 'printers') {
     bindPrinterEditor(root, state, slot, panel);
   }
 }
 
-export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = [], haCalendars = {}) {
+export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = [], haCalendars = {}, haTodos = {}) {
   const slots = createDashboardDraftState(device.dashboardSections, remembered);
   const isMini = device.panelProfileId === MINI_PROFILE;
-  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers), haCalendars });
+  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers), haCalendars, haTodos });
   root.innerHTML = `<div class="dashboard-composer ${isMini ? 'dashboard-composer--single' : ''}"><div class="dashboard-layout-map ${isMini ? 'dashboard-layout-map--single' : ''}" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>`;
   renderLayout(root); renderEditor(root);
 }
@@ -491,7 +503,7 @@ export function collectRememberedDashboardSettings(root) {
 }
 
 export function serialiseRememberedDashboardDrafts(slots) {
-  return { slots: slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({ type, version: slot.versions[type], config: clone(config) }))) };
+  return { slots: slots.map(rememberedProviderDrafts) };
 }
 
 export function collectTrainApiKey(root) {

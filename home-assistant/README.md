@@ -2,7 +2,7 @@
 
 InkPanel turns an ESP32-S3 e-paper display into a configurable dashboard. This Home Assistant App runs the same InkPanel server and Studio as the standalone installation.
 
-This `0.1.0-ha.6` release is experimental. Add
+This `0.1.0-ha.7` release is experimental. Add
 `https://github.com/CtrlAltcouk/inkpanel#Home-Assistant` as a Home Assistant App repository to test it.
 
 The Studio opens through Home Assistant Ingress. Physical panels use the separately configured LAN address; they cannot use an Ingress URL.
@@ -16,3 +16,5 @@ The Calendar widget can now use existing Home Assistant calendar entities, with 
 New panels use Home Assistant's installation location and timezone at first enrolment. Existing panels keep their saved settings, including manual Studio edits. If the installation location cannot be read, a new panel retries later instead of saving an incorrect default location.
 
 See the **Documentation** tab before starting the App.
+
+To Do can now display a Home Assistant `todo.*` list using the existing full-size or Mini layout. Choose **Home Assistant** as the provider, select a list, and click **Save changes**. This milestone is read-only: edit tasks in Home Assistant. Existing InkPanel lists keep their full local editor. Both provider selections are remembered, missing entities remain visible, and HA outages show unavailable data rather than replaying stale tasks. HA-3 awaits real-installation validation.

@@ -15,6 +15,7 @@ import type { DeviceRecord } from '../devices/types.ts';
 import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
 import { runHomeAssistantCalendars } from '../sources/homeAssistantCalendar.ts';
+import { runHomeAssistantTodo } from '../sources/homeAssistantTodo.ts';
 import type { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
@@ -237,7 +238,12 @@ export class FrameService {
           break;
         }
         case 'todo': {
-          if (!widget.config.listId || !this.deps.todoStore) {
+          if ('entityId' in widget.config) {
+            request = widget.config.entityId
+              ? runHomeAssistantTodo(widget.config.entityId, this.deps.homeAssistantClient, runOptions)
+                .then((outcome) => ({ type: 'todo', data: outcome.data, configured: true, health: outcome.health }))
+              : Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
+          } else if (!widget.config.listId || !this.deps.todoStore) {
             request = Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
           } else {
             request = this.deps.todoStore.get(widget.config.listId).then((list) => ({

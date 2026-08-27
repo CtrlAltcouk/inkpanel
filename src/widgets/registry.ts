@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
+import { todoEntityIdSchema } from '../homeAssistant/todoSchemas.ts';
 
 /** Persisted calendar URLs stay broad so existing private feeds remain readable. */
 export const calendarWidgetConfigV1Schema = z.strictObject({
@@ -53,6 +54,14 @@ export const octopusWidgetConfigV1Schema = z.strictObject({
 
 export const todoWidgetConfigV1Schema = z.strictObject({
   listId: z.string().regex(/^(?:|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/, 'invalid To Do list id'),
+});
+
+export const todoWidgetConfigV2Schema = z.discriminatedUnion('provider', [
+  z.strictObject({ provider: z.literal('local'), listId: todoWidgetConfigV1Schema.shape.listId }),
+  z.strictObject({ provider: z.literal('home-assistant'), entityId: z.union([z.literal(''), todoEntityIdSchema]) }),
+]);
+export const todoWidgetV2Schema = z.strictObject({
+  type: z.literal('todo'), version: z.literal(2), config: todoWidgetConfigV2Schema,
 });
 
 export const printersWidgetConfigV1Schema = z.strictObject({
@@ -126,6 +135,7 @@ export type DashboardWidget =
   | z.infer<typeof trafficWidgetV1Schema>
   | z.infer<typeof octopusWidgetV1Schema>
   | z.infer<typeof todoWidgetV1Schema>
+  | z.infer<typeof todoWidgetV2Schema>
   | z.infer<typeof printersWidgetV1Schema>
   | z.infer<typeof binsWidgetV1Schema>
   | z.infer<typeof emptyWidgetV1Schema>;
@@ -138,7 +148,7 @@ export const widgetRegistry = {
   bus: { 1: busWidgetV1Schema },
   traffic: { 1: trafficWidgetV1Schema },
   octopus: { 1: octopusWidgetV1Schema },
-  todo: { 1: todoWidgetV1Schema },
+  todo: { 1: todoWidgetV1Schema, 2: todoWidgetV2Schema },
   printers: { 1: printersWidgetV1Schema },
   bins: { 1: binsWidgetV1Schema },
   empty: { 1: emptyWidgetV1Schema },

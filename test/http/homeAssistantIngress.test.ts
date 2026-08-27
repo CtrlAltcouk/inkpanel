@@ -22,6 +22,7 @@ function app(access: 'lan' | 'trusted-ingress' | 'real-ingress', activeHttps: nu
     token: 'server-only-supervisor-token',
     fetchImpl: async (url) => String(url).endsWith('/calendars')
       ? Response.json([{ entity_id: 'calendar.family', name: 'Family', attributes: { secret: 'server-only-supervisor-token' } }])
+      : String(url).endsWith('/states') ? Response.json([{ entity_id: 'todo.family', attributes: { friendly_name: 'Family', token: 'server-only-supervisor-token' } }])
       : Response.json({
       version: '2026.8.1', location_name: 'Home', time_zone: 'Europe/London',
     }),
@@ -81,6 +82,14 @@ test('calendar discovery uses the existing authentication boundary and returns o
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { supported: true, available: true, calendars: [{ entityId: 'calendar.family', name: 'Family' }], error: null });
   assert.doesNotMatch(JSON.stringify(result.body), /supervisor|authorization|attributes|http:/i);
+});
+
+test('To Do discovery shares LAN/Ingress auth and projects only identities and names', async () => {
+  assert.equal((await requestJson(app('lan'), '/api/home-assistant/todo-lists')).status, 401);
+  assert.equal((await requestJson(app('real-ingress'), '/api/home-assistant/todo-lists')).status, 403);
+  const result = await requestJson(app('trusted-ingress'), '/api/home-assistant/todo-lists');
+  assert.deepEqual(result.body, { supported: true, available: true, lists: [{ entityId: 'todo.family', name: 'Family' }], error: null });
+  assert.doesNotMatch(JSON.stringify(result.body), /supervisor|token|attributes|http:/i);
 });
 
 test('HA runtime config exposes only the active direct HTTPS root for WebFlash', async () => {

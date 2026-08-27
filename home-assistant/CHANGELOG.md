@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-ha.7
+
+- Add read-only Home Assistant To Do discovery and incomplete-item fetching through the server-only Supervisor client.
+- Add To Do V2 local/Home Assistant provider selection without rewriting V1 records or changing DeviceStore schema/migrations.
+- Preserve both Calendar and To Do provider drafts across switching, saved per-slot settings and shared fallbacks.
+- Keep local To Do CRUD, full-size/Mini visual layouts and firmware unchanged; HA task lists are live-only, not stale-cached.
+- HA-1, HA-2 and ha.6 location defaults are real-hardware validated. HA-3 awaits real-installation validation.
+
 ## 0.1.0-ha.6
 
 - Seed newly enrolled full-size and Mini panels from the validated Home Assistant installation latitude, longitude, timezone and location name.

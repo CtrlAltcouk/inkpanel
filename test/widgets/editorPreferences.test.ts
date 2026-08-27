@@ -27,10 +27,33 @@ test('Calendar V2 preferences preserve version and empty provider drafts never r
     await store.set('p', slots);
     const loaded = new DashboardEditorPreferencesStore(path); await loaded.load();
     assert.deepEqual(loaded.get('p').slots, slots);
-    assert.deepEqual(loaded.get('new').shared, slots[0]);
+    assert.deepEqual(loaded.get('new').shared[0], slots[0][0]);
+    assert.deepEqual(loaded.get('new').shared[1]?.config, { calendarUrls: ['https://example.com/feed'] }, 'inactive iCal provider remains remembered');
     slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'ical', calendarUrls: [] } }];
     await loaded.set('p', slots);
     assert.deepEqual(loaded.get('new').shared[0]!.config, { provider: 'home-assistant', entityIds: ['calendar.home'] });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('provider-specific To Do and Calendar drafts persist per-slot and as shared fallbacks', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-provider-prefs-'));
+  const path = join(dir, 'preferences.json');
+  try {
+    const store = new DashboardEditorPreferencesStore(path);
+    const slots = emptySlots();
+    slots[0] = [
+      { type: 'todo', version: 2, config: { provider: 'home-assistant', entityId: 'todo.home' } },
+      { type: 'todo', version: 1, config: { listId: 'local-home' } },
+      { type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.home'] } },
+      { type: 'calendar', version: 1, config: { calendarUrls: ['https://example.com/feed'] } },
+    ];
+    await store.set('p', slots);
+    const reloaded = new DashboardEditorPreferencesStore(path); await reloaded.load();
+    assert.deepEqual(reloaded.get('p').slots, slots);
+    assert.deepEqual(reloaded.get('other').shared, slots[0]);
+    const duplicate = emptySlots();
+    duplicate[0] = [slots[0][0]!, slots[0][0]!];
+    await assert.rejects(store.set('p', duplicate), /duplicate remembered/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

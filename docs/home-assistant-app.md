@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1 and HA-2 are implemented and validated on real Home Assistant hardware. The `0.1.0-ha.6` cleanup release adds installation-location defaults for first-time panel enrolment on the `Home-Assistant` branch.
+Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do is implemented in `0.1.0-ha.7` and awaits real-installation validation on the `Home-Assistant` branch.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,9 +150,9 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.6` for linux/amd64 and linux/arm64.
+The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.7` for linux/amd64 and linux/arm64.
 
-#### First-time panel location defaults (ha.6)
+#### First-time panel location defaults (ha.6; validated on real hardware)
 
 In Home Assistant App mode, an unknown panel's first enrolment reads the installation location from `/api/config` through the server-only `HomeAssistantClient.installationLocation()` method. Latitude (-90..90), longitude (-180..180), a valid IANA timezone and a non-empty location name are validated and projected into `latitude`, `longitude`, `timezone` and `locationLabel`. Full-size panels retain four dashboard slots; Mini panels retain one.
 
@@ -162,16 +162,43 @@ Known devices never request installation location and are never automatically up
 
 After upgrading to ha.6, validate a genuinely new panel of each size against the installation location in Home Assistant. Existing panels intentionally retain their saved location; update those manually in Studio if necessary. Check that a manual location edit survives subsequent wakes, and that a known panel continues to receive frames during a temporary HA API outage (individual HA-backed widgets retain their existing unavailable/stale semantics).
 
-### Phase HA-3 — Home Assistant To Do
+### Phase HA-3 — Home Assistant To Do (implemented; awaiting real-world validation)
 
-Extend To Do configuration with a provider choice:
+To Do V2 adds a strict provider choice while existing To Do V1 records remain valid, local, and unchanged on load or unrelated saves:
 
-- existing InkPanel local named list;
-- Home Assistant `todo.*` entity.
+- `{"type":"todo","version":2,"config":{"provider":"local","listId":"..."}}`
+- `{"type":"todo","version":2,"config":{"provider":"home-assistant","entityId":"todo.shopping_list"}}`
 
-Use `todo.get_items` for incomplete items. Preserve InkPanel's current local-list store and editing behaviour.
+An empty selection is allowed as not set up. HA entity IDs must match `^todo\.[a-z0-9_]+$` (maximum 255 characters). Local list-ID validation is unchanged. No DeviceStore schema bump or frozen migration/default change is involved.
 
-A later milestone may allow add/update/complete/delete actions against Home Assistant lists from Studio. The first HA To Do milestone may be read-only if that reduces integration risk.
+#### Server-only API and live data
+
+The shared `HomeAssistantClient` discovers lists using `GET states`, validating the envelope and projecting only To Do entity IDs and friendly names (or readable fallback names). The authenticated InkPanel endpoint `GET /api/home-assistant/todo-lists` returns these safe choices. Standalone returns `supported: false` without contacting HA.
+
+Items use the official [`todo.get_items` action](https://www.home-assistant.io/actions/todo.get_items/) via `POST services/todo/get_items?return_response`, with JSON `{"entity_id":"todo.example","status":"needs_action"}`. This follows the [REST response-producing service contract](https://developers.home-assistant.io/docs/api/rest/#post-apiservicesdomainservice). The existing normalized Supervisor base, bearer authentication, redirect rejection, timeouts, cancellation and safe errors are shared by GET and JSON POST requests.
+
+The selected entity's `service_response` is validated. Only non-empty trimmed `needs_action` summaries, in HA order and limited to five, become the existing `TodoData` (`{ items: string[] }`). UIDs, descriptions, due metadata, arbitrary state attributes and credentials do not enter rendering or caching.
+
+FrameService uses a live-only source: no persistent last-good task list is replayed. A configured entity remains configured during an outage, with null data and diagnostic error health. Other widgets continue independently. Duplicate identical To Do sections share the existing per-frame request promise. Empty lists use the existing ALL DONE state; absent selections and unavailable data retain the existing renderer semantics. Full-size and Mini visual templates, framebuffer sizes and firmware are unchanged. Only visible item text/order affects the existing pixel hash.
+
+#### Studio and remembered settings
+
+In App mode the Provider selector offers **InkPanel list** and **Home Assistant**. InkPanel retains its complete existing local list/task editor and immediate CRUD persistence. HA mode shows only a list selector and read-only help: manage tasks in Home Assistant. Provider/entity selection is panel configuration and requires **Save changes**. Local task-content edits retain their separate preview-refresh/dirty-state behaviour.
+
+Calendar and To Do share provider draft handling. Active widget drafts retain their associated versions; explicit provider switches save V2. Both provider choices survive switching widget types, saving/reloading, and per-slot/shared remembered settings. The separate editor-preferences store accepts one entry per widget/provider (legacy one-per-type entries remain readable), with the active choice first and useful shared fallbacks retained independently. This is convenience state, not a DeviceStore migration.
+
+Missing or removed HA entities are shown as missing/unavailable without clearing the saved ID. Syntax is sufficient for saving HA config; discovery availability is never required to read/save an existing panel. Local V1/V2 selections still require a real TodoStore list when saved.
+
+#### Real-installation validation for ha.7
+
+1. Upgrade the App to ha.7 and open Studio through Ingress.
+2. Select To Do → Home Assistant, choose a list, and save on a full-size panel and a Mini.
+3. Verify the first five incomplete items match HA ordering, then complete/add/reorder items in HA and wake the panel or refresh its preview.
+4. Complete all items and verify ALL DONE. Temporarily make the source unavailable and verify no stale task list is replayed and unrelated widgets remain usable.
+5. Switch to InkPanel list and back, save/reopen, and verify both selections survive. Existing local CRUD and Calendar provider choices should remain intact.
+6. Remove a selected HA entity and verify Studio retains its missing selection until explicitly changed.
+
+Future HA write support (`todo.add_item`, `todo.update_item`, `todo.remove_item`) is a separate milestone. ha.7 exposes none of those actions from Studio.
 
 ### Phase HA-4 — Home Assistant Entities
 

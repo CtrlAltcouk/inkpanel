@@ -19,6 +19,7 @@ import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { PrinterConnectionStore } from '../printers/store.ts';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
+import { todoWidgetV2Schema } from '../widgets/registry.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -42,6 +43,7 @@ const octopusTariffCodeInputSchema = z
   );
 
 const dashboardSectionInputSchema = z.union([
+  todoWidgetV2Schema,
   z.strictObject({
     type: z.literal('calendar'), version: z.literal(1),
     config: z.strictObject({ calendarUrls: z.array(calendarUrlInputSchema).max(10) }),
@@ -288,7 +290,7 @@ export function manageRoutes(
     }
 
     for (const widget of sections) {
-      if (widget.type === 'todo' && widget.config.listId
+      if (widget.type === 'todo' && 'listId' in widget.config && widget.config.listId
         && (!todoStore || !(await todoStore.get(widget.config.listId)))) {
         res.status(400).json({ error: 'unknown To Do list', listId: widget.config.listId });
         return;
