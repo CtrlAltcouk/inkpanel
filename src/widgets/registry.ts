@@ -1,8 +1,18 @@
 import { z } from 'zod';
+import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
 
 /** Persisted calendar URLs stay broad so existing private feeds remain readable. */
 export const calendarWidgetConfigV1Schema = z.strictObject({
   calendarUrls: z.array(z.string().url()).max(10),
+});
+
+export const calendarWidgetConfigV2Schema = z.discriminatedUnion('provider', [
+  z.strictObject({ provider: z.literal('ical'), calendarUrls: z.array(z.string().url()).max(10) }),
+  z.strictObject({ provider: z.literal('home-assistant'), entityIds: calendarEntityIdsSchema }),
+]);
+
+export const calendarWidgetV2Schema = z.strictObject({
+  type: z.literal('calendar'), version: z.literal(2), config: calendarWidgetConfigV2Schema,
 });
 
 export const weatherWidgetConfigV1Schema = z.strictObject({});
@@ -109,6 +119,7 @@ export const emptyWidgetV1Schema = z.strictObject({
 
 export type DashboardWidget =
   | z.infer<typeof calendarWidgetV1Schema>
+  | z.infer<typeof calendarWidgetV2Schema>
   | z.infer<typeof weatherWidgetV1Schema>
   | z.infer<typeof trainsWidgetV1Schema>
   | z.infer<typeof busWidgetV1Schema>
@@ -121,7 +132,7 @@ export type DashboardWidget =
 
 /** Current runtime registry, explicitly keyed by widget type and version. */
 export const widgetRegistry = {
-  calendar: { 1: calendarWidgetV1Schema },
+  calendar: { 1: calendarWidgetV1Schema, 2: calendarWidgetV2Schema },
   weather: { 1: weatherWidgetV1Schema },
   trains: { 1: trainsWidgetV1Schema },
   bus: { 1: busWidgetV1Schema },

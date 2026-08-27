@@ -206,7 +206,7 @@ test('current runtime defaults are explicit and return independent section confi
   const second = defaultDevice('default-b');
   assert.equal('calendarUrls' in first, false, 'runtime defaults use the widget-envelope shape, not historical V1 fields');
   assert.deepEqual(first.dashboardSections.map((section) => section.type), ['calendar', 'weather', 'trains', 'bins']);
-  if (first.dashboardSections[0].type === 'calendar') {
+  if (first.dashboardSections[0].type === 'calendar' && first.dashboardSections[0].version === 1) {
     first.dashboardSections[0].config.calendarUrls.push('https://example.com/a.ics');
   }
   assert.deepEqual(second.dashboardSections[0], {
@@ -351,7 +351,7 @@ for (const [description, sections] of [
   ['fewer than four sections', defaultDevice('esp32-layout').dashboardSections.slice(0, 3)],
   ['more than four sections', [...defaultDevice('esp32-layout').dashboardSections, { type: 'empty', version: 1, config: {} }]],
   ['an unknown widget type', [{ type: 'future-widget', version: 1, config: {} }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
-  ['an unsupported widget version', [{ type: 'calendar', version: 2, config: { calendarUrls: [] } }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
+  ['an unsupported widget version', [{ type: 'calendar', version: 99, config: { calendarUrls: [] } }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
   ['a malformed strict widget config', [{ type: 'calendar', version: 1, config: { calendarUrls: [], extra: true } }, ...defaultDevice('esp32-layout').dashboardSections.slice(1)]],
 ] as const) {
   test(`${description} fails closed and preserves the original bytes`, async () => {

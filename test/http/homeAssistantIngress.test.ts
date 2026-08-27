@@ -20,7 +20,9 @@ function app(access: 'lan' | 'trusted-ingress' | 'real-ingress', activeHttps: nu
   const homeAssistantClient = new HomeAssistantClient({
     enabled: true,
     token: 'server-only-supervisor-token',
-    fetchImpl: async () => Response.json({
+    fetchImpl: async (url) => String(url).endsWith('/calendars')
+      ? Response.json([{ entity_id: 'calendar.family', name: 'Family', attributes: { secret: 'server-only-supervisor-token' } }])
+      : Response.json({
       version: '2026.8.1', location_name: 'Home', time_zone: 'Europe/London',
     }),
   });
@@ -70,6 +72,15 @@ test('the production Ingress boundary rejects direct non-Supervisor connections'
   });
   assert.equal(response.status, 403);
   assert.match(String(response.body.error), /Ingress proxy required/);
+});
+
+test('calendar discovery uses the existing authentication boundary and returns only safe metadata', async () => {
+  assert.equal((await requestJson(app('lan'), '/api/home-assistant/calendars')).status, 401);
+  assert.equal((await requestJson(app('real-ingress'), '/api/home-assistant/calendars')).status, 403);
+  const result = await requestJson(app('trusted-ingress'), '/api/home-assistant/calendars');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { supported: true, available: true, calendars: [{ entityId: 'calendar.family', name: 'Family' }], error: null });
+  assert.doesNotMatch(JSON.stringify(result.body), /supervisor|authorization|attributes|http:/i);
 });
 
 test('HA runtime config exposes only the active direct HTTPS root for WebFlash', async () => {

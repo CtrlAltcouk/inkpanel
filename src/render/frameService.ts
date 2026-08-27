@@ -14,6 +14,8 @@ import { batteryPercent } from '../devices/battery.ts';
 import type { DeviceRecord } from '../devices/types.ts';
 import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
+import { runHomeAssistantCalendars } from '../sources/homeAssistantCalendar.ts';
+import type { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
 import { runLiveSource, runSource } from '../sources/runner.ts';
@@ -53,6 +55,7 @@ export interface FrameDeps {
   fetchData?: (device: DeviceRecord) => Promise<SourceBundle>;
   /** Injected once at startup so calendar network policy is explicit/testable. */
   calendarSource?: Source<IcalFeedConfig, string>;
+  homeAssistantClient?: HomeAssistantClient;
   weatherSource?: typeof openMeteoSource;
   binsSource?: typeof binsSource;
   trainSource?: Source<TrainSourceConfig, TrainData>;
@@ -128,19 +131,21 @@ export class FrameService {
     const requests = new Map<string, Promise<DashboardSectionData>>();
 
     const sectionRequest = (widget: DeviceRecord['dashboardSections'][number]): Promise<DashboardSectionData> => {
-      const key = `${widget.type}:${JSON.stringify(widget.config)}`;
+      const key = `${widget.type}:${widget.version}:${JSON.stringify(widget.config)}`;
       const existing = requests.get(key);
       if (existing) return existing;
 
       let request: Promise<DashboardSectionData>;
       switch (widget.type) {
         case 'calendar':
-          request = runCalendars(
+          request = ('entityIds' in widget.config
+            ? runHomeAssistantCalendars(widget.config.entityIds, device.timezone, this.deps.homeAssistantClient, this.deps.cache, runOptions)
+            : runCalendars(
             widget.config.calendarUrls,
             device.timezone,
             this.deps.cache,
             { ...runOptions, source: this.deps.calendarSource },
-          ).then((outcome) => ({ type: 'calendar', data: outcome.data, health: outcome.health }));
+          )).then((outcome) => ({ type: 'calendar', data: outcome.data, health: outcome.health }));
           break;
         case 'weather':
           request = headerWeatherPromise.then((outcome) => ({

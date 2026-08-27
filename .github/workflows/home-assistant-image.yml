@@ -44,7 +44,7 @@ permissions:
 
 env:
   IMAGE_NAME: inkpanel-home-assistant
-  VERSION: 0.1.0-ha.4
+  VERSION: 0.1.0-ha.5
   ARCHITECTURES: '["amd64", "aarch64"]'
 
 jobs:

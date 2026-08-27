@@ -148,10 +148,16 @@ export async function main(): Promise<void> {
     googleRoutesEndpoint ? { endpoint: googleRoutesEndpoint } : {},
   );
 
+  const homeAssistantClient = new HomeAssistantClient({
+    enabled: homeAssistantMode,
+    baseUrl: process.env.HOME_ASSISTANT_BASE_URL,
+    token: process.env.SUPERVISOR_TOKEN,
+  });
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
     calendarSource,
+    homeAssistantClient,
     trainSource,
     busSource,
     trafficSource,
@@ -163,11 +169,6 @@ export async function main(): Promise<void> {
   const password = process.env.INKPANEL_PASSWORD?.trim() || null;
   const secret = await loadOrCreateSecret(join(dataDir, '.session-secret'));
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
-  const homeAssistantClient = new HomeAssistantClient({
-    enabled: homeAssistantMode,
-    baseUrl: process.env.HOME_ASSISTANT_BASE_URL,
-    token: process.env.SUPERVISOR_TOKEN,
-  });
 
   const sharedDeps: AppDeps = {
     store, frames, publicBaseUrl, runtimeState,

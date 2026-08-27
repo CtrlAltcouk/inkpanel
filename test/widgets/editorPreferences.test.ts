@@ -12,6 +12,28 @@ function emptySlots(): DashboardEditorSlots {
   return [[], [], [], []];
 }
 
+test('Calendar V2 preferences preserve version and empty provider drafts never replace useful shared settings', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-calendar-prefs-'));
+  const path = join(dir, 'preferences.json');
+  try {
+    const store = new DashboardEditorPreferencesStore(path);
+    const slots = emptySlots();
+    slots[0] = [{ type: 'calendar', version: 1, config: { calendarUrls: ['https://example.com/feed'] } }];
+    await store.set('p', slots);
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: [] } }];
+    await store.set('p', slots);
+    assert.equal(store.get('new').shared[0]!.version, 1);
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.home'] } }];
+    await store.set('p', slots);
+    const loaded = new DashboardEditorPreferencesStore(path); await loaded.load();
+    assert.deepEqual(loaded.get('p').slots, slots);
+    assert.deepEqual(loaded.get('new').shared, slots[0]);
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'ical', calendarUrls: [] } }];
+    await loaded.set('p', slots);
+    assert.deepEqual(loaded.get('new').shared[0]!.config, { provider: 'home-assistant', entityIds: ['calendar.home'] });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('remembered drafts persist per panel while useful values become shared fallbacks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-editor-prefs-'));
   const path = join(dir, '.dashboard-editor-preferences.json');

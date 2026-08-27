@@ -146,10 +146,10 @@ test('V2 persistence envelope remains generic while its frozen runtime registry 
   if (!unknownResult.success) assert.match(unknownResult.error.message, /unknown widget type: future-widget/);
 
   const futureVersion = structuredClone(migrated);
-  futureVersion.devices[0]!.dashboardSections[0] = { type: 'calendar', version: 2, config: { calendarUrls: [] } };
+  futureVersion.devices[0]!.dashboardSections[0] = { type: 'calendar', version: 99, config: { calendarUrls: [] } };
   const versionResult = deviceStoreV2Schema.safeParse(futureVersion);
   assert.equal(versionResult.success, false);
-  if (!versionResult.success) assert.match(versionResult.error.message, /unsupported calendar widget version: 2/);
+  if (!versionResult.success) assert.match(versionResult.error.message, /unsupported calendar widget version: 99/);
 
   const malformed = structuredClone(migrated);
   malformed.devices[0]!.dashboardSections[0] = { type: 'calendar', version: 1, config: { calendarUrls: [], extra: true } };

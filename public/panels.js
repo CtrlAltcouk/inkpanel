@@ -204,12 +204,12 @@ async function renderDetail(root, device, serviceStatus) {
   const dashboardEditor = detailEl.querySelector('#dashboard-editor');
   bindTodoPreviewRefresh(dashboardEditor, root, device.id);
   bindPrinterPreviewRefresh(dashboardEditor, root, device.id);
-  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers);
+  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers, serviceStatus.haCalendars);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers')]);
+  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }, haCalendars] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers'), getJson('/api/home-assistant/calendars').catch(() => ({ supported: false, available: false, calendars: [] }))]);
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers });
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers, haCalendars });
 }

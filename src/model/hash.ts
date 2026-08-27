@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ProfileDashboardData } from './dashboard.ts';
+import type { CalendarEvent, ProfileDashboardData } from './dashboard.ts';
 
 /**
  * Hash only what is visible on the panel.
@@ -54,7 +54,12 @@ export function contentHash(data: ProfileDashboardData): string {
       type: section.type,
       data: section.type === 'todo' && section.data
         ? { items: section.data.items.slice(0, 5) }
-        : section.type === 'printers' ? printerData : section.data,
+        : section.type === 'printers' ? printerData
+        : section.type === 'calendar' && section.data
+          ? Object.fromEntries(Object.entries(section.data).map(([day, events]) => [
+              day, events.map(({ title, start, end, allDay }: CalendarEvent) => ({ title, start, end, allDay })),
+            ]))
+          : section.data,
       // These widgets visibly distinguish an absent configuration ("not set
       // up") from a configured source whose first/live fetch failed
       // ("unavailable"). Health details themselves remain diagnostic-only.
@@ -82,7 +87,7 @@ export function contentHash(data: ProfileDashboardData): string {
       sections: [visibleSection(section)],
     };
   } else {
-    // Keep the established large-panel hash shape byte-for-byte equivalent.
+    // Keep the established large-panel global fields; source metadata stays hidden.
     visible = {
       timezone: data.timezone,
       today: data.today,

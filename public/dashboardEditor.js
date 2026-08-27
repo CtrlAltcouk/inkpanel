@@ -2,6 +2,7 @@ import { esc } from './components.js';
 import { renderStationPicker } from './stationPicker.js';
 import { renderBusStopPicker } from './busStopPicker.js';
 import { getJson, sendJson } from './api.js';
+import { calendarControlsHtml, rememberCalendarConfig, switchCalendarProvider } from './calendarEditor.js';
 
 const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'printers', 'todo', 'bins', 'empty'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
@@ -29,6 +30,7 @@ function defaultConfig(type) {
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function widgetsByType(widgets = []) { return Object.fromEntries(widgets.map((widget) => [widget.type, clone(widget.config)])); }
+function versionsByType(widgets = []) { return Object.fromEntries(widgets.map((widget) => [widget.type, widget.version])); }
 
 export function normalizePrinterUrlValue(value) {
   const trimmed = value.trim();
@@ -39,11 +41,16 @@ export function normalizePrinterUrlValue(value) {
 }
 
 export function createDashboardDraftState(sections, remembered = {}) {
+  // Apply identical precedence to config and version. Controls edit config;
+  // generic serializers retain the version belonging to that draft.
   const shared = widgetsByType(remembered.shared ?? []);
   const rememberedSlots = remembered.slots ?? [[], [], [], []];
   return sections.map((widget, index) => ({
     type: widget.type,
     drafts: { ...clone(shared), ...widgetsByType(rememberedSlots[index] ?? []), [widget.type]: clone(widget.config) },
+    versions: { ...versionsByType(remembered.shared), ...versionsByType(rememberedSlots[index]), [widget.type]: widget.version },
+    calendarProviderDrafts: Object.fromEntries([...(remembered.shared ?? []), ...(rememberedSlots[index] ?? []), widget]
+      .filter((entry) => entry.type === 'calendar').map((entry) => [entry.config.provider ?? 'ical', clone(entry.config)])),
   }));
 }
 
@@ -52,10 +59,11 @@ export function switchDashboardDraft(slots, index, nextType, currentConfig) {
   slot.drafts[slot.type] = clone(currentConfig);
   slot.type = nextType;
   slot.drafts[nextType] ??= defaultConfig(nextType);
+  slot.versions[nextType] ??= 1;
 }
 
 export function serialiseDashboardDraftState(slots) {
-  return slots.map((slot) => ({ type: slot.type, version: 1, config: clone(slot.drafts[slot.type]) }));
+  return slots.map((slot) => ({ type: slot.type, version: slot.versions[slot.type], config: clone(slot.drafts[slot.type]) }));
 }
 
 export function stationPickerOptions(deviceId, sectionIndex, endpoint, label, value) {
@@ -65,7 +73,7 @@ export function stationPickerOptions(deviceId, sectionIndex, endpoint, label, va
 function rememberCell(cell, slot, type = slot.type) {
   if (!cell) return;
   if (type === 'calendar') {
-    slot.drafts[type] = { calendarUrls: cell.querySelector('[data-calendar-urls]').value.split('\n').map((v) => v.trim()).filter(Boolean) };
+    slot.drafts[type] = rememberCalendarConfig(cell, slot);
   } else if (type === 'trains') {
     slot.drafts[type] = {
       originCrs: cell.querySelector('[data-station="origin"]')?.dataset.crs ?? '',
@@ -158,8 +166,8 @@ function printerControlsHtml(config, printers, isMini) {
     <p class="error" data-printer-error hidden></p></div>`;
 }
 
-function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini) {
-  if (type === 'calendar') return `<label>Secret iCal URLs, one per line</label><textarea data-calendar-urls rows="3" placeholder="https://calendar.example/private.ics">${esc((config.calendarUrls ?? []).join('\n'))}</textarea><p class="meta">For Google Calendar, <a href="https://support.google.com/calendar/answer/37648?hl=en-GB" target="_blank" rel="noreferrer">find your Secret address in iCal format</a>. Treat that URL like a password.</p>`;
+function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini, haCalendars) {
+  if (type === 'calendar') return calendarControlsHtml(config, haCalendars);
   if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
   if (type === 'empty') return '<p class="meta">This dashboard section will be blank.</p>';
@@ -171,13 +179,13 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
-export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false) {
+export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false, haCalendars = {}) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini)}</div>`;
+  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini, haCalendars)}</div>`;
 }
 
 function summary(type, config, locationLabel, todoLists = []) {
-  if (type === 'calendar') return config.calendarUrls?.length ? `${config.calendarUrls.length} calendar${config.calendarUrls.length === 1 ? '' : 's'} connected` : 'Not set up';
+  if (type === 'calendar') { const count = (config.entityIds ?? config.calendarUrls ?? []).length; return count ? `${count} calendar${count === 1 ? '' : 's'} connected` : 'Not set up'; }
   if (type === 'weather') return locationLabel || 'Uses panel location';
   if (type === 'trains') return config.originCrs && config.destinationCrs ? `${config.originCrs} → ${config.destinationCrs}` : 'Not set up';
   if (type === 'bus') return config.stopLabel || config.stopCode || 'Not set up';
@@ -421,7 +429,7 @@ function renderEditor(root) {
     { configured: state.trainApiConfigured, keyDraft: state.trainApiKeyDraft },
     { configured: state.busApiConfigured, appIdDraft: state.busAppIdDraft, appKeyDraft: state.busAppKeyDraft },
     { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft },
-    slotPosition(state, index), state.todoLists, state.printers, state.isMini);
+    slotPosition(state, index), state.todoLists, state.printers, state.isMini, state.haCalendars);
 
   panel.querySelector('[data-widget-type]').addEventListener('change', (event) => {
     const previous = slot.type;
@@ -429,7 +437,21 @@ function renderEditor(root) {
     switchDashboardDraft(state.slots, index, event.target.value, slot.drafts[previous]);
     renderLayout(root); renderEditor(root);
   });
-  if (slot.type === 'trains') {
+  if (slot.type === 'calendar') {
+    panel.querySelector('[data-calendar-provider]')?.addEventListener('change', (event) => {
+      rememberCell(panel, slot);
+      switchCalendarProvider(slot, event.target.value);
+      renderLayout(root); renderEditor(root); markDashboardChanged(root);
+    });
+    panel.querySelectorAll('[data-ha-calendar]').forEach((input) => input.addEventListener('change', () => {
+      const tooMany = panel.querySelectorAll('[data-ha-calendar]:checked').length > 10;
+      if (tooMany) input.checked = false;
+      const error = panel.querySelector('[data-calendar-error]');
+      error.textContent = tooMany ? 'Select at most 10 calendars.' : '';
+      error.hidden = !tooMany;
+      rememberCell(panel, slot); renderLayout(root);
+    }));
+  } else if (slot.type === 'trains') {
     panel.querySelector('[data-train-api-key]').addEventListener('input', (e) => { state.trainApiKeyDraft = e.currentTarget.value; });
     renderStationPicker(panel.querySelector('[data-station="origin"]'), stationPickerOptions(state.deviceId, index, 'origin', 'From', config.originCrs ?? ''));
     renderStationPicker(panel.querySelector('[data-station="destination"]'), stationPickerOptions(state.deviceId, index, 'destination', 'To', config.destinationCrs ?? ''));
@@ -446,10 +468,10 @@ function renderEditor(root) {
   }
 }
 
-export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = []) {
+export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = [], haCalendars = {}) {
   const slots = createDashboardDraftState(device.dashboardSections, remembered);
   const isMini = device.panelProfileId === MINI_PROFILE;
-  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers) });
+  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers), haCalendars });
   root.innerHTML = `<div class="dashboard-composer ${isMini ? 'dashboard-composer--single' : ''}"><div class="dashboard-layout-map ${isMini ? 'dashboard-layout-map--single' : ''}" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>`;
   renderLayout(root); renderEditor(root);
 }
@@ -465,7 +487,11 @@ export function collectRememberedDashboardSettings(root) {
   const state = stateByRoot.get(root);
   if (!state) throw new Error('dashboard editor is not initialised');
   syncCurrent(root, state);
-  return { slots: state.slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({ type, version: 1, config: clone(config) }))) };
+  return serialiseRememberedDashboardDrafts(state.slots);
+}
+
+export function serialiseRememberedDashboardDrafts(slots) {
+  return { slots: slots.map((slot) => Object.entries(slot.drafts).map(([type, config]) => ({ type, version: slot.versions[type], config: clone(config) }))) };
 }
 
 export function collectTrainApiKey(root) {

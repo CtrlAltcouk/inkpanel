@@ -1,4 +1,17 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
+import {
+  calendarEntityIdSchema, homeAssistantCalendarListSchema, homeAssistantCalendarEventsSchema,
+  type HomeAssistantCalendarEvent,
+} from './calendarSchemas.ts';
+
+export type HomeAssistantResult<T> = { available: true; data: T } | { available: false; error: string };
+export interface HomeAssistantCalendarDiscovery {
+  supported: boolean;
+  available: boolean;
+  calendars: Array<{ entityId: string; name: string }>;
+  error: string | null;
+}
 
 export type HomeAssistantMode = 'standalone' | 'home-assistant-app';
 
@@ -83,38 +96,72 @@ export class HomeAssistantClient {
     this.timeoutMs = options.timeoutMs ?? 5000;
   }
 
-  async status(externalSignal?: AbortSignal): Promise<HomeAssistantStatus> {
-    if (!this.enabled) return standaloneStatus();
-    if (!this.baseUrl) return unavailable(this.configurationError ?? 'Home Assistant configuration is invalid');
-    if (!this.token) return unavailable('Supervisor token is unavailable');
+  /** Instance identity only; never credentials. A disabled/unconfigured client cannot replay HA cache. */
+  get calendarCacheScope(): string | null {
+    return this.enabled && this.baseUrl && this.token
+      ? createHash('sha256').update(this.baseUrl.href).digest('hex') : null;
+  }
 
+  private async request<T>(path: string, schema: z.ZodType<T>, label: string, externalSignal?: AbortSignal): Promise<HomeAssistantResult<T>> {
+    if (!this.enabled) return { available: false, error: 'Home Assistant is not enabled' };
+    if (!this.baseUrl) return { available: false, error: this.configurationError ?? 'Home Assistant configuration is invalid' };
+    if (!this.token) return { available: false, error: 'Supervisor token is unavailable' };
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = externalSignal ? AbortSignal.any([externalSignal, timeout]) : timeout;
     try {
-      const response = await this.fetchImpl(new URL('config', this.baseUrl), {
+      const response = await this.fetchImpl(new URL(path, this.baseUrl), {
         method: 'GET',
+        redirect: 'error',
         headers: {
           accept: 'application/json',
           authorization: `Bearer ${this.token}`,
         },
         signal,
       });
-      if (!response.ok) return unavailable(`Home Assistant request failed (${response.status})`);
-      const parsed = configSchema.safeParse(await response.json());
-      if (!parsed.success) return unavailable('Home Assistant returned an invalid config response');
-      return {
-        available: true,
-        mode: 'home-assistant-app',
-        version: parsed.data.version,
-        locationName: parsed.data.location_name,
-        timeZone: parsed.data.time_zone,
-        error: null,
-      };
-    } catch (err) {
-      if (externalSignal?.aborted) return unavailable('Home Assistant request was cancelled');
-      if (timeout.aborted) return unavailable('Home Assistant request timed out');
-      return unavailable('Home Assistant is unavailable');
+      if (!response.ok) return { available: false, error: `Home Assistant request failed (${response.status})` };
+      const parsed = schema.safeParse(await response.json());
+      if (!parsed.success) return { available: false, error: `Home Assistant returned an invalid ${label} response` };
+      return { available: true, data: parsed.data };
+    } catch {
+      if (externalSignal?.aborted) return { available: false, error: 'Home Assistant request was cancelled' };
+      if (timeout.aborted) return { available: false, error: 'Home Assistant request timed out' };
+      return { available: false, error: 'Home Assistant is unavailable' };
     }
+  }
+
+  async status(externalSignal?: AbortSignal): Promise<HomeAssistantStatus> {
+    if (!this.enabled) return standaloneStatus();
+    const result = await this.request('config', configSchema, 'config', externalSignal);
+    if (!result.available) return unavailable(result.error);
+    return {
+      available: true, mode: 'home-assistant-app', version: result.data.version,
+      locationName: result.data.location_name, timeZone: result.data.time_zone, error: null,
+    };
+  }
+
+  async listCalendars(signal?: AbortSignal): Promise<HomeAssistantCalendarDiscovery> {
+    const result = await this.request('calendars', homeAssistantCalendarListSchema, 'calendars', signal);
+    return {
+      supported: this.enabled, available: result.available,
+      calendars: result.available
+        ? [...new Map(result.data.map((calendar) => [calendar.entity_id, {
+            entityId: calendar.entity_id, name: calendar.name,
+          }])).values()].sort((a, b) => a.name.localeCompare(b.name) || a.entityId.localeCompare(b.entityId))
+        : [],
+      error: result.available || !this.enabled ? null : result.error,
+    };
+  }
+
+  async getCalendarEvents(entityId: string, start: string, end: string, signal?: AbortSignal): Promise<HomeAssistantResult<HomeAssistantCalendarEvent[]>> {
+    if (!calendarEntityIdSchema.safeParse(entityId).success) {
+      return { available: false, error: 'invalid Home Assistant calendar entity ID' };
+    }
+    const timestamps = z.iso.datetime({ offset: true });
+    if (!timestamps.safeParse(start).success || !timestamps.safeParse(end).success || Date.parse(end) <= Date.parse(start)) {
+      return { available: false, error: 'invalid Home Assistant calendar time range' };
+    }
+    const query = new URLSearchParams({ start, end });
+    return this.request(`calendars/${encodeURIComponent(entityId)}?${query}`, homeAssistantCalendarEventsSchema, 'calendar events', signal);
   }
 }
 

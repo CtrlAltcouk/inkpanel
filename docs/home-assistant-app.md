@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: Phase 1 architecture decision for the `Home-Assistant` branch.
+Status: HA-1 complete and validated on real hardware. HA-2 implemented in `0.1.0-ha.5`, awaiting real-world validation on the `Home-Assistant` branch.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -102,7 +102,7 @@ V1 should prefer simple HTTP snapshot reads because InkPanel renders on demand a
 
 ## Provider roadmap
 
-### Phase HA-1 — App/runtime foundation
+### Phase HA-1 — App/runtime foundation (complete)
 
 - Home Assistant repository metadata and App metadata.
 - `/data` persistence.
@@ -112,18 +112,45 @@ V1 should prefer simple HTTP snapshot reads because InkPanel renders on demand a
 - authenticated health/status diagnostics in Settings.
 - CI validation for standalone mode and Home Assistant mode.
 
-No existing widget should change source in this phase.
+Validated on a real Home Assistant installation: Ingress and authenticated LAN Studio, Supervisor API, direct HTTPS WebFlash, full-size/Mini firmware flashing and enrolment, and Home Assistant-owned updates. Standalone remains independent.
 
-### Phase HA-2 — Home Assistant Calendar
+### Phase HA-2 — Home Assistant Calendar (implemented; awaiting real-world validation)
 
 Extend Calendar configuration with a provider choice:
 
 - existing iCal URLs;
 - Home Assistant calendar entity/entities.
 
-Home Assistant mode should discover `calendar.*` entities and read events using Home Assistant's calendar API. The existing normalized InkPanel Calendar data/rendering should be reused where possible so selecting HA does not create a second visual design.
+Studio discovers `calendar.*` entities using authenticated `/api/home-assistant/calendars`. Only entity IDs, friendly names, support/availability and safe errors reach the browser. Select up to ten calendars in the Calendar card and click Save changes. Missing saved IDs remain selected and are labeled missing/unavailable. Standalone exposes only the iCal choice; no long-lived token is required in the App.
 
 Existing iCal behaviour remains unchanged.
+
+#### Versioning and remembered drafts
+
+Calendar V1 remains exactly `{ type: "calendar", version: 1, config: { calendarUrls: [...] } }`. No DeviceStore migration runs. V1 and V2 iCal both use the existing `runCalendars()` path, including its SSRF protections and recurrence expansion.
+
+Calendar V2 uses a strict provider union:
+
+```json
+{ "type": "calendar", "version": 2, "config": { "provider": "ical", "calendarUrls": ["https://example.com/feed.ics"] } }
+{ "type": "calendar", "version": 2, "config": { "provider": "home-assistant", "entityIds": ["calendar.family", "calendar.work"] } }
+```
+
+Provider fields cannot be mixed. IDs must match `calendar.[a-z0-9_]+`, duplicates are rejected and both lists have a maximum of ten. Studio preserves each widget's version with its configuration: loading V1 or saving unrelated settings never upgrades it. Explicit provider changes produce V2 and keep V2 thereafter. Active > slot > shared > default precedence is unchanged; provider-specific drafts are retained while switching in the editor. Empty provider selections do not replace a useful shared preference. Saved preferences contain IDs/URLs, never Supervisor credentials.
+
+#### Client, dates and normalization
+
+The shared server-only `HomeAssistantClient` calls relative `calendars` and `calendars/<encoded entity ID>` paths under the existing `/core/api/` base, using its existing bearer token and timeout handling. IDs are revalidated before requests; redirects are refused and API JSON is runtime-validated. Unknown event attributes, description and location are discarded. Home Assistant owns recurrence expansion; InkPanel does not expand RRULEs for this provider. The endpoints follow the [official HA REST calendar API](https://developers.home-assistant.io/docs/api/rest/#get-apicalendars).
+
+A bounded four-UTC-day envelope brackets today and tomorrow in the panel's timezone, including extreme UTC offsets and DST transitions. Timed events are classified by their panel-local start date, matching the existing iCal display semantics. Date-only events use their authored dates directly and span each selected date before their exclusive end; they never shift through UTC conversion. The provider returns the existing `CalendarData`/`CalendarEvent` contract. Titles are trimmed with `(no title)` fallback; missing/invalid UIDs get a deterministic entity/start/end/title digest. Stable sorting removes API-order changes. UIDs and unrelated HA metadata do not affect frame hashes.
+
+#### Cache and failure isolation
+
+Selected calendars are fetched concurrently and independently through `SourceCache`, source ID `home-assistant-calendar`. Each key includes the device, a non-secret digest of the normalized HA API base (instance), entity ID and bounded query window. App `/data` separates installations. No token is included in the key or data. Changing instance endpoint, entity, device or date window cannot reuse a different logical source's data. A disabled/unconfigured HA client cannot replay HA cache.
+
+Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
+
+The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.5` for linux/amd64 and linux/arm64.
 
 ### Phase HA-3 — Home Assistant To Do
 

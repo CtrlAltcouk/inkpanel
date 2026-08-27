@@ -18,6 +18,7 @@ import { panelProfileIdV3Schema, timezoneSchema } from '../devices/schema.ts';
 import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { PrinterConnectionStore } from '../printers/store.ts';
+import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -40,10 +41,17 @@ const octopusTariffCodeInputSchema = z
     'Octopus Agile tariff code must look like E-1R-AGILE-24-10-01-C',
   );
 
-const dashboardSectionInputSchema = z.discriminatedUnion('type', [
+const dashboardSectionInputSchema = z.union([
   z.strictObject({
     type: z.literal('calendar'), version: z.literal(1),
     config: z.strictObject({ calendarUrls: z.array(calendarUrlInputSchema).max(10) }),
+  }),
+  z.strictObject({
+    type: z.literal('calendar'), version: z.literal(2),
+    config: z.discriminatedUnion('provider', [
+      z.strictObject({ provider: z.literal('ical'), calendarUrls: z.array(calendarUrlInputSchema).max(10) }),
+      z.strictObject({ provider: z.literal('home-assistant'), entityIds: calendarEntityIdsSchema }),
+    ]),
   }),
   z.strictObject({ type: z.literal('weather'), version: z.literal(1), config: z.strictObject({}) }),
   z.strictObject({

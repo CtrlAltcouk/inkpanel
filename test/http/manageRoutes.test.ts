@@ -56,6 +56,31 @@ test('lists devices', async () => {
   });
 });
 
+test('Calendar V1 and V2 save side-by-side without a DeviceStore migration or unrelated rewrite', async () => {
+  await withServer(async (base, store) => {
+    await store.getOrCreate('esp32-ha');
+    const sections = [
+      { type: 'calendar', version: 1, config: { calendarUrls: ['https://legacy.example/feed'] } },
+      { type: 'calendar', version: 2, config: { provider: 'ical', calendarUrls: ['https://new.example/feed'] } },
+      { type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.family', 'calendar.work'] } },
+      { type: 'weather', version: 1, config: {} },
+    ];
+    const save = (body: unknown) => fetch(`${base}/api/devices/esp32-ha`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await save({ dashboardSections: sections })).status, 200);
+    assert.equal((await save({ name: 'Renamed' })).status, 200);
+    assert.deepEqual((await store.get('esp32-ha'))!.dashboardSections, sections);
+    for (const config of [
+      { provider: 'home-assistant', entityIds: ['light.home'] },
+      { provider: 'home-assistant', entityIds: ['calendar.home/../../config'] },
+      { provider: 'home-assistant', entityIds: ['calendar.home', 'calendar.home'] },
+      { provider: 'home-assistant', entityIds: [], calendarUrls: [] },
+      { provider: 'ical', calendarUrls: ['ftp://example.com/feed'] },
+      { provider: 'ical', calendarUrls: ['https://user:pass@example.com/feed'] },
+    ]) assert.equal((await save({ dashboardSections: [{ type: 'calendar', version: 2, config }, ...sections.slice(1)] })).status, 400);
+    assert.deepEqual((await store.get('esp32-ha'))!.dashboardSections, sections);
+  });
+});
+
 test('updates and claims a device', async () => {
   await withServer(async (base, store) => {
     await store.getOrCreate('esp32-1');
