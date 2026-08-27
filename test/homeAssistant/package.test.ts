@@ -11,7 +11,7 @@ test('repository and immediate App metadata parse and describe the HA-1 boundary
   const repository = parse(await readFile(join(root, 'repository.yaml'), 'utf8'));
   const config = parse(await readFile(join(root, 'home-assistant', 'config.yaml'), 'utf8'));
   assert.equal(repository.url, 'https://github.com/CtrlAltcouk/inkpanel');
-  assert.equal(config.version, '0.1.0-ha.8');
+  assert.equal(config.version, '0.1.0-ha.9');
   assert.equal(config.image, 'ghcr.io/ctrlaltcouk/inkpanel-home-assistant');
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
   assert.equal(config.ingress, true);
@@ -25,6 +25,20 @@ test('repository and immediate App metadata parse and describe the HA-1 boundary
   assert.equal(config.schema.lan_password, 'password');
 });
 
+test('every App version requires a matching query-only Ingress entry and image version', async () => {
+  const config = parse(await readFile(join(root, 'home-assistant', 'config.yaml'), 'utf8'));
+  const workflow = parse(await readFile(join(root, '.github', 'workflows', 'home-assistant-image.yml'), 'utf8'));
+  assert.equal(config.ingress_entry, `?inkpanel_release=${encodeURIComponent(config.version)}`,
+    'bumping the App version without changing its iframe entry must fail CI');
+  assert.equal(workflow.env.VERSION, config.version);
+  // Supervisor concatenates ingress_entry after /api/hassio_ingress/<token>/.
+  const prefix = 'https://ha.example/api/hassio_ingress/example-token/';
+  const entry = new URL(prefix + config.ingress_entry);
+  assert.equal(entry.pathname, new URL(prefix).pathname);
+  assert.equal(entry.searchParams.get('inkpanel_release'), config.version);
+  assert.equal(entry.hash, '');
+});
+
 test('the dedicated image preserves the Playwright version and /data startup adapter', async () => {
   const dockerfile = await readFile(join(root, 'Dockerfile.home-assistant'), 'utf8');
   const dockerignore = await readFile(join(root, '.dockerignore'), 'utf8');
@@ -33,6 +47,7 @@ test('the dedicated image preserves the Playwright version and /data startup ada
   assert.match(dockerfile, /CMD \["node", "scripts\/home-assistant-start\.mjs"\]/);
   assert.match(dockerfile, /VOLUME \["\/data"\]/);
   assert.match(dockerfile, /io\.hass\.type="app"/);
+  assert.match(dockerfile, /INKPANEL_HA_RELEASE=\$\{BUILD_VERSION\}/);
   assert.doesNotMatch(dockerfile, /io\.hass\.type="addon"/);
   assert.doesNotMatch(dockerfile, /arduino-cli/, 'firmware is compiled before the runtime image build');
   assert.doesNotMatch(dockerignore, /^firmware(?:\/dist)?\/?$/m,
@@ -48,7 +63,7 @@ test('the image workflow builds, verifies and embeds production firmware before 
   assert.match(workflow, /build-image@4de35182/);
   assert.match(workflow, /publish-multi-arch-manifest@4de35182/);
   assert.match(workflow, /\["amd64", "aarch64"\]/);
-  assert.match(workflow, /VERSION: 0\.1\.0-ha\.8/);
+  assert.match(workflow, /process\.env\.INKPANEL_HA_RELEASE !== process\.argv\[1\]/);
   assert.match(workflow, /matrix: \$\{\{ steps\.prepare\.outputs\.matrix \}\}/);
   assert.match(workflow, /runs-on: \$\{\{ matrix\.os \}\}/);
   assert.match(workflow, /registry-prefix: ghcr\.io\/ctrlaltcouk/);

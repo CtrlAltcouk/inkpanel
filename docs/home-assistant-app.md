@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do was implemented in `0.1.0-ha.7`; real-installation testing exposed Studio reliability issues addressed in `0.1.0-ha.8` on the `Home-Assistant` branch. HA-3 is not yet fully validated and requires retesting.
+Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do was implemented in `0.1.0-ha.7`. Real-world ha.8 tests confirmed direct LAN Studio worked but Ingress retained an older document. `0.1.0-ha.9` versions the Ingress entry on the `Home-Assistant` branch. HA-3 is not yet fully validated and requires another real-installation Ingress retest.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,7 +150,7 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.8` for linux/amd64 and linux/arm64.
+The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.9` for linux/amd64 and linux/arm64.
 
 #### First-time panel location defaults (ha.6; validated on real hardware)
 
@@ -197,15 +197,26 @@ Studio uses the existing non-secret `/api/runtime-config` `updateMode` as the au
 
 One preview-URL helper adds a timestamp plus per-page revision on initial open, save/reopen and explicit refresh (including Push and local-content edits). Even two opens within the same millisecond use distinct URLs. The existing `render.png` route still selects the claimed dashboard or enrolment frame and sends `Cache-Control: no-store`. FrameService memoisation, physical frame hashes/ETags and panel polling are unchanged.
 
-#### Real-installation validation for ha.8
+#### ha.9 Ingress entry freshness
 
-1. Upgrade the App to ha.8 and confirm that version in Home Assistant. Close/reopen Studio through Ingress normally, without clearing caches or using Ctrl+F5. Repeat through authenticated LAN Studio. In browser Network tools verify Studio HTML/JS/CSS responses have `Cache-Control: no-store`.
-2. On both full-size and Mini, select To Do and verify **Provider → InkPanel list / Home Assistant** appears. Choose Home Assistant, select a list, save, close/reopen the panel, and verify the saved choice remains.
-3. In browser request-blocking tools temporarily block `*/api/home-assistant/todo-lists` and `*/api/home-assistant/calendars`, leaving runtime-config accessible. Reopen the panel: both provider selectors must remain available and saved IDs must remain visible with unavailable messages. Unblock and reopen to recover discovery.
-4. Open an already-claimed panel without Push and verify the preview immediately shows its dashboard. On an unclaimed test panel, tick **Claimed**, save and return to Dashboard: the enrolment preview must be replaced. Close/reopen it and verify again. Then verify **Push to display** still refreshes the preview.
-5. Verify the first five incomplete To Do items match HA ordering, then complete/add/reorder items in HA and wake the physical panel or reopen its preview. Complete all items and verify ALL DONE. Temporarily make the source unavailable and verify no stale task list is replayed and unrelated widgets remain usable.
-6. Switch to InkPanel list and back, save/reopen, and verify both selections survive. Test local add/edit/complete/reorder/delete and Calendar provider choices. Remove a selected HA entity and verify Studio retains its missing selection until explicitly changed.
-7. Confirm full-size/Mini physical display behaviour, existing location defaults and direct HTTPS WebFlash remain unchanged. HA-3 remains awaiting validation until these real-installation checks pass.
+ha.8's real-installation results isolated the remaining problem: the same running container served correct providers/previews through LAN, while the HA sidebar retained an older Studio document. New response headers cannot replace an already loaded iframe document whose entry URL stays unchanged.
+
+The App now declares `ingress_entry: "?inkpanel_release=0.1.0-ha.9"`. Home Assistant [documents ingress_entry as a string URL entry point](https://developers.home-assistant.io/docs/apps/configuration/). The current [Supervisor implementation appends it to a trailing-slash Ingress prefix](https://github.com/home-assistant/supervisor/blob/main/supervisor/apps/app.py#L587-L595), and [the proxy forwards query parameters](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/ingress.py#L224-L232). The leading slash is deliberately omitted to avoid a doubled slash. The effective iframe URL is `/api/hassio_ingress/<token>/?inkpanel_release=0.1.0-ha.9`.
+
+Each release must change this query alongside `version`; a package invariant test enforces exact equality and checks the image version matches. The changed URL selects a fresh application document after upgrade, while ha.8's `no-store`, disabled ETag/Last-Modified validators and intentional vendor-font caching remain unchanged. No version subdirectory, redirect or browser base-path change is introduced. `appPath()` still uses `location.pathname`, so APIs, previews, Push, pickers, local CRUD, Flash and static/dynamic module imports retain the Ingress prefix without the release query.
+
+HA runtime config now includes `release`, sourced from the existing image `BUILD_VERSION` through `INKPANEL_HA_RELEASE` and shared server dependencies. Both LAN and Ingress report the image's actual build value, never the browser query. Standalone omits this HA-only diagnostic; unpackaged HA runs without build metadata report null. No credentials or other environment fields are exposed. PR image checks and post-publication checks verify the embedded release matches the release workflow version.
+
+#### Real-installation validation for ha.9
+
+1. Upgrade the App to ha.9 and confirm that version in Home Assistant. Navigate away from InkPanel, then reopen it from the HA sidebar normally: do not clear caches, use Ctrl+F5 or reinstall. In browser developer tools inspect the InkPanel iframe's document URL (not the outer HA page URL): it must end with `/?inkpanel_release=0.1.0-ha.9` under the existing Ingress prefix. Verify the document and Studio JS/CSS responses have `Cache-Control: no-store`.
+2. Inspect `/api/runtime-config` in the iframe's Network requests: `updateMode` must be `home-assistant` and `release` must be `0.1.0-ha.9`. Compare with `http://<HA-IP>:8080/api/runtime-config`; both must report the same release. The browser release query is only an entry cache key, not the diagnostic source.
+3. On both full-size and Mini, select To Do and verify **Provider → InkPanel list / Home Assistant** appears. Choose Home Assistant, select a list, save, close/reopen the panel, and verify the saved choice remains. Repeat with Calendar's iCal/Home Assistant selector.
+4. In browser request-blocking tools temporarily block `*/api/home-assistant/todo-lists` and `*/api/home-assistant/calendars`, leaving runtime-config accessible. Reopen the panel: both provider selectors must remain available and saved IDs must remain visible with unavailable messages. Unblock and reopen to recover discovery.
+5. Open an already-claimed panel without Push and verify the preview immediately shows its dashboard. On an unclaimed test panel, tick **Claimed**, save and return to Dashboard: the enrolment preview must be replaced. Close/reopen it and verify again. Then verify **Push to display** still refreshes the preview.
+6. Verify the first five incomplete To Do items match HA ordering, then complete/add/reorder items in HA and wake the physical panel or reopen its preview. Complete all items and verify ALL DONE. Temporarily make the source unavailable and verify no stale task list is replayed and unrelated widgets remain usable.
+7. Switch to InkPanel list and back, save/reopen, and verify both selections survive. Test local add/edit/complete/reorder/delete and Calendar provider choices. Remove a selected HA entity and verify Studio retains its missing selection until explicitly changed.
+8. Confirm pickers, printer APIs, full-size/Mini physical display behaviour, existing location defaults and direct HTTPS WebFlash remain unchanged. HA-3 remains awaiting validation until these real-installation checks pass.
 
 Future HA write support (`todo.add_item`, `todo.update_item`, `todo.remove_item`) is a separate milestone. ha.7 exposes none of those actions from Studio.
 

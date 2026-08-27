@@ -1,5 +1,5 @@
 name: InkPanel
-version: 0.1.0-ha.8
+version: 0.1.0-ha.9
 slug: inkpanel
 description: Self-hosted e-paper dashboard server and Studio
 url: https://github.com/CtrlAltcouk/inkpanel
@@ -13,6 +13,8 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
+# Supervisor appends this to its trailing-slash Ingress URL. Keep it query-only.
+ingress_entry: "?inkpanel_release=0.1.0-ha.9"
 panel_icon: mdi:tablet-dashboard
 homeassistant_api: true
 ports:

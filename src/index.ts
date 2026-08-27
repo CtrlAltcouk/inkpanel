@@ -183,6 +183,7 @@ export async function main(): Promise<void> {
     moonrakerClient,
     homeAssistantClient,
     updateMode,
+    homeAssistantRelease: homeAssistantMode ? process.env.INKPANEL_HA_RELEASE : undefined,
     enrolmentDefaults: homeAssistantEnrolmentDefaults(homeAssistantMode, homeAssistantClient),
   };
   const app = createApp({ ...sharedDeps, access: { mode: 'lan' } });

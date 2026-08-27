@@ -21,3 +21,10 @@ test('panel base URL must be a clean LAN origin and LAN password is required', (
   }
   assert.throws(() => runtimeEnvironment({ panel_base_url: 'http://panel.local', lan_password: ' ' }), /lan_password/);
 });
+
+test('the startup adapter preserves the image release for runtime diagnostics', () => {
+  const env = runtimeEnvironment({ panel_base_url: 'http://panel.local:8080', lan_password: 'password' }, {
+    INKPANEL_HA_RELEASE: 'test-image-release',
+  });
+  assert.equal(env.INKPANEL_HA_RELEASE, 'test-image-release');
+});

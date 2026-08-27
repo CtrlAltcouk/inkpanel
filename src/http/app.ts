@@ -71,6 +71,8 @@ export interface AppDeps {
   enrolmentDefaults?: DeviceEnrolmentDefaultsProvider;
   /** Deployment capability shared by runtime UI and mutation routes. Defaults to standalone. */
   updateMode?: UpdateMode;
+  /** Non-secret image BUILD_VERSION, shared by LAN and Ingress diagnostics. */
+  homeAssistantRelease?: string;
   /** Selects the request trust boundary without duplicating application routes. */
   access?: {
     mode: 'lan' | 'home-assistant-ingress';
@@ -167,6 +169,7 @@ export function createApp(deps: AppDeps): express.Express {
       updateMode,
       ...(updateMode === 'home-assistant'
         ? {
+            release: deps.homeAssistantRelease ?? null,
             accessMode: deps.access?.mode === 'home-assistant-ingress'
               ? 'home-assistant-ingress'
               : 'lan',

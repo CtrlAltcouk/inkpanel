@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-ha.9
+
+- Real-world ha.8 testing confirmed that direct LAN Studio worked, while Home Assistant Ingress retained an older Studio document at its unchanged iframe entry URL.
+- Set a release-specific, query-only `ingress_entry` so an App upgrade changes the iframe URL without changing its pathname or API/module base paths. CI enforces that the entry query and image version match the App version on every release.
+- Preserve ha.8's normal Studio `no-store` policy, separate runtime capability/discovery handling and fresh initial/Push previews.
+- Expose the image's non-secret build release in HA runtime config, shared by LAN and Ingress, for easy version comparison.
+- No e-ink renderer/template/CSS, firmware, framebuffer/protocol, profile or DeviceStore/migration changes. HA-3 still awaits real-installation validation through Ingress after this release.
+
 ## 0.1.0-ha.8
 
 - Fix Studio/cache reliability issues discovered during real-installation HA-3 validation; HA-3 is not yet fully validated and needs retesting.

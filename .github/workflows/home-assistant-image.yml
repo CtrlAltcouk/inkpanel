@@ -44,7 +44,7 @@ permissions:
 
 env:
   IMAGE_NAME: inkpanel-home-assistant
-  VERSION: 0.1.0-ha.8
+  VERSION: 0.1.0-ha.9
   ARCHITECTURES: '["amd64", "aarch64"]'
 
 jobs:
@@ -138,6 +138,7 @@ jobs:
         run: |
           expected_hash="$(bash scripts/firmware-input-hash.sh)"
           docker run --rm --entrypoint bash "$IMAGE_REF" /app/scripts/verify-firmware-package.sh /app/firmware/dist "$expected_hash"
+          docker run --rm --entrypoint node "$IMAGE_REF" -e 'if (process.env.INKPANEL_HA_RELEASE !== process.argv[1]) process.exit(1)' '${{ env.VERSION }}'
 
   publish:
     if: github.event_name == 'push'
@@ -173,3 +174,4 @@ jobs:
         run: |
           expected_hash="$(bash scripts/firmware-input-hash.sh)"
           docker run --rm --entrypoint bash "$IMAGE_REF" /app/scripts/verify-firmware-package.sh /app/firmware/dist "$expected_hash"
+          docker run --rm --entrypoint node "$IMAGE_REF" -e 'if (process.env.INKPANEL_HA_RELEASE !== process.argv[1]) process.exit(1)' '${{ env.VERSION }}'

@@ -36,6 +36,7 @@ function app(access: 'lan' | 'trusted-ingress' | 'real-ingress', activeHttps: nu
     firmwareDir: 'unused',
     auth: { password: 'lan-password', secret: randomBytes(32) },
     updateMode: 'home-assistant',
+    homeAssistantRelease: 'test-image-release',
     homeAssistantClient,
     access: access === 'lan'
       ? { mode: 'lan' }
@@ -93,16 +94,18 @@ test('To Do discovery shares LAN/Ingress auth and projects only identities and n
 });
 
 test('HA runtime config exposes only the active direct HTTPS root for WebFlash', async () => {
+  assert.equal((await requestJson(app('trusted-ingress'), '/api/runtime-config?inkpanel_release=not-the-image')).body.release,
+    'test-image-release', 'release diagnostics come from the image, never the browser query');
   assert.deepEqual((await requestJson(app('trusted-ingress'), '/api/runtime-config')).body, {
-    httpsPort: null, updateMode: 'home-assistant',
+    httpsPort: null, updateMode: 'home-assistant', release: 'test-image-release',
     accessMode: 'home-assistant-ingress', webFlashUrl: null,
   });
   assert.deepEqual((await requestJson(app('trusted-ingress', 8443), '/api/runtime-config')).body, {
-    httpsPort: 8443, updateMode: 'home-assistant', accessMode: 'home-assistant-ingress',
+    httpsPort: 8443, updateMode: 'home-assistant', release: 'test-image-release', accessMode: 'home-assistant-ingress',
     webFlashUrl: 'https://192.168.1.20:8443/#flash',
   });
   assert.deepEqual((await requestJson(app('lan', 8443), '/api/runtime-config')).body, {
-    httpsPort: 8443, updateMode: 'home-assistant',
+    httpsPort: 8443, updateMode: 'home-assistant', release: 'test-image-release',
     accessMode: 'lan', webFlashUrl: 'https://192.168.1.20:8443/#flash',
   });
   assert.equal(directWebFlashUrl('http://panel.local:8080/path', 8443), 'https://panel.local:8443/#flash');
