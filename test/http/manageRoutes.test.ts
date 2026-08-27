@@ -244,6 +244,7 @@ test('serves preview HTML and a PNG of the real output', async () => {
 
     const png = await fetch(`${base}/api/devices/esp32-1/render.png`);
     assert.equal(png.headers.get('content-type'), 'image/png');
+    assert.equal(png.headers.get('cache-control'), 'no-store');
     const bytes = Buffer.from(await png.arrayBuffer());
     assert.deepEqual(bytes.subarray(0, 4), Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'PNG magic');
   });

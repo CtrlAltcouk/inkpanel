@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do is implemented in `0.1.0-ha.7` and awaits real-installation validation on the `Home-Assistant` branch.
+Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do was implemented in `0.1.0-ha.7`; real-installation testing exposed Studio reliability issues addressed in `0.1.0-ha.8` on the `Home-Assistant` branch. HA-3 is not yet fully validated and requires retesting.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,7 +150,7 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.7` for linux/amd64 and linux/arm64.
+The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.8` for linux/amd64 and linux/arm64.
 
 #### First-time panel location defaults (ha.6; validated on real hardware)
 
@@ -189,14 +189,23 @@ Calendar and To Do share provider draft handling. Active widget drafts retain th
 
 Missing or removed HA entities are shown as missing/unavailable without clearing the saved ID. Syntax is sufficient for saving HA config; discovery availability is never required to read/save an existing panel. Local V1/V2 selections still require a real TodoStore list when saved.
 
-#### Real-installation validation for ha.7
+#### ha.8 Studio reliability
 
-1. Upgrade the App to ha.7 and open Studio through Ingress.
-2. Select To Do → Home Assistant, choose a list, and save on a full-size panel and a Mini.
-3. Verify the first five incomplete items match HA ordering, then complete/add/reorder items in HA and wake the panel or refresh its preview.
-4. Complete all items and verify ALL DONE. Temporarily make the source unavailable and verify no stale task list is replayed and unrelated widgets remain usable.
-5. Switch to InkPanel list and back, save/reopen, and verify both selections survive. Existing local CRUD and Calendar provider choices should remain intact.
-6. Remove a selected HA entity and verify Studio retains its missing selection until explicitly changed.
+Stable-URL Studio HTML, JS, CSS and dynamic modules now use `Cache-Control: no-store` with asset validators disabled. Vendor fonts retain their intentional immutable policy. The same static serving policy applies to Ingress and LAN; WebFlash/module paths are unchanged.
+
+Studio uses the existing non-secret `/api/runtime-config` `updateMode` as the authoritative HA capability signal, rather than treating a failed discovery request as unsupported. Discovery supplies availability and choices. Calendar and To Do selectors stay enabled in App mode during discovery failure, show their existing unavailable messages and retain saved IDs. Standalone keeps HA providers unavailable. A failed runtime capability read reports a page error rather than silently downgrading support. No new version registry or credentials are exposed.
+
+One preview-URL helper adds a timestamp plus per-page revision on initial open, save/reopen and explicit refresh (including Push and local-content edits). Even two opens within the same millisecond use distinct URLs. The existing `render.png` route still selects the claimed dashboard or enrolment frame and sends `Cache-Control: no-store`. FrameService memoisation, physical frame hashes/ETags and panel polling are unchanged.
+
+#### Real-installation validation for ha.8
+
+1. Upgrade the App to ha.8 and confirm that version in Home Assistant. Close/reopen Studio through Ingress normally, without clearing caches or using Ctrl+F5. Repeat through authenticated LAN Studio. In browser Network tools verify Studio HTML/JS/CSS responses have `Cache-Control: no-store`.
+2. On both full-size and Mini, select To Do and verify **Provider → InkPanel list / Home Assistant** appears. Choose Home Assistant, select a list, save, close/reopen the panel, and verify the saved choice remains.
+3. In browser request-blocking tools temporarily block `*/api/home-assistant/todo-lists` and `*/api/home-assistant/calendars`, leaving runtime-config accessible. Reopen the panel: both provider selectors must remain available and saved IDs must remain visible with unavailable messages. Unblock and reopen to recover discovery.
+4. Open an already-claimed panel without Push and verify the preview immediately shows its dashboard. On an unclaimed test panel, tick **Claimed**, save and return to Dashboard: the enrolment preview must be replaced. Close/reopen it and verify again. Then verify **Push to display** still refreshes the preview.
+5. Verify the first five incomplete To Do items match HA ordering, then complete/add/reorder items in HA and wake the physical panel or reopen its preview. Complete all items and verify ALL DONE. Temporarily make the source unavailable and verify no stale task list is replayed and unrelated widgets remain usable.
+6. Switch to InkPanel list and back, save/reopen, and verify both selections survive. Test local add/edit/complete/reorder/delete and Calendar provider choices. Remove a selected HA entity and verify Studio retains its missing selection until explicitly changed.
+7. Confirm full-size/Mini physical display behaviour, existing location defaults and direct HTTPS WebFlash remain unchanged. HA-3 remains awaiting validation until these real-installation checks pass.
 
 Future HA write support (`todo.add_item`, `todo.update_item`, `todo.remove_item`) is a separate milestone. ha.7 exposes none of those actions from Studio.
 

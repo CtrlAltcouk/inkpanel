@@ -251,7 +251,13 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/vendor/fonts', express.static(fontDir('@fontsource/dela-gothic-one'), fontOptions));
   app.use('/vendor/fonts', express.static(fontDir('@fontsource/inter'), fontOptions));
 
-  app.use(express.static(publicDir));
+  // Studio modules keep stable URLs across App upgrades, including Ingress.
+  // Do not let old HTML/JS/CSS (or their validators) survive a release change.
+  app.use(express.static(publicDir, {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); },
+  }));
 
   return app;
 }

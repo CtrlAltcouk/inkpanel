@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-ha.8
+
+- Fix Studio/cache reliability issues discovered during real-installation HA-3 validation; HA-3 is not yet fully validated and needs retesting.
+- Serve normal Studio assets with `Cache-Control: no-store`, without stale asset validators; keep intentional immutable vendor-font caching.
+- Determine Calendar/To Do provider support from runtime deployment mode, independently of discovery availability. Temporary discovery failures keep the HA provider visible and saved entities intact.
+- Use fresh preview URLs on initial open, save/reopen and Push so a claimed panel does not reuse an old enrolment preview. Keep server frame memoisation and preview `no-store` behaviour unchanged.
+- No e-ink renderer/template/CSS, firmware, framebuffer/protocol, profile, DeviceStore schema or migration changes.
+
 ## 0.1.0-ha.7
 
 - Add read-only Home Assistant To Do discovery and incomplete-item fetching through the server-only Supervisor client.

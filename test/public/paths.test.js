@@ -25,7 +25,8 @@ test('API, preview, and login navigation all use the central path helper', async
   const login = await readFile(`${root}login.html`, 'utf8');
   assert.match(api, /fetch\(appPath\(path\)/);
   assert.match(api, /location\.href = appPath\('\/login\.html'\)/);
-  assert.match(panels, /appPath\(`\/api\/devices\/\$\{encodeURIComponent\(device\.id\)\}\/render\.png`\)/);
+  assert.match(panels, /src="\$\{panelPreviewUrl\(device\.id\)\}"/);
+  assert.match(panels, /img\.src = panelPreviewUrl\(deviceId\)/);
   assert.match(panels, /appPath\(`\/api\/devices\/\$\{encodeURIComponent\(deviceId\)\}\/render\.png\?t=/);
   assert.match(login, /fetch\(appPath\('\/api\/auth\/login'\)/);
   assert.match(login, /location\.href = appPath\('\/'\)/);
