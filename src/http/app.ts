@@ -10,7 +10,7 @@ import type { GoogleMapsCredentialStore } from '../sources/googleMapsCredentials
 import type { RuntimeState } from '../runtimeConfig.ts';
 import { createAuth, type AuthOptions } from './auth.ts';
 import { deviceRoutes } from './deviceRoutes.ts';
-import type { DeviceEnrolmentLimiter } from './deviceEnrolment.ts';
+import type { DeviceEnrolmentLimiter, DeviceEnrolmentDefaultsProvider } from './deviceEnrolment.ts';
 import { editorPreferencesRoutes } from './editorPreferencesRoutes.ts';
 import { firmwareRoutes } from './firmwareRoutes.ts';
 import { manageRoutes } from './manageRoutes.ts';
@@ -67,6 +67,8 @@ export interface AppDeps {
   moonrakerClient?: MoonrakerClient;
   /** Shared Supervisor API client. Standalone tests/embedders may omit it. */
   homeAssistantClient?: HomeAssistantClient;
+  /** First-enrolment defaults supplied by the deployment, never used for known panels. */
+  enrolmentDefaults?: DeviceEnrolmentDefaultsProvider;
   /** Deployment capability shared by runtime UI and mutation routes. Defaults to standalone. */
   updateMode?: UpdateMode;
   /** Selects the request trust boundary without duplicating application routes. */
@@ -196,6 +198,7 @@ export function createApp(deps: AppDeps): express.Express {
     deps.frames,
     deps.publicBaseUrl,
     deps.enrolmentLimiter,
+    deps.enrolmentDefaults,
   ));
   app.use('/api', manageRoutes(
     deps.store,

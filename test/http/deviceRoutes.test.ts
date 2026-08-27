@@ -8,6 +8,9 @@ import { createApp } from '../../src/http/app.ts';
 import { DeviceStore, DeviceStoreError } from '../../src/devices/store.ts';
 import type { FrameService } from '../../src/render/frameService.ts';
 import { DeviceEnrolmentLimiter } from '../../src/http/deviceEnrolment.ts';
+import { HomeAssistantClient } from '../../src/homeAssistant/client.ts';
+import { homeAssistantEnrolmentDefaults } from '../../src/homeAssistant/enrolment.ts';
+import { currentDeviceRecordSchema } from '../../src/devices/schema.ts';
 
 const ETAG = 'a'.repeat(32);
 
@@ -34,6 +37,8 @@ async function withServer(
     limiter?: DeviceEnrolmentLimiter;
     trustProxy?: boolean | number | string;
     password?: string | null;
+    homeAssistantClient?: HomeAssistantClient;
+    homeAssistantMode?: boolean;
     prepare?: (store: DeviceStore, configPath: string) => Promise<void>;
   } = {},
 ) {
@@ -48,6 +53,11 @@ async function withServer(
     auth: { password: options.password ?? null, secret: randomBytes(32) },
     trustProxy: options.trustProxy,
     enrolmentLimiter: options.limiter,
+    homeAssistantClient: options.homeAssistantClient,
+    enrolmentDefaults: homeAssistantEnrolmentDefaults(
+      options.homeAssistantMode ?? false,
+      options.homeAssistantClient ?? new HomeAssistantClient({ enabled: false }),
+    ),
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -80,6 +90,119 @@ test('serves an enrolment frame for an unknown device', async () => {
     assert.equal((await res.arrayBuffer()).byteLength, 48000);
     assert.equal((await store.get('esp32-a1b2c3'))?.claimed, false, 'auto-registered as unclaimed');
   });
+});
+
+const haConfig = {
+  version: '2026.8.1', latitude: -36.85, longitude: 174.76,
+  time_zone: 'Pacific/Auckland', location_name: 'My HA home',
+  supervisor_token: 'never-persist-supervisor-token',
+};
+const haLocation = {
+  latitude: haConfig.latitude, longitude: haConfig.longitude,
+  timezone: haConfig.time_zone, locationLabel: haConfig.location_name,
+};
+
+test('HA first enrolment seeds full-size and Mini location without credentials or profile changes', async () => {
+  let requests = 0;
+  const homeAssistantClient = new HomeAssistantClient({
+    enabled: true, token: haConfig.supervisor_token,
+    fetchImpl: async () => { requests += 1; return Response.json(haConfig); },
+  });
+  await withServer(async (base, store, configPath) => {
+    for (const [id, profile, slots] of [
+      ['esp32-000001', 'wft0583-800x480-mono', 4],
+      ['esp32-000002', 'ssd1681-200x200-mono', 1],
+    ] as const) {
+      const res = await fetch(`${base}/api/devices/${id}/frame`, {
+        headers: { 'X-InkPanel-Profile': profile },
+      });
+      assert.equal(res.status, 200);
+      assert.doesNotMatch(await res.text(), /never-persist-supervisor-token/);
+      assert.doesNotMatch(JSON.stringify([...res.headers]), /never-persist-supervisor-token/);
+      const device = currentDeviceRecordSchema.parse(await store.get(id));
+      for (const key of ['latitude', 'longitude', 'timezone', 'locationLabel'] as const) {
+        assert.equal(device[key], haLocation[key]);
+      }
+      assert.equal(device.panelProfileId, profile);
+      assert.equal(device.dashboardSections.length, slots);
+    }
+    assert.equal(requests, 2);
+    assert.doesNotMatch(await readFile(configPath, 'utf8'), /supervisor_token|never-persist-supervisor-token/);
+  }, { homeAssistantClient, homeAssistantMode: true });
+});
+
+test('known HA panels preserve manual location and work without another HA request', async () => {
+  let requests = 0;
+  let config = haConfig;
+  let offline = false;
+  const homeAssistantClient = new HomeAssistantClient({
+    enabled: true, token: haConfig.supervisor_token,
+    fetchImpl: async () => {
+      requests += 1;
+      if (offline) throw new Error(haConfig.supervisor_token);
+      return Response.json(config);
+    },
+  });
+  await withServer(async (base, store) => {
+    const url = `${base}/api/devices/esp32-000001/frame`;
+    assert.equal((await fetch(url)).status, 200);
+    const manual = { latitude: 40.71, longitude: -74, timezone: 'America/New_York', locationLabel: 'Office' };
+    await store.update('esp32-000001', { ...manual, claimed: true });
+    config = { ...haConfig, latitude: 48.85, longitude: 2.35, time_zone: 'Europe/Paris' };
+    assert.equal((await fetch(url)).status, 200);
+    offline = true;
+    assert.equal((await fetch(url)).status, 200);
+    assert.equal(requests, 1, 'known devices must not fetch installation config');
+    const device = (await store.get('esp32-000001'))!;
+    for (const key of ['latitude', 'longitude', 'timezone', 'locationLabel'] as const) {
+      assert.equal(device[key], manual[key]);
+    }
+  }, { homeAssistantClient, homeAssistantMode: true });
+});
+
+test('failed HA first enrolment is retryable, persists nothing and refunds capacity', async () => {
+  for (const failure of ['http', 'network', 'malformed'] as const) {
+    let recovered = false;
+    const homeAssistantClient = new HomeAssistantClient({
+      enabled: true, token: haConfig.supervisor_token,
+      fetchImpl: async () => {
+        if (recovered) return Response.json(haConfig);
+        if (failure === 'network') throw new Error(haConfig.supervisor_token);
+        if (failure === 'http') return new Response(haConfig.supervisor_token, { status: 503 });
+        return Response.json({ ...haConfig, latitude: 999 });
+      },
+    });
+    await withServer(async (base, store, configPath) => {
+      const url = `${base}/api/devices/esp32-000001/frame`;
+      const res = await fetch(url);
+      assert.equal(res.status, 503, failure);
+      assert.equal(res.headers.get('retry-after'), '300');
+      assert.equal(res.headers.get('x-next-wake-seconds'), '300');
+      assert.deepEqual(await res.json(), { error: 'device enrolment defaults temporarily unavailable' });
+      assert.deepEqual(await store.list(), []);
+      await assert.rejects(stat(configPath), { code: 'ENOENT' });
+      recovered = true;
+      assert.equal((await fetch(url)).status, 200);
+      assert.equal((await store.get('esp32-000001'))?.latitude, haLocation.latitude);
+    }, {
+      homeAssistantClient, homeAssistantMode: true,
+      limiter: new DeviceEnrolmentLimiter({ perIpLimit: 1, globalLimit: 1 }),
+    });
+  }
+});
+
+test('standalone enrolment retains historical location defaults and never calls HA', async () => {
+  const homeAssistantClient = new HomeAssistantClient({
+    enabled: true, token: 'unused', fetchImpl: async () => { assert.fail('standalone must not request HA config'); },
+  });
+  await withServer(async (base, store) => {
+    assert.equal((await fetch(`${base}/api/devices/esp32-000001/frame`)).status, 200);
+    const device = (await store.get('esp32-000001'))!;
+    assert.equal(device.latitude, 52.04);
+    assert.equal(device.longitude, -0.76);
+    assert.equal(device.timezone, 'Europe/London');
+    assert.equal(device.dashboardSections.length, 4);
+  }, { homeAssistantClient, homeAssistantMode: false });
 });
 
 test('unclaimed devices are told to come back quickly', async () => {

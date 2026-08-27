@@ -18,6 +18,9 @@ export type DeviceStoreErrorCode =
   | 'config_io'
   | 'config_unsupported_version';
 
+/** Optional deployment defaults, applied only when creating a new record. */
+export type DeviceInitialLocation = Pick<DeviceRecord, 'latitude' | 'longitude' | 'timezone' | 'locationLabel'>;
+
 /**
  * A storage failure that callers must not reinterpret as an empty installation.
  *
@@ -191,11 +194,19 @@ export class DeviceStore {
   async getOrCreateWithStatus(
     id: string,
     panelProfileId: PanelProfileId = 'wft0583-800x480-mono',
+    initialLocation?: DeviceInitialLocation,
   ): Promise<{ device: DeviceRecord; created: boolean }> {
     return this.mutate((file) => {
       const existing = file.devices.find((d) => d.id === id);
       if (existing) return { device: existing, created: false };
-      const validation = currentDeviceRecordSchema.safeParse(defaultDevice(id, panelProfileId));
+      const defaults = defaultDevice(id, panelProfileId);
+      const validation = currentDeviceRecordSchema.safeParse(initialLocation ? {
+        ...defaults,
+        latitude: initialLocation.latitude,
+        longitude: initialLocation.longitude,
+        timezone: initialLocation.timezone,
+        locationLabel: initialLocation.locationLabel,
+      } : defaults);
       if (!validation.success) {
         throw new DeviceStoreError(
           'config_invalid',

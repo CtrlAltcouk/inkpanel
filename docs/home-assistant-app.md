@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1 complete and validated on real hardware. HA-2 implemented in `0.1.0-ha.5`, awaiting real-world validation on the `Home-Assistant` branch.
+Status: HA-1 and HA-2 are implemented and validated on real Home Assistant hardware. The `0.1.0-ha.6` cleanup release adds installation-location defaults for first-time panel enrolment on the `Home-Assistant` branch.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -114,7 +114,7 @@ V1 should prefer simple HTTP snapshot reads because InkPanel renders on demand a
 
 Validated on a real Home Assistant installation: Ingress and authenticated LAN Studio, Supervisor API, direct HTTPS WebFlash, full-size/Mini firmware flashing and enrolment, and Home Assistant-owned updates. Standalone remains independent.
 
-### Phase HA-2 — Home Assistant Calendar (implemented; awaiting real-world validation)
+### Phase HA-2 — Home Assistant Calendar (implemented and validated on real hardware)
 
 Extend Calendar configuration with a provider choice:
 
@@ -150,7 +150,17 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.5` for linux/amd64 and linux/arm64.
+The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.6` for linux/amd64 and linux/arm64.
+
+#### First-time panel location defaults (ha.6)
+
+In Home Assistant App mode, an unknown panel's first enrolment reads the installation location from `/api/config` through the server-only `HomeAssistantClient.installationLocation()` method. Latitude (-90..90), longitude (-180..180), a valid IANA timezone and a non-empty location name are validated and projected into `latitude`, `longitude`, `timezone` and `locationLabel`. Full-size panels retain four dashboard slots; Mini panels retain one.
+
+The deployment adapter supplies an optional generic location-defaults provider to the HTTP enrolment flow. DeviceStore has no Home Assistant dependency: it applies only those four fields to a new profile-specific default record and validates the complete current record before writing. Historical migration/default schemas are unchanged; no schema bump is required.
+
+Known devices never request installation location and are never automatically updated when HA's location changes. Manual per-panel Studio settings remain authoritative. If HA is unavailable or returns invalid location data for an unknown panel, enrolment returns HTTP 503 with a 300-second retry interval and writes no device. It does not silently fall back to historical location defaults. Standalone enrolment remains unchanged. Supervisor credentials and unrelated HA config fields are never included in the seed or HTTP response.
+
+After upgrading to ha.6, validate a genuinely new panel of each size against the installation location in Home Assistant. Existing panels intentionally retain their saved location; update those manually in Studio if necessary. Check that a manual location edit survives subsequent wakes, and that a known panel continues to receive frames during a temporary HA API outage (individual HA-backed widgets retain their existing unavailable/stale semantics).
 
 ### Phase HA-3 — Home Assistant To Do
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-ha.6
+
+- Seed newly enrolled full-size and Mini panels from the validated Home Assistant installation latitude, longitude, timezone and location name.
+- Keep existing panels and manual Studio location choices unchanged; standalone defaults and frozen migrations are unchanged.
+- Return a retryable error without creating a device if first-enrolment installation location is unavailable or invalid.
+- HA-1 and HA-2 native Calendar are validated on real Home Assistant hardware. No renderer, firmware or framebuffer changes.
+
 ## 0.1.0-ha.5
 
 - Add native Home Assistant Calendar discovery and multi-calendar selection through the server-only Supervisor client.

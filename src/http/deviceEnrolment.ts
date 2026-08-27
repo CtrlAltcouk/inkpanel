@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import type { DeviceInitialLocation } from '../devices/store.ts';
+
+/** null means temporarily unavailable, not permission to use fallback defaults. */
+export type DeviceEnrolmentDefaultsProvider = () => Promise<DeviceInitialLocation | null>;
 
 export const DEVICE_ENROLMENT_WINDOW_MS = 60 * 60 * 1000;
 export const DEVICE_ENROLMENT_PER_IP_LIMIT = 5;

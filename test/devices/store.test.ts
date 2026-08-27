@@ -60,6 +60,36 @@ test('returns the same record on second sight', async () => {
   });
 });
 
+test('new-device location is validated as part of the complete record before persistence', async () => {
+  await withStore(async (store, path) => {
+    const location = { latitude: 45, longitude: 2, timezone: 'Europe/Paris', locationLabel: 'Home' };
+    await expectStoreError(() => store.getOrCreateWithStatus('esp32-seed', undefined, {
+      ...location, latitude: 999,
+    }), 'config_invalid');
+    assert.deepEqual(await store.list(), []);
+    await assert.rejects(readFile(path), { code: 'ENOENT' });
+    const result = await store.getOrCreateWithStatus('esp32-seed', 'ssd1681-200x200-mono', location);
+    assert.equal(result.created, true);
+    assert.equal(result.device.latitude, 45);
+    assert.equal(result.device.dashboardSections.length, 1);
+    assert.ok(currentDeviceRecordSchema.safeParse(result.device).success);
+  });
+});
+
+test('concurrent enrolment seeds cannot overwrite the winning record or its profile', async () => {
+  await withStore(async (store) => {
+    const location = { latitude: 45, longitude: 2, timezone: 'Europe/Paris', locationLabel: 'Home' };
+    const [first, duplicate] = await Promise.all([
+      store.getOrCreateWithStatus('esp32-seed', 'ssd1681-200x200-mono', location),
+      store.getOrCreateWithStatus('esp32-seed', 'wft0583-800x480-mono', { ...location, latitude: 50 }),
+    ]);
+    assert.equal(first.created, true);
+    assert.equal(duplicate.created, false);
+    assert.deepEqual(duplicate.device, first.device);
+    assert.equal((await store.list()).length, 1);
+  });
+});
+
 test('persists across instances', async () => {
   await withStore(async (store, path) => {
     await store.getOrCreate('esp32-a1b2c3');

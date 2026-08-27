@@ -8,6 +8,7 @@ import { panelProfile, WFT0583 } from '../panel/profile.ts';
 import {
   DeviceEnrolmentLimiter,
   firmwareAutoEnrolmentIdSchema,
+  type DeviceEnrolmentDefaultsProvider,
 } from './deviceEnrolment.ts';
 
 const ERROR_RETRY_SECONDS = 300;
@@ -30,6 +31,7 @@ export function deviceRoutes(
   frames: FrameService,
   publicBaseUrl: string,
   enrolmentLimiter = new DeviceEnrolmentLimiter(),
+  enrolmentDefaults?: DeviceEnrolmentDefaultsProvider,
 ): Router {
   const router = Router();
 
@@ -63,11 +65,20 @@ export function deviceRoutes(
       }
 
       try {
+        const initialLocation = enrolmentDefaults ? await enrolmentDefaults() : undefined;
+        if (initialLocation === null) {
+          reserved.reservation.complete(false);
+          res.set('Retry-After', String(ERROR_RETRY_SECONDS));
+          res.set('X-Next-Wake-Seconds', String(ERROR_RETRY_SECONDS));
+          res.status(503).json({ error: 'device enrolment defaults temporarily unavailable' });
+          return;
+        }
         // Firmware 0.1.4 predates the profile header. Missing therefore means
         // the existing 7.5-inch profile, preserving old-board auto-enrolment.
         const result = await store.getOrCreateWithStatus(
           id,
           advertisedProfile ?? WFT0583.id as PanelProfileId,
+          initialLocation,
         );
         reserved.reservation.complete(result.created);
         device = result.device;

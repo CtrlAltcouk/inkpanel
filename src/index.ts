@@ -28,6 +28,7 @@ import { TodoStore } from './todo/store.ts';
 import { PrinterConnectionStore } from './printers/store.ts';
 import { MoonrakerClient } from './printers/moonraker.ts';
 import { HomeAssistantClient, isHomeAssistantMode } from './homeAssistant/client.ts';
+import { homeAssistantEnrolmentDefaults } from './homeAssistant/enrolment.ts';
 import { updateModeForDeployment } from './system/updateOwnership.ts';
 
 export const version = '0.1.0';
@@ -182,6 +183,7 @@ export async function main(): Promise<void> {
     moonrakerClient,
     homeAssistantClient,
     updateMode,
+    enrolmentDefaults: homeAssistantEnrolmentDefaults(homeAssistantMode, homeAssistantClient),
   };
   const app = createApp({ ...sharedDeps, access: { mode: 'lan' } });
   const server = app.listen(port);

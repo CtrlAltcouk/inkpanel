@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import { isValidTimezone } from '../devices/schema.ts';
 import {
   calendarEntityIdSchema, homeAssistantCalendarListSchema, homeAssistantCalendarEventsSchema,
   type HomeAssistantCalendarEvent,
@@ -37,6 +38,23 @@ const configSchema = z.object({
   location_name: z.string().min(1),
   time_zone: z.string().min(1),
 }).passthrough();
+
+/** Only these validated installation fields may seed a new panel. */
+export interface HomeAssistantInstallationLocation {
+  latitude: number;
+  longitude: number;
+  timezone: string;
+  locationLabel: string;
+}
+
+// Location validation is stricter than the diagnostic probe: diagnostics can
+// still report Core's version when its location is unsuitable for enrolment.
+const installationConfigSchema = configSchema.extend({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  time_zone: z.string().trim().min(1).max(255).refine(isValidTimezone),
+  location_name: z.string().trim().min(1),
+});
 
 function standaloneStatus(): HomeAssistantStatus {
   return {
@@ -137,6 +155,19 @@ export class HomeAssistantClient {
       available: true, mode: 'home-assistant-app', version: result.data.version,
       locationName: result.data.location_name, timeZone: result.data.time_zone, error: null,
     };
+  }
+
+  async installationLocation(signal?: AbortSignal): Promise<HomeAssistantResult<HomeAssistantInstallationLocation>> {
+    const result = await this.request('config', installationConfigSchema, 'installation config', signal);
+    if (!result.available) return result;
+    // Explicit projection: arbitrary HA config metadata/credentials never leave
+    // this server-only boundary or become part of a DeviceRecord.
+    return { available: true, data: {
+      latitude: result.data.latitude,
+      longitude: result.data.longitude,
+      timezone: result.data.time_zone,
+      locationLabel: result.data.location_name,
+    } };
   }
 
   async listCalendars(signal?: AbortSignal): Promise<HomeAssistantCalendarDiscovery> {

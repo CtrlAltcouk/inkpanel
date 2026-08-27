@@ -2,6 +2,57 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HomeAssistantClient, isHomeAssistantMode } from '../../src/homeAssistant/client.ts';
 
+const installationConfig = {
+  version: '2026.8.1', latitude: -36.85, longitude: 174.76,
+  time_zone: 'Pacific/Auckland', location_name: 'Home',
+};
+
+test('installation location validates config and exposes only device location fields', async () => {
+  const client = new HomeAssistantClient({
+    enabled: true, token: 'super-secret-token',
+    fetchImpl: async (input, init) => {
+      assert.equal(String(input), 'http://supervisor/core/api/config');
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer super-secret-token');
+      return Response.json({ ...installationConfig, token: 'super-secret-token', extra: 'not a device field' });
+    },
+  });
+  assert.deepEqual(await client.installationLocation(), { available: true, data: {
+    latitude: -36.85, longitude: 174.76, timezone: 'Pacific/Auckland', locationLabel: 'Home',
+  } });
+  assert.equal((await client.status()).version, '2026.8.1', 'diagnostic probe remains available');
+});
+
+test('malformed installation location is rejected without reflecting input or credentials', async () => {
+  for (const patch of [
+    { latitude: -91 }, { latitude: 91 }, { latitude: '52.04' }, { latitude: null },
+    { latitude: undefined }, { latitude: Infinity }, { latitude: NaN },
+    { longitude: -181 }, { longitude: 181 }, { longitude: '0' }, { longitude: undefined },
+    { time_zone: '' }, { time_zone: '  ' }, { time_zone: 'Invalid/secret-token' },
+    { location_name: '' }, { location_name: '  ' }, { location_name: null }, { version: null },
+  ]) {
+    const client = new HomeAssistantClient({
+      enabled: true, token: 'secret-token',
+      fetchImpl: async () => Response.json({ ...installationConfig, ...patch }),
+    });
+    assert.deepEqual(await client.installationLocation(), {
+      available: false, error: 'Home Assistant returned an invalid installation config response',
+    });
+  }
+});
+
+test('installation location accepts coordinate boundaries and trims names', async () => {
+  for (const [latitude, longitude] of [[-90, -180], [90, 180], [0, 0]]) {
+    const client = new HomeAssistantClient({
+      enabled: true, token: 'secret', fetchImpl: async () => Response.json({
+        ...installationConfig, latitude, longitude, location_name: ' Home ', time_zone: ' UTC ',
+      }),
+    });
+    assert.deepEqual(await client.installationLocation(), { available: true, data: {
+      latitude, longitude, locationLabel: 'Home', timezone: 'UTC',
+    } });
+  }
+});
+
 test('standalone mode is explicitly unavailable without making a request', async () => {
   let calls = 0;
   const client = new HomeAssistantClient({
