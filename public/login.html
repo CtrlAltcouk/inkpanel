@@ -15,28 +15,6 @@
     <button type="submit">Sign in</button>
     <p class="error" id="error" hidden></p>
   </form>
-<script type="module">
-const form = document.getElementById('form');
-const error = document.getElementById('error');
-
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  error.hidden = true;
-
-  const res = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password: document.getElementById('password').value }),
-  });
-
-  if (res.ok) {
-    location.href = '/';
-    return;
-  }
-  const body = await res.json().catch(() => ({ error: res.statusText }));
-  error.textContent = body.error ?? 'Sign in failed';
-  error.hidden = false;
-});
-</script>
+<script type="module" src="./login.js"></script>
 </body>
 </html>

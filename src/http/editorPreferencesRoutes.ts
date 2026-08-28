@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { DeviceStore } from '../devices/store.ts';
+import { authorizePersonalTodoAccess } from '../homeAssistant/ingressUser.ts';
 import {
   DashboardEditorPreferencesStore,
   dashboardEditorSlotSchema,
@@ -34,6 +35,14 @@ export function editorPreferencesRoutes(store: DeviceStore, dataDir: string): Ro
   );
   const ready = preferences.load();
 
+  router.use('/dashboard-editor/:id', async (req, res, next) => {
+    if (res.locals.homeAssistantIngress && !res.locals.homeAssistantUser) {
+      const device = await store.get(req.params.id);
+      if (device && !authorizePersonalTodoAccess(device.dashboardSections, res)) return;
+    }
+    next();
+  });
+
   router.get('/dashboard-editor/:id', async (req, res) => {
     if (!(await store.get(req.params.id))) {
       res.status(404).json({ error: 'unknown device' });
@@ -41,7 +50,9 @@ export function editorPreferencesRoutes(store: DeviceStore, dataDir: string): Ro
     }
     await ready;
     res.set('cache-control', 'no-store');
-    res.json(preferences.get(req.params.id));
+    const result = preferences.get(req.params.id);
+    if (!authorizePersonalTodoAccess([...result.shared, ...result.slots.flat()], res)) return;
+    res.json(result);
   });
 
   router.put('/dashboard-editor/:id', async (req, res) => {
@@ -54,6 +65,7 @@ export function editorPreferencesRoutes(store: DeviceStore, dataDir: string): Ro
       res.status(400).json({ error: 'invalid remembered widget settings', issues: parsed.error.issues });
       return;
     }
+    if (!authorizePersonalTodoAccess(parsed.data.slots.flat(), res)) return;
     await ready;
     await preferences.set(req.params.id, persistedSlots(parsed.data.slots));
     res.set('cache-control', 'no-store');

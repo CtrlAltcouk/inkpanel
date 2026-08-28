@@ -57,8 +57,11 @@ Shared fallbacks are promoted only from complete/useful configurations:
 - Traffic: both From and To
 - Octopus Agile: a tariff code
 - Bins: a UPRN
+- Home Assistant Sensors: at least one ordered `sensor.*` entity ID (maximum four)
 
 Weather and Empty have no reusable configuration.
+
+Home Assistant Sensors uses the existing `entities` V1 draft in both per-slot and shared remembered settings. Switching Sensors → Weather → Sensors restores the selected IDs and order; active configuration still takes precedence over remembered defaults. Missing IDs remain valid configuration and are never silently removed. Sensor search is transient UI state, while add/remove/reorder requires **Save changes**. The Content option is offered only in HA App mode; an already-saved Sensors widget remains visible even if discovery or HA support is unavailable.
 
 ## Save behaviour
 

@@ -1,0 +1,33 @@
+name: InkPanel
+version: 0.1.0-ha.12
+slug: inkpanel
+description: Self-hosted e-paper dashboard server and Studio
+url: https://github.com/CtrlAltcouk/inkpanel
+image: ghcr.io/ctrlaltcouk/inkpanel-home-assistant
+arch:
+  - amd64
+  - aarch64
+stage: experimental
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+# Supervisor appends this to its trailing-slash Ingress URL. Keep it query-only.
+ingress_entry: "?inkpanel_release=0.1.0-ha.12"
+panel_admin: true
+panel_icon: mdi:tablet-dashboard
+homeassistant_api: true
+ports:
+  8080/tcp: 8080
+  8443/tcp: 8443
+ports_description:
+  8080/tcp: Panel-facing HTTP and authenticated Studio
+  8443/tcp: Secure WebFlash page
+options:
+  panel_base_url: null
+  lan_password: null
+schema:
+  panel_base_url: url
+  lan_password: password
+backup: cold

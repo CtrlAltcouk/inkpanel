@@ -14,6 +14,11 @@ import { batteryPercent } from '../devices/battery.ts';
 import type { DeviceRecord } from '../devices/types.ts';
 import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
+import { runHomeAssistantCalendars } from '../sources/homeAssistantCalendar.ts';
+import { runHomeAssistantTodo } from '../sources/homeAssistantTodo.ts';
+import { runHomeAssistantEntities } from '../sources/homeAssistantEntities.ts';
+import type { HomeAssistantClient } from '../homeAssistant/client.ts';
+import type { HomeAssistantUserStore } from '../homeAssistant/userStore.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
 import { runLiveSource, runSource } from '../sources/runner.ts';
@@ -53,6 +58,8 @@ export interface FrameDeps {
   fetchData?: (device: DeviceRecord) => Promise<SourceBundle>;
   /** Injected once at startup so calendar network policy is explicit/testable. */
   calendarSource?: Source<IcalFeedConfig, string>;
+  homeAssistantClient?: HomeAssistantClient;
+  homeAssistantUserStore?: HomeAssistantUserStore;
   weatherSource?: typeof openMeteoSource;
   binsSource?: typeof binsSource;
   trainSource?: Source<TrainSourceConfig, TrainData>;
@@ -128,19 +135,27 @@ export class FrameService {
     const requests = new Map<string, Promise<DashboardSectionData>>();
 
     const sectionRequest = (widget: DeviceRecord['dashboardSections'][number]): Promise<DashboardSectionData> => {
-      const key = `${widget.type}:${JSON.stringify(widget.config)}`;
+      const key = `${widget.type}:${widget.version}:${JSON.stringify(widget.config)}`;
       const existing = requests.get(key);
       if (existing) return existing;
 
       let request: Promise<DashboardSectionData>;
       switch (widget.type) {
+        case 'entities':
+          request = widget.config.entityIds.length
+            ? runHomeAssistantEntities(widget.config.entityIds, this.deps.homeAssistantClient, runOptions)
+              .then((outcome) => ({ type: 'entities', data: outcome.data, configured: true, health: outcome.health }))
+            : Promise.resolve({ type: 'entities', data: null, configured: false, health: null });
+          break;
         case 'calendar':
-          request = runCalendars(
+          request = ('entityIds' in widget.config
+            ? runHomeAssistantCalendars(widget.config.entityIds, device.timezone, this.deps.homeAssistantClient, this.deps.cache, runOptions)
+            : runCalendars(
             widget.config.calendarUrls,
             device.timezone,
             this.deps.cache,
             { ...runOptions, source: this.deps.calendarSource },
-          ).then((outcome) => ({ type: 'calendar', data: outcome.data, health: outcome.health }));
+          )).then((outcome) => ({ type: 'calendar', data: outcome.data, health: outcome.health }));
           break;
         case 'weather':
           request = headerWeatherPromise.then((outcome) => ({
@@ -232,7 +247,13 @@ export class FrameService {
           break;
         }
         case 'todo': {
-          if (!widget.config.listId || !this.deps.todoStore) {
+          if ('entityId' in widget.config) {
+            request = widget.config.entityId
+              ? runHomeAssistantTodo(widget.config.entityId, this.deps.homeAssistantClient, runOptions,
+                widget.version === 3 ? { ownerUserId: widget.config.ownerUserId, store: this.deps.homeAssistantUserStore } : undefined)
+                .then((outcome) => ({ type: 'todo', data: outcome.data, configured: true, health: outcome.health }))
+              : Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
+          } else if (!widget.config.listId || !this.deps.todoStore) {
             request = Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
           } else {
             request = this.deps.todoStore.get(widget.config.listId).then((list) => ({

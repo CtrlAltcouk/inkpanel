@@ -1,5 +1,6 @@
 import { getJson, sendJson } from './api.js';
 import { esc } from './components.js';
+import { renderHomeAssistantUsers } from './homeAssistantUsers.js';
 
 const POLL_MS = 2000;
 const GIVE_UP_MS = 3 * 60 * 1000;
@@ -36,7 +37,25 @@ function sourcesSection(sources) {
   return `<p class="meta">${sourcesLine(sources)}</p>${items ? `<ul class="issue-list">${items}</ul>` : ''}`;
 }
 
-function settingsView(info) {
+function homeAssistantSection(status) {
+  if (status?.mode !== 'home-assistant-app') {
+    return `<h3>Home Assistant</h3><p class="meta">Not running as a Home Assistant App.</p>`;
+  }
+  if (!status.available) {
+    return `<h3>Home Assistant</h3><div class="health"><span class="pill">Unavailable</span></div>
+      <p class="meta">${esc(status.error || 'Could not reach the Home Assistant Core API.')}</p>
+      <p class="meta">Updates are managed by Home Assistant.</p>`;
+  }
+  return `<h3>Home Assistant</h3><div class="health">
+    <span class="pill">Connected</span>
+    <span class="pill">Core ${esc(status.version)}</span>
+    <span class="pill">${esc(status.locationName)}</span>
+    <span class="pill">${esc(status.timeZone)}</span>
+  </div>
+  <p class="meta">Updates are managed by Home Assistant.</p>`;
+}
+
+export function settingsView(info, homeAssistantStatus) {
   return `<div class="studio-card">
     <div class="studio-card-head"><div><h2>Server</h2><p class="meta">InkPanel runtime and source health.</p></div></div>
     <div class="health">
@@ -47,6 +66,7 @@ function settingsView(info) {
     </div>
     <h3>Sources</h3>
     ${sourcesSection(info.sources)}
+    ${homeAssistantSection(homeAssistantStatus)}
     <div class="actions"><button type="button" class="ghost" id="recheck">Refresh status</button></div>
   </div>`;
 }
@@ -100,8 +120,16 @@ async function pollUntilDone(log, requestedAt) {
 }
 
 export async function renderSettings(root, { refresh = false } = {}) {
-  const info = await getJson(`/api/system/info${refresh ? '?refresh=1' : ''}`);
-  root.innerHTML = settingsView(info);
+  const [info, homeAssistantStatus] = await Promise.all([
+    getJson(`/api/system/info${refresh ? '?refresh=1' : ''}`),
+    getJson('/api/home-assistant/status'),
+  ]);
+  root.innerHTML = settingsView(info, homeAssistantStatus);
+  if (homeAssistantStatus?.mode === 'home-assistant-app') {
+    const ownership = document.createElement('div');
+    root.append(ownership);
+    await renderHomeAssistantUsers(ownership);
+  }
   root.querySelector('#recheck').addEventListener('click', async () => {
     root.innerHTML = '<p class="empty">Checking…</p>';
     try {

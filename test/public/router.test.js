@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRouteName } from '../../public/router.js';
+import {
+  fallbackRouteForUpdateMode,
+  removeManagedUpdateNavigation,
+  resolveRouteName,
+  routesForUpdateMode,
+} from '../../public/router.js';
 
 const ROUTES = { panels: () => {}, settings: () => {} };
 
@@ -19,4 +24,30 @@ test('an unrecognised hash resolves to the fallback, not itself', () => {
   // *resolved* name, or an unknown hash like "#foo" renders the fallback
   // view while leaving every tab unhighlighted.
   assert.equal(resolveRouteName('#foo', ROUTES, 'panels'), 'panels');
+});
+
+test('Home Assistant removes Updates navigation and the updater route', () => {
+  let removed = false;
+  const root = { querySelector: () => ({ remove: () => { removed = true; } }) };
+  const routes = { ...ROUTES, updates: () => 'standalone updater' };
+  const available = routesForUpdateMode(routes, 'home-assistant');
+  removeManagedUpdateNavigation(root, 'home-assistant');
+
+  assert.equal(removed, true);
+  assert.equal('updates' in available, false);
+  const fallback = fallbackRouteForUpdateMode('#updates', 'home-assistant');
+  assert.equal(fallback, 'settings');
+  assert.equal(resolveRouteName('#updates', available, fallback), 'settings');
+});
+
+test('standalone keeps Updates navigation and routing unchanged', () => {
+  let removed = false;
+  const root = { querySelector: () => ({ remove: () => { removed = true; } }) };
+  const routes = { ...ROUTES, updates: () => 'standalone updater' };
+  const available = routesForUpdateMode(routes, 'self');
+  removeManagedUpdateNavigation(root, 'self');
+
+  assert.equal(removed, false);
+  assert.equal(available, routes);
+  assert.equal(resolveRouteName('#updates', available, 'panels'), 'updates');
 });

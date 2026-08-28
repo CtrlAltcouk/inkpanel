@@ -1,4 +1,5 @@
 import { getJson, sendJson } from './api.js';
+import { appPath } from './paths.js';
 import { esc, formatRelative, formatVolts, field, pill } from './components.js';
 import {
   collectBusApiCredentials,
@@ -12,6 +13,12 @@ import {
 const MINI_PROFILE = 'ssd1681-200x200-mono';
 let selectedId = null;
 let selectedPanelTab = 'dashboard';
+let previewRevision = 0;
+
+function panelPreviewUrl(deviceId) {
+  // Fresh on open, save/reopen and explicit refresh, even within one clock tick.
+  return appPath(`/api/devices/${encodeURIComponent(deviceId)}/render.png?t=${Date.now()}-${++previewRevision}`);
+}
 
 export function setSelectedPanel(id) { selectedId = id; }
 function isMini(device) { return device.panelProfileId === MINI_PROFILE; }
@@ -53,7 +60,7 @@ function detail(device) {
           <div class="studio-card">
             <div class="studio-card-head"><div><h2>Live e-ink preview</h2><p class="meta">${esc(displayLabel(device))} · exactly what this panel will show</p></div></div>
             <div class="panel-preview-wrap ${mini ? 'panel-preview-wrap--mini' : ''}">
-              <img class="panel-preview-image ${mini ? 'panel-preview-image--mini' : ''}" alt="What ${esc(device.name)} is showing" src="/api/devices/${encodeURIComponent(device.id)}/render.png">
+              <img class="panel-preview-image ${mini ? 'panel-preview-image--mini' : ''}" alt="What ${esc(device.name)} is showing" src="${panelPreviewUrl(device.id)}">
             </div>
             <div class="actions">
               <button type="button" data-push="${esc(device.id)}">Push to display</button>
@@ -136,7 +143,7 @@ function pushMessage(result) {
 
 export function refreshPanelPreview(root, deviceId) {
   const img = root.querySelector('.panel-preview-image');
-  if (img) img.src = `/api/devices/${encodeURIComponent(deviceId)}/render.png?t=${Date.now()}`;
+  if (img) img.src = panelPreviewUrl(deviceId);
 }
 
 export function bindTodoPreviewRefresh(editor, root, deviceId) {
@@ -203,12 +210,33 @@ async function renderDetail(root, device, serviceStatus) {
   const dashboardEditor = detailEl.querySelector('#dashboard-editor');
   bindTodoPreviewRefresh(dashboardEditor, root, device.id);
   bindPrinterPreviewRefresh(dashboardEditor, root, device.id);
-  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers);
+  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers, serviceStatus.haCalendars, serviceStatus.haTodos, serviceStatus.haSensors);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }] = await Promise.all([getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'), getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers')]);
+  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }, runtime, calendars, todos, sensors] = await Promise.all([
+    getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'),
+    getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers'),
+    getJson('/api/runtime-config'),
+    getJson('/api/home-assistant/calendars').catch(() => ({ available: false, calendars: [] })),
+    getJson('/api/home-assistant/todo-lists').catch(() => ({ available: false, lists: [] })),
+    getJson('/api/home-assistant/sensors').catch(() => ({ available: false, entities: [] })),
+  ]);
+  // Deployment capability is independent of discovery availability. A failed
+  // runtime read surfaces as a page error instead of silently hiding providers.
+  const supported = runtime.updateMode === 'home-assistant';
+  const haCalendars = { ...calendars, supported };
+  const haTodos = { ...todos, supported };
+  if (supported) {
+    const identity = await getJson('/api/home-assistant/current-user').catch(() => ({ available: false, user: null }));
+    const [mappings, personal] = await Promise.all([
+      getJson('/api/home-assistant/users').catch(() => ({ users: [] })),
+      identity.available ? getJson('/api/home-assistant/my-todo-lists').catch(() => ({ lists: [] })) : Promise.resolve({ lists: [] }),
+    ]);
+    Object.assign(haTodos, { personalSupported: true, currentUser: identity.user, users: mappings.users, personalLists: personal.lists });
+  }
+  const haSensors = { ...sensors, supported };
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers });
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers, haCalendars, haTodos, haSensors });
 }

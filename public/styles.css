@@ -8,21 +8,21 @@
  */
 @font-face {
   font-family: "Dela Gothic One";
-  src: url("/vendor/fonts/dela-gothic-one-latin-400-normal.woff2") format("woff2");
+  src: url("./vendor/fonts/dela-gothic-one-latin-400-normal.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter";
-  src: url("/vendor/fonts/inter-latin-400-normal.woff2") format("woff2");
+  src: url("./vendor/fonts/inter-latin-400-normal.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter";
-  src: url("/vendor/fonts/inter-latin-700-normal.woff2") format("woff2");
+  src: url("./vendor/fonts/inter-latin-700-normal.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -138,7 +138,9 @@ textarea:focus {
   accent-color: var(--brand-pink);
 }
 
-button {
+button,
+.button-link {
+  display: inline-block;
   background: var(--brand-pink);
   color: var(--bg-0);
   border: 0;
@@ -152,8 +154,11 @@ button {
   margin-top: var(--sp-5);
 }
 
-button:hover { background: var(--brand-pink-hover); }
-button:active { background: var(--brand-pink-press); }
+button:hover,
+.button-link:hover { background: var(--brand-pink-hover); }
+button:active,
+.button-link:active { background: var(--brand-pink-press); }
+.button-link { text-decoration: none; }
 
 .meta {
   min-width: 0;

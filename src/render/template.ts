@@ -17,6 +17,7 @@ import type {
 import type { BinsData } from '../sources/bins.ts';
 import type { PanelProfile } from '../panel/profile.ts';
 import { panelCss } from './panel.css.ts';
+import { ENTITIES_CSS, renderEntities } from './entities.ts';
 
 function esc(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -247,6 +248,10 @@ function renderSection(section: DashboardSectionData, data: DashboardData, posit
   let label: string;
   let content: string;
   switch (section.type) {
+    case 'entities':
+      label = 'Sensors';
+      content = renderEntities(section.data, section.configured);
+      break;
     case 'calendar':
       label = 'Today';
       content = agendaCell(section.data, data.timezone);
@@ -291,5 +296,6 @@ export function renderHtml(data: DashboardData, profile: PanelProfile, fontCss: 
   const positions = ['tl', 'tr', 'bl', 'br'];
   const todoCss = data.sections.some((section) => section.type === 'todo') ? TODO_CSS : '';
   const printerCss = data.sections.some((section) => section.type === 'printers') ? PRINTER_CSS : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}${todoCss}${printerCss}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
+  const entitiesCss = data.sections.some((section) => section.type === 'entities') ? ENTITIES_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${panelCss(profile)}${todoCss}${printerCss}${entitiesCss}</style></head><body>${banner(data)}<div class="rule"></div><div class="grid">${data.sections.map((section, index) => renderSection(section, data, positions[index]!)).join('')}</div></body></html>`;
 }

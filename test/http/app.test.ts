@@ -38,13 +38,39 @@ test('/api/runtime-config reads current active HTTPS state before the auth gate'
   const runtimeState = createRuntimeState();
   const app = makeApp(undefined, undefined, frames, runtimeState, 'hunter2');
   const before = await requestJson(app, '/api/runtime-config');
-  assert.deepEqual(before.body, { httpsPort: null });
+  assert.deepEqual(before.body, { httpsPort: null, updateMode: 'self' });
   runtimeState.httpsPort = 9443;
   const after = await requestJson(app, '/api/runtime-config');
   assert.equal(after.status, 200);
-  assert.deepEqual(after.body, { httpsPort: 9443 });
+  assert.deepEqual(after.body, { httpsPort: 9443, updateMode: 'self' });
   assert.equal((await requestJson(app, '/api/devices')).status, 401,
     'the password must genuinely be enabled while runtime config remains public');
+});
+
+test('Studio assets are upgrade-safe while vendor fonts retain intentional immutable caching', async () => {
+  const server = makeApp().listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    for (const path of ['/', '/index.html', '/login.html', '/app.js', '/panels.js', '/todoEditor.js', '/cityPicker.js', '/flash.js', '/styles.css', '/studio.css', '/vendor/esptool-js.js']) {
+      const response = await fetch(`${base}${path}`, {
+        headers: { 'if-modified-since': 'Wed, 01 Jan 2099 00:00:00 GMT', 'if-none-match': '"old-release"' },
+      });
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get('cache-control'), 'no-store', path);
+      assert.equal(response.headers.get('etag'), null, path);
+      assert.equal(response.headers.get('last-modified'), null, path);
+      await response.arrayBuffer();
+    }
+    for (const font of ['dela-gothic-one-latin-400-normal.woff2', 'inter-latin-400-normal.woff2']) {
+      const response = await fetch(`${base}/vendor/fonts/${font}`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('cache-control') ?? '', /max-age=2592000.*immutable/);
+      await response.arrayBuffer();
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 async function requestJson(app: ReturnType<typeof createApp>, path: string) {

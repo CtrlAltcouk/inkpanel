@@ -1,3 +1,5 @@
+import { appPath } from './paths.js';
+
 export class ApiError extends Error {
   constructor(message, status, issues) {
     super(message);
@@ -7,7 +9,7 @@ export class ApiError extends Error {
 }
 
 async function request(method, path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(appPath(path), {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -16,7 +18,7 @@ async function request(method, path, body) {
   // A 401 means the password was set, or the session expired. Either way the
   // only useful action is to send the user to sign in.
   if (res.status === 401) {
-    location.href = '/login.html';
+    location.href = appPath('/login.html');
     throw new ApiError('authentication required', 401);
   }
 

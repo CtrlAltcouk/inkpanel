@@ -68,14 +68,27 @@ export interface TodoData {
   items: string[];
 }
 
+/** Only display content; HA IDs, device classes and timestamps stay upstream. */
+export interface EntityDisplayItem {
+  name: string;
+  value: string;
+  unit: string | null;
+  available: boolean;
+}
+
+export interface EntitiesData {
+  items: EntityDisplayItem[];
+}
+
 export type DashboardSectionData =
+  | { type: 'entities'; data: EntitiesData | null; configured: boolean; health: SourceHealth | null }
   | { type: 'calendar'; data: CalendarData | null; health: SourceHealth }
   | { type: 'weather'; data: WeatherData | null; health: SourceHealth }
   | { type: 'trains'; data: TrainData | null; health: SourceHealth | null }
   | { type: 'bus'; data: BusData | null; health: SourceHealth | null }
   | { type: 'traffic'; data: TrafficData | null; health: SourceHealth | null }
   | { type: 'octopus'; data: OctopusAgileData | null; health: SourceHealth | null }
-  | { type: 'todo'; data: TodoData | null; configured: boolean; health: null }
+  | { type: 'todo'; data: TodoData | null; configured: boolean; health: SourceHealth | null }
   | { type: 'printers'; data: { printers: PrinterStatus[] } | null; configured: boolean; health: SourceHealth | null }
   | { type: 'bins'; data: BinsData | null; health: SourceHealth | null }
   | { type: 'empty' };

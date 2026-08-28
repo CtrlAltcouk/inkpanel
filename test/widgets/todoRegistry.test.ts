@@ -30,3 +30,36 @@ test('adding To Do uses the generic V3 envelope without a DeviceStore migration'
   const existing = defaultDeviceV3('esp32-existing');
   assert.equal(deviceRecordV3Schema.safeParse(existing).success, true, 'existing widget configurations remain valid');
 });
+
+test('To Do V2 discriminates local and HA providers without changing V1 or store versions', () => {
+  for (const config of [{ provider: 'local', listId: 'home' }, { provider: 'home-assistant', entityId: 'todo.shopping_list' },
+    { provider: 'home-assistant', entityId: '' }]) {
+    const widget = { type: 'todo', version: 2, config };
+    assert.deepEqual(dashboardWidgetSchema.parse(widget), widget);
+    const mini = defaultDeviceV3('esp32-mini', 'ssd1681-200x200-mono');
+    assert.ok(deviceRecordV3Schema.safeParse({ ...mini, dashboardSections: [widget] }).success);
+  }
+  for (const config of [{ provider: 'local', entityId: 'todo.home' }, { provider: 'home-assistant', listId: 'home' },
+    { provider: 'home-assistant', entityId: 'todo.HOME' }, { provider: 'home-assistant', entityId: 'todo.a/evil' },
+    { provider: 'home-assistant', entityId: 'sensor.home' }, { provider: 'other', listId: 'home' },
+    { provider: 'local', listId: 'BAD ID' }, { provider: 'home-assistant', entityId: 'todo.home', token: 'secret' }]) {
+    assert.equal(dashboardWidgetSchema.safeParse({ type: 'todo', version: 2, config }).success, false);
+  }
+  assert.equal(CURRENT_DEVICE_STORE_SCHEMA_VERSION, 3);
+});
+
+test('To Do V3 strictly validates fixed owner/entity without live discovery or a store migration', () => {
+  for (const config of [{ provider: 'local', listId: 'home' }, { provider: 'home-assistant', ownerUserId: 'user-id', entityId: 'todo.no_longer_exists' }]) {
+    const widget = { type: 'todo', version: 3, config };
+    assert.deepEqual(dashboardWidgetSchema.parse(widget), widget);
+  }
+  for (const config of [
+    { provider: 'home-assistant', entityId: 'todo.home' },
+    { provider: 'home-assistant', ownerUserId: '', entityId: 'todo.home' },
+    { provider: 'home-assistant', ownerUserId: 'bad\n', entityId: 'todo.home' },
+    { provider: 'home-assistant', ownerUserId: 'a'.repeat(129), entityId: 'todo.home' },
+    { provider: 'home-assistant', ownerUserId: 'user', entityId: '' },
+    { provider: 'home-assistant', ownerUserId: 'user', entityId: 'sensor.home' },
+  ]) assert.equal(dashboardWidgetSchema.safeParse({ type: 'todo', version: 3, config }).success, false);
+  assert.equal(CURRENT_DEVICE_STORE_SCHEMA_VERSION, 3);
+});

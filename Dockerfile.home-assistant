@@ -1,0 +1,32 @@
+# This version must match the Playwright package, as enforced by the existing
+# Docker regression test.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+ARG BUILD_VERSION
+ARG BUILD_ARCH
+LABEL io.hass.version="${BUILD_VERSION}" \
+      io.hass.arch="${BUILD_ARCH}" \
+      io.hass.type="app"
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+ENV DATA_DIR=/data \
+    INKPANEL_HA_RELEASE=${BUILD_VERSION} \
+    PORT=8080 \
+    HTTPS_PORT=8443 \
+    HOME_ASSISTANT_MODE=1 \
+    HOME_ASSISTANT_INGRESS_PORT=8099 \
+    HOME_ASSISTANT_BASE_URL=http://supervisor/core/api
+
+VOLUME ["/data"]
+EXPOSE 8080 8443 8099
+
+HEALTHCHECK --interval=60s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "scripts/home-assistant-start.mjs"]

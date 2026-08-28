@@ -12,6 +12,69 @@ function emptySlots(): DashboardEditorSlots {
   return [[], [], [], []];
 }
 
+test('personal To Do is remembered only for its panel while Calendar and Sensors remain shared', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-personal-prefs-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'preferences.json');
+  const store = new DashboardEditorPreferencesStore(path);
+  const slots = emptySlots();
+  slots[0] = [
+    { type: 'todo', version: 3, config: { provider: 'home-assistant', ownerUserId: 'owner', entityId: 'todo.personal' } },
+    { type: 'todo', version: 2, config: { provider: 'local', listId: 'home' } },
+    { type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.shared'] } },
+    { type: 'entities', version: 1, config: { entityIds: ['sensor.shared'] } },
+  ];
+  await store.set('panel', slots);
+  const loaded = new DashboardEditorPreferencesStore(path); await loaded.load();
+  assert.deepEqual(loaded.get('panel').slots, slots);
+  assert.deepEqual(loaded.get('other').shared, slots[0].slice(1));
+});
+
+test('Calendar V2 preferences preserve version and empty provider drafts never replace useful shared settings', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-calendar-prefs-'));
+  const path = join(dir, 'preferences.json');
+  try {
+    const store = new DashboardEditorPreferencesStore(path);
+    const slots = emptySlots();
+    slots[0] = [{ type: 'calendar', version: 1, config: { calendarUrls: ['https://example.com/feed'] } }];
+    await store.set('p', slots);
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: [] } }];
+    await store.set('p', slots);
+    assert.equal(store.get('new').shared[0]!.version, 1);
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.home'] } }];
+    await store.set('p', slots);
+    const loaded = new DashboardEditorPreferencesStore(path); await loaded.load();
+    assert.deepEqual(loaded.get('p').slots, slots);
+    assert.deepEqual(loaded.get('new').shared[0], slots[0][0]);
+    assert.deepEqual(loaded.get('new').shared[1]?.config, { calendarUrls: ['https://example.com/feed'] }, 'inactive iCal provider remains remembered');
+    slots[0] = [{ type: 'calendar', version: 2, config: { provider: 'ical', calendarUrls: [] } }];
+    await loaded.set('p', slots);
+    assert.deepEqual(loaded.get('new').shared[0]!.config, { provider: 'home-assistant', entityIds: ['calendar.home'] });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('provider-specific To Do and Calendar drafts persist per-slot and as shared fallbacks', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-provider-prefs-'));
+  const path = join(dir, 'preferences.json');
+  try {
+    const store = new DashboardEditorPreferencesStore(path);
+    const slots = emptySlots();
+    slots[0] = [
+      { type: 'todo', version: 2, config: { provider: 'home-assistant', entityId: 'todo.home' } },
+      { type: 'todo', version: 1, config: { listId: 'local-home' } },
+      { type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.home'] } },
+      { type: 'calendar', version: 1, config: { calendarUrls: ['https://example.com/feed'] } },
+    ];
+    await store.set('p', slots);
+    const reloaded = new DashboardEditorPreferencesStore(path); await reloaded.load();
+    assert.deepEqual(reloaded.get('p').slots, slots);
+    assert.deepEqual(reloaded.get('other').shared, slots[0]);
+    const duplicate = emptySlots();
+    duplicate[0] = [slots[0][0]!, slots[0][0]!];
+    await assert.rejects(store.set('p', duplicate), /duplicate remembered/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('remembered drafts persist per panel while useful values become shared fallbacks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-editor-prefs-'));
   const path = join(dir, '.dashboard-editor-preferences.json');

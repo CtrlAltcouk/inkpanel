@@ -13,6 +13,21 @@ test('hash excludes render and fetch timestamps', () => {
   assert.equal(contentHash(base), contentHash(changed));
 });
 
+test('calendar UIDs are hidden while normalized event content changes invalidate the hash', () => {
+  const base = dashboardData();
+  const renamed = structuredClone(base);
+  if (renamed.sections[0].type === 'calendar') renamed.sections[0].data!.today[0]!.uid = 'new-ha-uid';
+  assert.equal(contentHash(base), contentHash(renamed));
+  for (const patch of [
+    { title: 'Changed title' }, { start: '2026-08-03T08:00:00Z' },
+    { end: '2026-08-03T17:00:00Z' }, { allDay: true },
+  ]) {
+    const changed = structuredClone(base);
+    if (changed.sections[0].type === 'calendar') Object.assign(changed.sections[0].data!.today[0]!, patch);
+    assert.notEqual(contentHash(base), contentHash(changed));
+  }
+});
+
 test('hash includes the displayed minute of a stale badge, but not raw seconds', () => {
   const base = dashboardData();
   if (base.sections[0].type === 'calendar') base.sections[0].health = { id: 'ical', status: 'stale', fetchedAt: '2026-08-03T03:10:01.000Z', error: 'timeout' };

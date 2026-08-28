@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTrainSourceFromEnv } from '../src/index.ts';
+import { createTrainSourceFromEnv, resolveHomeAssistantIngressPort } from '../src/index.ts';
+
+test('Home Assistant Ingress uses its internal default and validates overrides', () => {
+  assert.equal(resolveHomeAssistantIngressPort(undefined), 8099);
+  assert.equal(resolveHomeAssistantIngressPort(' 9010 '), 9010);
+  for (const value of ['0', '65536', '1.5', 'bad']) {
+    assert.throws(() => resolveHomeAssistantIngressPort(value), /HOME_ASSISTANT_INGRESS_PORT/);
+  }
+});
 
 test('National Rail transport stays optional when no environment is configured', () => {
   assert.equal(createTrainSourceFromEnv({}), undefined);
