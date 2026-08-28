@@ -4,6 +4,7 @@ import type { FrameService } from '../render/frameService.ts';
 import { nextWakeSeconds } from '../schedule/nextWake.ts';
 import { deviceIdSchema } from '../devices/schema.ts';
 import type { PanelProfileId } from '../devices/types.ts';
+import { authorizePersonalTodoAccess } from '../homeAssistant/ingressUser.ts';
 import { panelProfile, WFT0583 } from '../panel/profile.ts';
 import {
   DeviceEnrolmentLimiter,
@@ -97,6 +98,7 @@ export function deviceRoutes(
       });
       return;
     }
+    if (!authorizePersonalTodoAccess(device.dashboardSections, res)) return;
     const batteryVolts = parseVolts(req.get('x-battery-voltage'));
 
     const wake = nextWakeSeconds({ now: new Date(), device, batteryVolts });

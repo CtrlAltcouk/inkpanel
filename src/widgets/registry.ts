@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
 import { todoEntityIdSchema } from '../homeAssistant/todoSchemas.ts';
+import { homeAssistantUserIdSchema } from '../homeAssistant/ingressUser.ts';
 import { sensorEntityIdsSchema } from '../homeAssistant/sensorSchemas.ts';
 
 export const entitiesWidgetConfigV1Schema = z.strictObject({ entityIds: sensorEntityIdsSchema });
@@ -68,6 +69,12 @@ export const todoWidgetConfigV2Schema = z.discriminatedUnion('provider', [
 ]);
 export const todoWidgetV2Schema = z.strictObject({
   type: z.literal('todo'), version: z.literal(2), config: todoWidgetConfigV2Schema,
+});
+export const todoWidgetV3Schema = z.strictObject({
+  type: z.literal('todo'), version: z.literal(3), config: z.discriminatedUnion('provider', [
+    z.strictObject({ provider: z.literal('local'), listId: todoWidgetConfigV1Schema.shape.listId }),
+    z.strictObject({ provider: z.literal('home-assistant'), ownerUserId: homeAssistantUserIdSchema, entityId: todoEntityIdSchema }),
+  ]),
 });
 
 export const printersWidgetConfigV1Schema = z.strictObject({
@@ -143,6 +150,7 @@ export type DashboardWidget =
   | z.infer<typeof octopusWidgetV1Schema>
   | z.infer<typeof todoWidgetV1Schema>
   | z.infer<typeof todoWidgetV2Schema>
+  | z.infer<typeof todoWidgetV3Schema>
   | z.infer<typeof printersWidgetV1Schema>
   | z.infer<typeof binsWidgetV1Schema>
   | z.infer<typeof emptyWidgetV1Schema>;
@@ -156,7 +164,7 @@ export const widgetRegistry = {
   bus: { 1: busWidgetV1Schema },
   traffic: { 1: trafficWidgetV1Schema },
   octopus: { 1: octopusWidgetV1Schema },
-  todo: { 1: todoWidgetV1Schema, 2: todoWidgetV2Schema },
+  todo: { 1: todoWidgetV1Schema, 2: todoWidgetV2Schema, 3: todoWidgetV3Schema },
   printers: { 1: printersWidgetV1Schema },
   bins: { 1: binsWidgetV1Schema },
   empty: { 1: emptyWidgetV1Schema },

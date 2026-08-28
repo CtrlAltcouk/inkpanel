@@ -12,6 +12,24 @@ function emptySlots(): DashboardEditorSlots {
   return [[], [], [], []];
 }
 
+test('personal To Do is remembered only for its panel while Calendar and Sensors remain shared', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-personal-prefs-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'preferences.json');
+  const store = new DashboardEditorPreferencesStore(path);
+  const slots = emptySlots();
+  slots[0] = [
+    { type: 'todo', version: 3, config: { provider: 'home-assistant', ownerUserId: 'owner', entityId: 'todo.personal' } },
+    { type: 'todo', version: 2, config: { provider: 'local', listId: 'home' } },
+    { type: 'calendar', version: 2, config: { provider: 'home-assistant', entityIds: ['calendar.shared'] } },
+    { type: 'entities', version: 1, config: { entityIds: ['sensor.shared'] } },
+  ];
+  await store.set('panel', slots);
+  const loaded = new DashboardEditorPreferencesStore(path); await loaded.load();
+  assert.deepEqual(loaded.get('panel').slots, slots);
+  assert.deepEqual(loaded.get('other').shared, slots[0].slice(1));
+});
+
 test('Calendar V2 preferences preserve version and empty provider drafts never replace useful shared settings', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-calendar-prefs-'));
   const path = join(dir, 'preferences.json');

@@ -22,6 +22,8 @@ import { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { homeAssistantRoutes } from './homeAssistantRoutes.ts';
 import type { UpdateMode } from '../system/updateOwnership.ts';
 import { mountStudioAssets } from './studioAssets.ts';
+import { parseIngressUser } from '../homeAssistant/ingressUser.ts';
+import { HomeAssistantUserStore, HomeAssistantUserStoreError } from '../homeAssistant/userStore.ts';
 
 function deviceStoreErrorBody(err: DeviceStoreError) {
   return {
@@ -58,6 +60,7 @@ export interface AppDeps {
   moonrakerClient?: MoonrakerClient;
   /** Shared Supervisor API client. Standalone tests/embedders may omit it. */
   homeAssistantClient?: HomeAssistantClient;
+  homeAssistantUserStore?: HomeAssistantUserStore;
   /** First-enrolment defaults supplied by the deployment, never used for known panels. */
   enrolmentDefaults?: DeviceEnrolmentDefaultsProvider;
   /** Deployment capability shared by runtime UI and mutation routes. Defaults to standalone. */
@@ -121,6 +124,20 @@ export function createApp(deps: AppDeps): express.Express {
     });
   }
   app.use(express.json());
+  const homeAssistantUserStore = deps.homeAssistantUserStore ?? new HomeAssistantUserStore(join(deps.dataDir, '.home-assistant-users.json'));
+  app.use(async (req, res, next) => {
+    const ingress = deps.access?.mode === 'home-assistant-ingress';
+    res.locals.homeAssistantIngress = ingress;
+    res.locals.homeAssistantUser = parseIngressUser(req, ingress);
+    if (res.locals.homeAssistantUser && ['/', '/index.html', '/api/home-assistant/current-user'].includes(req.path)) {
+      try { await homeAssistantUserStore.observe(res.locals.homeAssistantUser); }
+      catch (error) {
+        if (req.path.startsWith('/api/')) return next(error);
+        // Keep the shared Studio shell accessible; personal API requests fail closed.
+      }
+    }
+    next();
+  });
 
   app.get('/health', async (_req, res) => {
     const uptimeSeconds = Math.round(process.uptime());
@@ -208,7 +225,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', editorPreferencesRoutes(deps.store, deps.dataDir));
   app.use('/api', todoRoutes(deps.store, todoStore));
   app.use('/api', printerRoutes(deps.store, printerStore, moonrakerClient));
-  app.use('/api', homeAssistantRoutes(homeAssistantClient));
+  app.use('/api', homeAssistantRoutes(homeAssistantClient, homeAssistantUserStore));
   app.use('/api', systemRoutes(deps.store, deps.frames, deps.dataDir, { updateMode }));
   app.use('/api', firmwareRoutes(deps.firmwareDir, deps.publicBaseUrl));
 
@@ -218,6 +235,11 @@ export function createApp(deps: AppDeps): express.Express {
   // fetch failure and retain its existing e-paper image rather than enrolling
   // into a freshly invented empty configuration.
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof HomeAssistantUserStoreError) {
+      res.status(err.code === 'users_invalid' ? 400 : err.code === 'users_not_found' ? 404 : 503)
+        .json({ component: 'home-assistant-users', code: err.code, error: err.message });
+      return;
+    }
     if (err instanceof DeviceStoreError) {
       res.status(503).json(deviceStoreErrorBody(err));
       return;

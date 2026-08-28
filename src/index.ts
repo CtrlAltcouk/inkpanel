@@ -28,6 +28,7 @@ import { TodoStore } from './todo/store.ts';
 import { PrinterConnectionStore } from './printers/store.ts';
 import { MoonrakerClient } from './printers/moonraker.ts';
 import { HomeAssistantClient, isHomeAssistantMode } from './homeAssistant/client.ts';
+import { HomeAssistantUserStore } from './homeAssistant/userStore.ts';
 import { homeAssistantEnrolmentDefaults } from './homeAssistant/enrolment.ts';
 import { updateModeForDeployment } from './system/updateOwnership.ts';
 
@@ -154,11 +155,13 @@ export async function main(): Promise<void> {
     baseUrl: process.env.HOME_ASSISTANT_BASE_URL,
     token: process.env.SUPERVISOR_TOKEN,
   });
+  const homeAssistantUserStore = new HomeAssistantUserStore(join(dataDir, '.home-assistant-users.json'));
   const frames = new FrameService({
     renderer,
     cache: new SourceCache(join(dataDir, 'cache')),
     calendarSource,
     homeAssistantClient,
+    homeAssistantUserStore,
     trainSource,
     busSource,
     trafficSource,
@@ -183,6 +186,7 @@ export async function main(): Promise<void> {
     moonrakerClient,
     homeAssistantClient,
     updateMode,
+    homeAssistantUserStore,
     homeAssistantRelease: homeAssistantMode ? process.env.INKPANEL_HA_RELEASE : undefined,
     enrolmentDefaults: homeAssistantEnrolmentDefaults(homeAssistantMode, homeAssistantClient),
   };

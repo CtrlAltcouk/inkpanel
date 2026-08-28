@@ -2,10 +2,18 @@
 
 InkPanel turns an ESP32-S3 e-paper display into a configurable dashboard. This Home Assistant App runs the same InkPanel server and Studio as the standalone installation.
 
-This `0.1.0-ha.11` release is experimental. Add
+This `0.1.0-ha.12` release is experimental. Add
 `https://github.com/CtrlAltcouk/inkpanel#Home-Assistant` as a Home Assistant App repository to test it.
 
 The Studio opens through Home Assistant Ingress. Physical panels use the separately configured LAN address; they cannot use an Ingress URL.
+
+### Personal Home Assistant To Do (HA-5)
+
+Studio remains Home Assistant-admin-only (`panel_admin: true`). Open it through Ingress to register your HA user ID, then use **Settings → Home Assistant To Do users → Manage** to assign personal lists. In a To Do widget, choose Home Assistant, an owner and one of their assigned lists, then Save changes. Existing V2 HA widgets remain **Legacy shared Home Assistant To Do** until you explicitly choose **Make personal** and save.
+
+Only HA To Do has ownership. Calendar, Sensors, local InkPanel lists, other data and panel configuration remain household/shared. Physical panels use the owner/list saved in their widget, never the user currently browsing Studio. Revoked or unavailable ownership fails closed without fetching tasks. Back up `/data/.home-assistant-users.json` with device configuration.
+
+ha.12 keeps the complete release-versioned Studio assets introduced in ha.11 (`/assets/0.1.0-ha.12/`). Normal non-admin personal Studio access requires a future permission/redaction milestone; this release does not broaden Supervisor privileges or enumerate HA accounts.
 
 The App image includes the verified production WebFlash packages for both the full-size InkPanel and InkPanel Mini. Firmware is built during release CI, never when the App starts.
 

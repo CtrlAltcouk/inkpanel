@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FrameService } from '../../src/render/frameService.ts';
@@ -9,6 +9,8 @@ import { HomeAssistantClient } from '../../src/homeAssistant/client.ts';
 import { SourceCache } from '../../src/sources/cache.ts';
 import { defaultDevice } from '../../src/devices/types.ts';
 import { TodoStore } from '../../src/todo/store.ts';
+import { HomeAssistantUserStore } from '../../src/homeAssistant/userStore.ts';
+import { runHomeAssistantTodo } from '../../src/sources/homeAssistantTodo.ts';
 import { WEATHER } from '../fixtures/dashboard.ts';
 
 const weatherSource = { id: 'weather', async fetch() { return { status: 'ok' as const, data: WEATHER, fetchedAt: new Date().toISOString() }; } };
@@ -89,6 +91,72 @@ test('V2 local To Do renders exactly like V1 on both profiles', async () => {
       device.dashboardSections = device.dashboardSections.map(() => ({ type: 'todo', version: 2, config: { provider: 'local', listId: list.id } }));
       assert.equal((await frames.frameFor(device, null)).etag, first.etag);
       assert.match(await frames.previewHtml(device), /Existing local task/);
+      device.dashboardSections = device.dashboardSections.map(() => ({ type: 'todo', version: 3, config: { provider: 'local', listId: list.id } }));
+      assert.equal((await frames.frameFor(device, null)).etag, first.etag, 'V3 local has identical visible pixels');
     }
   } finally { await renderer.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('personal V3 uses fixed assignment, identical pixels, no substitution or stale replay on both profiles', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-personal-frame-'));
+  const renderer = new Renderer();
+  t.after(async () => { await renderer.close(); await rm(dir, { recursive: true, force: true }); });
+  const path = join(dir, 'users.json');
+  const users = new HomeAssistantUserStore(path);
+  await users.observe({ id: 'owner', username: null, displayName: 'Owner' });
+  await users.observe({ id: 'browser-user', username: null, displayName: 'Browser user' });
+  const requests: string[] = [];
+  let items = ['First personal task', 'Second', 'Third', 'Fourth', 'Fifth', 'Hidden sixth'];
+  const client = new HomeAssistantClient({ enabled: true, token: 'secret-token', fetchImpl: async (_url, init) => {
+    const id = JSON.parse(String(init?.body)).entity_id;
+    requests.push(id);
+    return Response.json({ changed_states: [], service_response: { [id]: { items: items.map((summary) => ({ summary, status: 'needs_action' })) } } });
+  } });
+  const frames = new FrameService({ renderer, cache: new SourceCache(join(dir, 'cache')), weatherSource, homeAssistantClient: client, homeAssistantUserStore: users });
+  for (const profile of ['wft0583-800x480-mono', 'ssd1681-200x200-mono'] as const) {
+    await users.assign('browser-user', []);
+    await users.assign('owner', ['todo.personal']);
+    items = ['First personal task', 'Second', 'Third', 'Fourth', 'Fifth', 'Hidden sixth'];
+    const device = defaultDevice(`personal-${profile}`, profile);
+    device.dashboardSections = device.dashboardSections.map(() => ({ type: 'todo', version: 2, config: { provider: 'home-assistant', entityId: 'todo.personal' } }));
+    const shared = await frames.frameFor(device, null);
+    device.dashboardSections = device.dashboardSections.map(() => ({ type: 'todo', version: 3, config: { provider: 'home-assistant', ownerUserId: 'owner', entityId: 'todo.personal' } }));
+    assert.equal((await frames.frameFor(device, null)).etag, shared.etag, 'ownership metadata never enters the pixel hash');
+    await users.observe({ id: 'browser-user', username: 'owner', displayName: 'Owner' });
+    assert.equal((await frames.frameFor(device, null)).etag, shared.etag, 'observed browser identity cannot select panel contents');
+    assert.doesNotMatch(await frames.previewHtml(device), /Hidden sixth|secret-token/);
+    items = [];
+    assert.match(await frames.previewHtml(device), /ALL DONE|All done/);
+    await users.assign('owner', []);
+    const before = requests.length;
+    assert.doesNotMatch(await frames.previewHtml(device), /First personal task|ALL DONE|All done/);
+    await frames.frameFor(device, null);
+    assert.equal(requests.length, before, 'revoked ownership does not fetch');
+    assert.ok(frames.sourceIssues().some((issue) => issue.deviceId === device.id && issue.sourceId.includes('home-assistant-todo')));
+    await users.assign('browser-user', ['todo.personal']);
+    assert.doesNotMatch(await frames.previewHtml(device), /ALL DONE|All done/);
+    assert.equal(requests.length, before, 'reassignment cannot substitute a new owner');
+  }
+  const before = requests.length;
+  await writeFile(path, '{invalid');
+  const outcome = await runHomeAssistantTodo('todo.personal', client, { deviceId: 'p', timeoutMs: 1000 }, { ownerUserId: 'owner', store: users });
+  assert.equal(outcome.data, null);
+  assert.equal(outcome.health.status, 'error');
+  assert.equal(requests.length, before);
+  assert.ok(requests.every((id) => id === 'todo.personal'));
+});
+
+test('revocation during an in-flight personal fetch discards the returned tasks', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'inkpanel-revoke-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new HomeAssistantUserStore(join(dir, 'users.json'));
+  await store.observe({ id: 'owner', username: null, displayName: null });
+  await store.assign('owner', ['todo.personal']);
+  const client = new HomeAssistantClient({ enabled: true, token: 'secret', fetchImpl: async () => {
+    await store.assign('owner', []);
+    return Response.json({ changed_states: [], service_response: { 'todo.personal': { items: [{ summary: 'Private', status: 'needs_action' }] } } });
+  } });
+  const outcome = await runHomeAssistantTodo('todo.personal', client, { deviceId: 'p', timeoutMs: 1000 }, { ownerUserId: 'owner', store });
+  assert.equal(outcome.data, null);
+  assert.equal(outcome.health.status, 'error');
 });

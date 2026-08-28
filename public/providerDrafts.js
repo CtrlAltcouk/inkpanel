@@ -28,5 +28,6 @@ export function rememberedProviderDrafts(slot) {
     ...Object.entries(slot.providerDrafts?.[type] ?? {})
       .filter(([provider]) => provider !== providerOf(type, config))
       .map(([, widget]) => structuredClone(widget)),
-  ]);
+  ]).filter((widget) => widget.type !== 'todo' || widget.version !== 3
+    || widget.config.provider !== 'home-assistant' || (widget.config.ownerUserId && widget.config.entityId));
 }

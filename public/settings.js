@@ -1,5 +1,6 @@
 import { getJson, sendJson } from './api.js';
 import { esc } from './components.js';
+import { renderHomeAssistantUsers } from './homeAssistantUsers.js';
 
 const POLL_MS = 2000;
 const GIVE_UP_MS = 3 * 60 * 1000;
@@ -124,6 +125,11 @@ export async function renderSettings(root, { refresh = false } = {}) {
     getJson('/api/home-assistant/status'),
   ]);
   root.innerHTML = settingsView(info, homeAssistantStatus);
+  if (homeAssistantStatus?.mode === 'home-assistant-app') {
+    const ownership = document.createElement('div');
+    root.append(ownership);
+    await renderHomeAssistantUsers(ownership);
+  }
   root.querySelector('#recheck').addEventListener('click', async () => {
     root.innerHTML = '<p class="empty">Checking…</p>';
     try {

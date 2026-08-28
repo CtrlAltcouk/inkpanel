@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { createApp } from '../../src/http/app.ts';
 import { DeviceStore } from '../../src/devices/store.ts';
 import { createRuntimeState } from '../../src/runtimeConfig.ts';
+import { HomeAssistantUserStore } from '../../src/homeAssistant/userStore.ts';
 import { parse } from 'yaml';
 
 const MINI = 'ssd1681-200x200-mono';
@@ -18,6 +19,9 @@ const appConfig = parse(await readFile(new URL('../../home-assistant/config.yaml
 async function withStudio({ ha = true, prefix = '', profile = MINI, realEntry = false } = {}, run) {
   const dir = await mkdtemp(join(tmpdir(), 'inkpanel-studio-reliability-'));
   const store = new DeviceStore(join(dir, 'config.json'));
+  const users = new HomeAssistantUserStore(join(dir, 'users.json'));
+  await users.observe({ id: 'test-user', username: null, displayName: 'Test user' });
+  await users.assign('test-user', ['todo.shopping']);
   await store.getOrCreate('panel-a', profile);
   const sections = (first) => profile === MINI ? [first] : [first, ...Array.from({ length: 3 }, () => ({ type: 'weather', version: 1, config: {} }))];
   await store.update('panel-a', { claimed: realEntry, dashboardSections: sections({ type: 'todo', version: 1, config: { listId: '' } }) });
@@ -50,7 +54,7 @@ async function withStudio({ ha = true, prefix = '', profile = MINI, realEntry = 
     store, frames, publicBaseUrl: 'http://panel.test:8080', runtimeState: createRuntimeState(),
     dataDir: dir, firmwareDir: dir, auth: { password: null, secret: randomBytes(32) },
     updateMode: ha ? 'home-assistant' : 'self',
-    homeAssistantRelease: appConfig.version,
+    homeAssistantRelease: appConfig.version, homeAssistantUserStore: users,
     ...(prefix ? { access: { mode: 'home-assistant-ingress', isTrustedRequest: () => true } } : {}),
   }));
   const app = express();
@@ -59,7 +63,7 @@ async function withStudio({ ha = true, prefix = '', profile = MINI, realEntry = 
   await new Promise((resolve) => server.once('listening', resolve));
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ extraHTTPHeaders: { 'x-remote-user-id': 'test-user' } });
     const requests = [];
     page.on('request', (request) => requests.push(new URL(request.url())));
     await page.goto(`http://127.0.0.1:${server.address().port}${prefix}/${realEntry ? appConfig.ingress_entry : 'harness'}`);

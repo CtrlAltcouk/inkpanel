@@ -11,7 +11,9 @@ test('repository and immediate App metadata parse and describe the HA-1 boundary
   const repository = parse(await readFile(join(root, 'repository.yaml'), 'utf8'));
   const config = parse(await readFile(join(root, 'home-assistant', 'config.yaml'), 'utf8'));
   assert.equal(repository.url, 'https://github.com/CtrlAltcouk/inkpanel');
-  assert.equal(config.version, '0.1.0-ha.11');
+  assert.equal(config.version, '0.1.0-ha.12');
+  assert.equal(config.panel_admin, true);
+  for (const privilege of ['hassio_role', 'full_access', 'docker_api', 'auth_api']) assert.equal(config[privilege], undefined);
   assert.equal(config.image, 'ghcr.io/ctrlaltcouk/inkpanel-home-assistant');
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
   assert.equal(config.ingress, true);

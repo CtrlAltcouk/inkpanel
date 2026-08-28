@@ -19,7 +19,8 @@ import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { PrinterConnectionStore } from '../printers/store.ts';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
-import { todoWidgetV2Schema, entitiesWidgetV1Schema } from '../widgets/registry.ts';
+import { todoWidgetV2Schema, todoWidgetV3Schema, entitiesWidgetV1Schema } from '../widgets/registry.ts';
+import { authorizePersonalTodoAccess } from '../homeAssistant/ingressUser.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -45,6 +46,7 @@ const octopusTariffCodeInputSchema = z
 const dashboardSectionInputSchema = z.union([
   entitiesWidgetV1Schema,
   todoWidgetV2Schema,
+  todoWidgetV3Schema,
   z.strictObject({
     type: z.literal('calendar'), version: z.literal(1),
     config: z.strictObject({ calendarUrls: z.array(calendarUrlInputSchema).max(10) }),
@@ -254,7 +256,17 @@ export function manageRoutes(
   });
 
   router.get('/devices', async (_req, res) => {
-    res.json({ devices: await store.list() });
+    const devices = await store.list();
+    if (!authorizePersonalTodoAccess(devices.flatMap((device) => device.dashboardSections), res)) return;
+    res.json({ devices });
+  });
+
+  router.use('/devices/:id', async (req, res, next) => {
+    if (res.locals.homeAssistantIngress && !res.locals.homeAssistantUser) {
+      const device = await store.get(req.params.id);
+      if (device && !authorizePersonalTodoAccess(device.dashboardSections, res)) return;
+    }
+    next();
   });
 
   router.get('/devices/:id', async (req, res) => {
@@ -290,6 +302,7 @@ export function manageRoutes(
       return;
     }
 
+    if (!authorizePersonalTodoAccess(sections, res)) return;
     for (const widget of sections) {
       if (widget.type === 'todo' && 'listId' in widget.config && widget.config.listId
         && (!todoStore || !(await todoStore.get(widget.config.listId)))) {

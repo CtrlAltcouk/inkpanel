@@ -3,7 +3,7 @@ import { renderStationPicker } from './stationPicker.js';
 import { renderBusStopPicker } from './busStopPicker.js';
 import { getJson, sendJson } from './api.js';
 import { calendarControlsHtml, rememberCalendarConfig, switchCalendarProvider } from './calendarEditor.js';
-import { todoProviderHtml, homeAssistantTodoControlsHtml, rememberTodoConfig, switchTodoProvider } from './todoEditor.js';
+import { todoProviderHtml, homeAssistantTodoControlsHtml, rememberTodoConfig, switchTodoProvider, makeTodoPersonal } from './todoEditor.js';
 import { providerDraftState, rememberedProviderDrafts } from './providerDrafts.js';
 import { entitiesControlsHtml, bindEntitiesEditor } from './entitiesEditor.js';
 
@@ -480,10 +480,18 @@ function renderEditor(root) {
   } else if (slot.type === 'todo') {
     panel.querySelector('[data-todo-provider]')?.addEventListener('change', (event) => {
       rememberCell(panel, slot);
-      switchTodoProvider(slot, event.target.value);
+      switchTodoProvider(slot, event.target.value, state.haTodos);
       renderLayout(root); renderEditor(root); markDashboardChanged(root);
     });
     if (config.provider === 'home-assistant') {
+      panel.querySelector('[data-todo-make-personal]')?.addEventListener('click', () => {
+        makeTodoPersonal(slot, state.haTodos);
+        renderLayout(root); renderEditor(root); markDashboardChanged(root);
+      });
+      panel.querySelector('[data-ha-todo-owner]')?.addEventListener('change', (event) => {
+        slot.drafts.todo = { provider: 'home-assistant', ownerUserId: event.target.value, entityId: '' };
+        renderLayout(root); renderEditor(root); markDashboardChanged(root);
+      });
       panel.querySelector('[data-ha-todo-list]').addEventListener('change', () => {
         rememberCell(panel, slot); renderLayout(root); markDashboardChanged(root);
       });

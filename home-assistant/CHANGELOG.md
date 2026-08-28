@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-ha.12
+
+- Add HA-5 personal Home Assistant To Do ownership keyed only by validated user IDs from the trusted Supervisor Ingress listener. LAN headers cannot forge an identity.
+- Persist observed users and unique personal-list assignments in a separate version-1, atomic mode-0600 ownership store; retain corrupt originals and fail closed.
+- Add current-user/scoped-list APIs and administrative Settings assignment management without task contents, user enumeration or broader Supervisor privileges. Explicitly retain `panel_admin: true`.
+- Add To Do V3 fixed owner/entity configuration. Keep V1/V2 unchanged, label V2 HA as legacy shared, and require explicit Make personal/save conversion. Preserve provider drafts without sharing personal defaults across panels.
+- Check ownership before and after live fetch; revoked/reassigned/unavailable ownership never fetches another list or replays stale tasks. Keep existing full-size/Mini To Do pixels and ETags.
+- Only HA To Do is user-scoped. Calendar, Sensors, other sources, local To Do and panel configuration remain shared. Non-admin Studio is deferred to a dedicated permissions/redaction milestone.
+- Synchronize App, Ingress query and image release at ha.12; retain complete release-versioned assets. No firmware, framebuffer, protocol, profile, DeviceStore version or frozen migration changes.
+
 ## 0.1.0-ha.11
 
 - Real-world ha.10 Sensors worked over direct LAN, while Ingress retained older nested frontend modules. A release query on the document alone did not version stable JS/CSS/import URLs.

@@ -18,6 +18,7 @@ import { runHomeAssistantCalendars } from '../sources/homeAssistantCalendar.ts';
 import { runHomeAssistantTodo } from '../sources/homeAssistantTodo.ts';
 import { runHomeAssistantEntities } from '../sources/homeAssistantEntities.ts';
 import type { HomeAssistantClient } from '../homeAssistant/client.ts';
+import type { HomeAssistantUserStore } from '../homeAssistant/userStore.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
 import { runLiveSource, runSource } from '../sources/runner.ts';
@@ -58,6 +59,7 @@ export interface FrameDeps {
   /** Injected once at startup so calendar network policy is explicit/testable. */
   calendarSource?: Source<IcalFeedConfig, string>;
   homeAssistantClient?: HomeAssistantClient;
+  homeAssistantUserStore?: HomeAssistantUserStore;
   weatherSource?: typeof openMeteoSource;
   binsSource?: typeof binsSource;
   trainSource?: Source<TrainSourceConfig, TrainData>;
@@ -247,7 +249,8 @@ export class FrameService {
         case 'todo': {
           if ('entityId' in widget.config) {
             request = widget.config.entityId
-              ? runHomeAssistantTodo(widget.config.entityId, this.deps.homeAssistantClient, runOptions)
+              ? runHomeAssistantTodo(widget.config.entityId, this.deps.homeAssistantClient, runOptions,
+                widget.version === 3 ? { ownerUserId: widget.config.ownerUserId, store: this.deps.homeAssistantUserStore } : undefined)
                 .then((outcome) => ({ type: 'todo', data: outcome.data, configured: true, health: outcome.health }))
               : Promise.resolve({ type: 'todo', data: null, configured: false, health: null });
           } else if (!widget.config.listId || !this.deps.todoStore) {

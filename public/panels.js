@@ -227,6 +227,14 @@ export async function renderPanels(root) {
   const supported = runtime.updateMode === 'home-assistant';
   const haCalendars = { ...calendars, supported };
   const haTodos = { ...todos, supported };
+  if (supported) {
+    const identity = await getJson('/api/home-assistant/current-user').catch(() => ({ available: false, user: null }));
+    const [mappings, personal] = await Promise.all([
+      getJson('/api/home-assistant/users').catch(() => ({ users: [] })),
+      identity.available ? getJson('/api/home-assistant/my-todo-lists').catch(() => ({ lists: [] })) : Promise.resolve({ lists: [] }),
+    ]);
+    Object.assign(haTodos, { personalSupported: true, currentUser: identity.user, users: mappings.users, personalLists: personal.lists });
+  }
   const haSensors = { ...sensors, supported };
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;

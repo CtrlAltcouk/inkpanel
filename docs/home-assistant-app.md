@@ -1,6 +1,18 @@
 # Home Assistant App architecture
 
-Status: HA-1, HA-2 and ha.6 installation-location defaults are validated. HA-3 and HA-4 are implemented. Real-world ha.10 Sensors worked through direct LAN Studio, but Ingress still loaded older nested frontend modules: ha.9's document query was not sufficient to version the module graph. `0.1.0-ha.11` versions the complete Studio asset namespace on the experimental `Home-Assistant` branch. HA-4 awaits final real-world Ingress/physical validation. PR #31 remains draft and unmerged.
+Status: HA-1/HA-2 are validated, HA-3 is working, and HA-4 Sensors work in the real installation with longer soak/physical testing continuing. ha.11's complete Studio asset versioning is validated through Ingress and LAN. `0.1.0-ha.12` adds HA-5 personal To Do ownership on the experimental `Home-Assistant` branch. PR #31 remains draft and unmerged.
+
+## HA-5 ownership and administration
+
+Only Home Assistant To Do becomes user-aware. Calendar, Sensors, local To Do, other sources, device configuration, location and schedules remain shared. Studio stays HA-admin-only with explicit `panel_admin: true`; authenticated LAN Studio is also an administrative surface. A restricted non-admin personal view is a future authorization/redaction milestone, not part of ha.12.
+
+The trusted Supervisor listener centrally parses validated `X-Remote-User-Id`, `X-Remote-User-Name` and `X-Remote-User-Display-Name`. LAN listeners ignore these headers. User ID is the sole ownership key. Valid observed identities are registered in `/data/.home-assistant-users.json`, a strict atomic mode-0600 version-1 store of safe metadata and unique `todo.*` assignments. Name changes preserve assignments; reused names do not inherit them. Corrupt data remains untouched and personal operations fail closed.
+
+`GET /api/home-assistant/current-user` distinguishes trusted Ingress from LAN. `GET /api/home-assistant/my-todo-lists` returns only the current Ingress user's assigned identities/names, retaining missing IDs. Admin discovery remains `/api/home-assistant/todo-lists`. Admin mapping management uses `GET /api/home-assistant/users`, `PUT /api/home-assistant/users/:id` with `{todoEntityIds: string[]}`, and `DELETE /api/home-assistant/users/:id` (removes the local mapping, never the HA account). No endpoint here returns task contents or credentials, and no HA user enumeration API is used.
+
+To Do V3 stores either `{provider:"local",listId}` or `{provider:"home-assistant",ownerUserId,entityId}`. V1/V2 remain unchanged; V2 HA is explicitly legacy shared. New personal selections default to the observed Ingress user; administrators can explicitly choose another observed owner. Only assigned lists appear, and removed IDs remain selected as unavailable rather than being substituted. Personal preferences stay per-panel and do not become household defaults.
+
+The physical frame uses its fixed V3 owner/entity, validates ownership before live fetch and again after fetch, and fails closed on revocation, reassignment or storage failure. It retains the existing `{items:string[]}` contract and renderer/hash behavior. No firmware, device schema, frozen migrations or display profiles change. See [security boundaries and validation](home-assistant-todo-security.md).
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,7 +162,7 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 Calendar renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. The current experimental image tag is `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.11` for linux/amd64 and linux/arm64 (HA's aarch64).
+The full-size 800×480 and Mini 200×200 Calendar renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. The ha.12 release image tag is `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.12` for linux/amd64 and linux/arm64 (HA's aarch64).
 
 #### First-time panel location defaults (ha.6; validated on real hardware)
 
@@ -248,7 +260,7 @@ Full-size Sensors uses a dominant value with its friendly name beneath for one s
 
 In HA App mode choose **Home Assistant Sensors** in Content. Search by name or entity ID (at most 20 search results at once), inspect current values/units, add up to four, remove or reorder, then **Save changes**. Searching does not dirty panel config. Missing selections stay visible as missing/unavailable. Existing per-slot/shared remembered settings retain IDs and order across Sensors → Weather → Sensors and save/reopen. Standalone hides the new option for other widgets but preserves any already-saved Sensors config.
 
-ha.10 introduced Sensors without changing the asset namespace. ha.11 keeps that implementation unchanged and updates App `version`, `ingress_entry: "?inkpanel_release=0.1.0-ha.11"` and the image workflow version together. Existing checks enforce the same release through `BUILD_VERSION`, `INKPANEL_HA_RELEASE` and runtime diagnostics. Use ha.11 for the current upgrade.
+ha.10 introduced Sensors without changing the asset namespace. ha.11 kept that implementation unchanged and updated App `version`, `ingress_entry: "?inkpanel_release=0.1.0-ha.11"` and the image workflow version together. Existing checks enforce the same release through `BUILD_VERSION`, `INKPANEL_HA_RELEASE` and runtime diagnostics. ha.12 retains these invariants with its own release namespace.
 
 #### ha.11 complete frontend asset namespace
 
@@ -286,7 +298,7 @@ Battery              78%
 
 Mini uses the dedicated hero or short-list layout described above. Lock and other non-sensor domains are not supported in HA-4 V1.
 
-### Phase HA-5 — richer Home Assistant capabilities
+### Future phases — richer Home Assistant capabilities
 
 Possible later work:
 
@@ -321,6 +333,7 @@ App runtime state remains under `/data`, including the existing:
 - source cache;
 - remembered editor preferences;
 - local To Do lists;
+- `.home-assistant-users.json` observed identities and personal To Do assignments (ha.12);
 - printer connections;
 - managed provider credentials;
 - session secret;
