@@ -67,6 +67,7 @@ function clone<T>(value: T): T {
 /** Only complete/useful configs become the shared fallback for other panels. */
 function meaningful(widget: DashboardWidget): boolean {
   switch (widget.type) {
+    case 'entities': return widget.config.entityIds.length > 0;
     case 'calendar': return 'entityIds' in widget.config
       ? widget.config.entityIds.length > 0 : widget.config.calendarUrls.length > 0;
     case 'trains': return Boolean(widget.config.originCrs && widget.config.destinationCrs);

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { isValidTimezone } from '../devices/schema.ts';
 import { todoEntityIdSchema, homeAssistantTodoListsSchema, homeAssistantTodoResponseSchema } from './todoSchemas.ts';
 import type { TodoData } from '../model/dashboard.ts';
+import { sensorEntityIdSchema, homeAssistantSensorStateSchema, homeAssistantSensorsSchema, type HomeAssistantSensorState } from './sensorSchemas.ts';
 import {
   calendarEntityIdSchema, homeAssistantCalendarListSchema, homeAssistantCalendarEventsSchema,
   type HomeAssistantCalendarEvent,
@@ -22,6 +23,13 @@ export interface HomeAssistantTodoDiscovery {
   supported: boolean;
   available: boolean;
   lists: Array<{ entityId: string; name: string }>;
+  error: string | null;
+}
+
+export interface HomeAssistantSensorDiscovery {
+  supported: boolean;
+  available: boolean;
+  entities: Array<Omit<HomeAssistantSensorState, 'available'>>;
   error: string | null;
 }
 
@@ -221,6 +229,21 @@ export class HomeAssistantClient {
     }
     return this.request('services/todo/get_items?return_response', homeAssistantTodoResponseSchema(entityId),
       'To Do items', signal, { method: 'POST', body: { entity_id: entityId, status: 'needs_action' } });
+  }
+
+  async listSensors(signal?: AbortSignal): Promise<HomeAssistantSensorDiscovery> {
+    const result = await this.request('states', homeAssistantSensorsSchema, 'sensor discovery', signal);
+    return { supported: this.enabled, available: result.available,
+      entities: result.available ? result.data.map(({ available: _available, ...sensor }) => sensor) : [],
+      error: result.available || !this.enabled ? null : result.error };
+  }
+
+  async getSensorState(entityId: string, signal?: AbortSignal): Promise<HomeAssistantResult<HomeAssistantSensorState>> {
+    if (!sensorEntityIdSchema.safeParse(entityId).success) {
+      return { available: false, error: 'invalid Home Assistant sensor entity ID' };
+    }
+    return this.request(`states/${encodeURIComponent(entityId)}`,
+      homeAssistantSensorStateSchema.refine((state) => state.entityId === entityId), 'sensor state', signal);
   }
 }
 

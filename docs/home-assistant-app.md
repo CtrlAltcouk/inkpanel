@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do was implemented in `0.1.0-ha.7`. Real-world ha.8 tests confirmed direct LAN Studio worked but Ingress retained an older document. `0.1.0-ha.9` versions the Ingress entry on the `Home-Assistant` branch. HA-3 is not yet fully validated and requires another real-installation Ingress retest.
+Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do is implemented; real-world testing now confirms the ha.9 Ingress freshness fix works. `0.1.0-ha.10` adds HA-4 Home Assistant Sensors on the experimental `Home-Assistant` branch. HA-4 is implemented but not yet real-world validated. PR #31 remains draft and unmerged.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,7 +150,7 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. Experimental images are published as `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.9` for linux/amd64 and linux/arm64.
+The full-size 800×480 and Mini 200×200 Calendar renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. The current experimental image tag is `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.10` for linux/amd64 and linux/arm64 (HA's aarch64).
 
 #### First-time panel location defaults (ha.6; validated on real hardware)
 
@@ -162,7 +162,7 @@ Known devices never request installation location and are never automatically up
 
 After upgrading to ha.6, validate a genuinely new panel of each size against the installation location in Home Assistant. Existing panels intentionally retain their saved location; update those manually in Studio if necessary. Check that a manual location edit survives subsequent wakes, and that a known panel continues to receive frames during a temporary HA API outage (individual HA-backed widgets retain their existing unavailable/stale semantics).
 
-### Phase HA-3 — Home Assistant To Do (implemented; awaiting real-world validation)
+### Phase HA-3 — Home Assistant To Do (implemented; ha.9 Ingress fix confirmed)
 
 To Do V2 adds a strict provider choice while existing To Do V1 records remain valid, local, and unchanged on load or unrelated saves:
 
@@ -220,43 +220,59 @@ HA runtime config now includes `release`, sourced from the existing image `BUILD
 
 Future HA write support (`todo.add_item`, `todo.update_item`, `todo.remove_item`) is a separate milestone. ha.7 exposes none of those actions from Studio.
 
-### Phase HA-4 — Home Assistant Entities
+### Phase HA-4 — Home Assistant Sensors (implemented; awaiting real-world validation)
 
-Add a generic widget type such as `home_assistant` or `ha_entities`.
+The first read-only generic entity-display milestone deliberately supports **only `sensor.*`**. Other domains are future work, not enabled by this release.
 
-It should allow selecting useful entities from Home Assistant and display normalized rows such as:
+#### Persistence and API boundaries
 
-- entity friendly name;
-- state;
-- unit of measurement where applicable;
-- optional icon/category metadata used only by Studio, not required by the monochrome framebuffer.
+```json
+{"type":"entities","version":1,"config":{"entityIds":["sensor.living_room_temperature","sensor.house_power"]}}
+```
 
-Initial supported domains should prioritize display-oriented state:
+The widget registry validates a strict V1 config: ordered, unique IDs matching `^sensor\.[a-z0-9_]+$`, maximum 255 characters per ID and four selections. Empty means not configured. Validation is syntactic, not dependent on current HA discovery; missing entities never make DeviceStore unreadable. No DeviceStore version, frozen schema or migration changes are needed. Both profiles use the existing widget registry and editor-preferences persistence.
 
-- `sensor.*`
-- `binary_sensor.*`
-- `weather.*`
-- `climate.*`
-- `person.*`
-- `lock.*`
-- `alarm_control_panel.*`
+The server-only Supervisor client uses the official [HA REST state endpoints](https://developers.home-assistant.io/docs/api/rest/): `GET states` for discovery and `GET states/<encoded entity_id>` for each selected runtime state. Discovery is exposed by authenticated `GET /api/home-assistant/sensors`, projecting only `entityId`, friendly `name`, `state`, `unit` and `deviceClass`. Names/states are bounded to 255 characters, units to 32 and device classes to 64; malformed optional attributes fall back safely. Other attributes, timestamps, contexts and credentials never reach Studio. Runtime response IDs must match the requested ID. Existing timeouts, aborts, redirect rejection and safe errors apply.
 
-The data model must be generic enough that additional domains can be enabled later without a DeviceStore migration.
+HA capability continues to come from runtime deployment mode. Discovery failure means supported but unavailable in HA App mode, not unsupported. Standalone discovery is unsupported and does not contact HA. All sensor operations are GET-only; Studio exposes no state mutation.
 
-Example physical content:
+#### Live-only data and rendering
+
+FrameService fetches up to four selected states concurrently. Identical widgets share the existing per-frame request promise. The display model contains only `items: [{name, value, unit, available}]` in selection order: no entity ID, device class or hidden HA metadata. There is no persistent sensor cache or stale replay. A missing/unknown entity keeps its row and shows UNAVAILABLE; valid rows survive other failures. If every request fails, configured remains true, data is null and health is error. Empty selection has configured false and no data. Unrelated widgets retain their own source/health behaviour.
+
+One formatting helper preserves trimmed HA strings/units, performs no conversions and associates units consistently (`21.4°C`, `89%`, `312 W`). Unknown, unavailable and invalid placeholder strings never appear as numeric values. Ordinary model hashing excludes health and hidden HA metadata; unchanged display state preserves existing physical ETag/304 semantics. No physical refresh special case is added.
+
+Full-size Sensors uses a dominant value with its friendly name beneath for one sensor, or up to four rows with names left and values right. Mini uses a dedicated 200×200 hero/row layout with the same data. Names and long values are bounded and ellipsized, with explicit unavailable states. Both are monochrome, use existing fonts and inject only widget-scoped CSS when Sensors is present. Existing widget markup/CSS is pinned against ha.9 output; no banner, grid, existing widget, quantisation or framebuffer changes are made.
+
+#### Studio and release
+
+In HA App mode choose **Home Assistant Sensors** in Content. Search by name or entity ID (at most 20 search results at once), inspect current values/units, add up to four, remove or reorder, then **Save changes**. Searching does not dirty panel config. Missing selections stay visible as missing/unavailable. Existing per-slot/shared remembered settings retain IDs and order across Sensors → Weather → Sensors and save/reopen. Standalone hides the new option for other widgets but preserves any already-saved Sensors config.
+
+ha.10 updates App `version`, `ingress_entry: "?inkpanel_release=0.1.0-ha.10"` and the image workflow version together. Existing checks enforce the same release through `BUILD_VERSION`, `INKPANEL_HA_RELEASE` and runtime diagnostics. Historical ha.9 details/checklist above document the original freshness fix; use ha.10 for the current upgrade.
+
+#### Real-world validation checklist for ha.10
+
+1. Upgrade to `0.1.0-ha.10`, reopen from the HA sidebar normally, and confirm the iframe query and both LAN/Ingress runtime-config releases equal `0.1.0-ha.10`. Do not clear caches or reinstall.
+2. On a full-size panel, choose Sensors in one section. Search by friendly name and by ID, select a temperature sensor and save. Open the preview and wake the panel: confirm the hero value/unit/name matches HA without conversion.
+3. Add humidity, power and battery (or other real sensors); reorder and save. Verify four rows, matching order/units, on preview and physical display. Try long names/values and an entity without a unit: no overlap or overflow.
+4. Repeat single-sensor and four-sensor checks on Mini at physical size, including long text and UNAVAILABLE. Confirm legibility; HA-4 is not validated until these real displays are checked.
+5. Switch Sensors → Weather → Sensors, save/reopen, and confirm selections/order. Check a new panel/slot receives the existing shared remembered fallback without overwriting its active config.
+6. Remove or disable one selected sensor in HA: retain its configured position/ID, show unavailable, and keep other rows. Temporarily interrupt HA API access: all-failed Sensors shows unavailable, not stale values, while unrelated widgets remain usable. Restore HA and refresh/wake to recover.
+7. Change only hidden HA metadata and confirm the next physical frame poll retains its ETag/304; change a displayed value and confirm a new frame. The normal refresh schedule still applies; this milestone adds no live subscription.
+8. Recheck HA Calendar, HA/local To Do, ha.6 location defaults, previews without Push, and existing full-size/Mini widgets. Standalone should not offer Sensors for a new widget. Firmware, provisioning and WebFlash remain unchanged.
+
+Example four-sensor physical content:
 
 ```
-HOME
+SENSORS
 ------------------------
 Living room       21.4 C
-Outside             16 C
 Solar             2.8 kW
 House             1.3 kW
 Battery              78%
-Front door         LOCKED
 ```
 
-Mini should use a reduced single-focus or short-list layout rather than attempting to mirror a large full-size list blindly.
+Mini uses the dedicated hero or short-list layout described above. Lock and other non-sensor domains are not supported in HA-4 V1.
 
 ### Phase HA-5 — richer Home Assistant capabilities
 

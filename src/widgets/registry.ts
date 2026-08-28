@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
 import { todoEntityIdSchema } from '../homeAssistant/todoSchemas.ts';
+import { sensorEntityIdsSchema } from '../homeAssistant/sensorSchemas.ts';
+
+export const entitiesWidgetConfigV1Schema = z.strictObject({ entityIds: sensorEntityIdsSchema });
+export const entitiesWidgetV1Schema = z.strictObject({
+  type: z.literal('entities'), version: z.literal(1), config: entitiesWidgetConfigV1Schema,
+});
 
 /** Persisted calendar URLs stay broad so existing private feeds remain readable. */
 export const calendarWidgetConfigV1Schema = z.strictObject({
@@ -127,6 +133,7 @@ export const emptyWidgetV1Schema = z.strictObject({
 });
 
 export type DashboardWidget =
+  | z.infer<typeof entitiesWidgetV1Schema>
   | z.infer<typeof calendarWidgetV1Schema>
   | z.infer<typeof calendarWidgetV2Schema>
   | z.infer<typeof weatherWidgetV1Schema>
@@ -142,6 +149,7 @@ export type DashboardWidget =
 
 /** Current runtime registry, explicitly keyed by widget type and version. */
 export const widgetRegistry = {
+  entities: { 1: entitiesWidgetV1Schema },
   calendar: { 1: calendarWidgetV1Schema, 2: calendarWidgetV2Schema },
   weather: { 1: weatherWidgetV1Schema },
   trains: { 1: trainsWidgetV1Schema },

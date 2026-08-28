@@ -16,6 +16,7 @@ import type { IcalFeedConfig } from '../sources/ical.ts';
 import { runCalendars } from '../sources/calendarRunner.ts';
 import { runHomeAssistantCalendars } from '../sources/homeAssistantCalendar.ts';
 import { runHomeAssistantTodo } from '../sources/homeAssistantTodo.ts';
+import { runHomeAssistantEntities } from '../sources/homeAssistantEntities.ts';
 import type { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { openMeteoSource } from '../sources/openMeteo.ts';
 import { binsSource } from '../sources/bins.ts';
@@ -138,6 +139,12 @@ export class FrameService {
 
       let request: Promise<DashboardSectionData>;
       switch (widget.type) {
+        case 'entities':
+          request = widget.config.entityIds.length
+            ? runHomeAssistantEntities(widget.config.entityIds, this.deps.homeAssistantClient, runOptions)
+              .then((outcome) => ({ type: 'entities', data: outcome.data, configured: true, health: outcome.health }))
+            : Promise.resolve({ type: 'entities', data: null, configured: false, health: null });
+          break;
         case 'calendar':
           request = ('entityIds' in widget.config
             ? runHomeAssistantCalendars(widget.config.entityIds, device.timezone, this.deps.homeAssistantClient, this.deps.cache, runOptions)

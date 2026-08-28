@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-ha.10
+
+- Add HA-4 Home Assistant Sensors: the first read-only generic entity-display milestone, supporting only `sensor.*` in the strict `entities` V1 widget with up to four ordered, unique selections.
+- Discover safe sensor summaries through the authenticated HA client; fetch selected states concurrently through individual state endpoints. Strip unrelated attributes and keep Supervisor credentials server-only.
+- Add HA-only searchable Studio selection, current values, ordering and missing-entity preservation using existing saved/per-slot/shared drafts.
+- Add isolated full-size and Mini hero/row layouts. Preserve HA units, show honest partial/all-source unavailability and never replay persistent sensor data. Existing widget output remains unchanged.
+- Advance App, Ingress entry and published image to the same ha.10 release while retaining BUILD_VERSION/INKPANEL_HA_RELEASE invariants and ha.9 freshness behaviour, now confirmed working in real-world testing.
+- No firmware, framebuffer/protocol, profile, DeviceStore version or frozen migration changes. HA-4 awaits real-world validation; the branch remains experimental.
+
 ## 0.1.0-ha.9
 
 - Real-world ha.8 testing confirmed that direct LAN Studio worked, while Home Assistant Ingress retained an older Studio document at its unchanged iframe entry URL.

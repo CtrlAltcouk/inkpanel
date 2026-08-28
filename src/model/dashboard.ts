@@ -68,7 +68,20 @@ export interface TodoData {
   items: string[];
 }
 
+/** Only display content; HA IDs, device classes and timestamps stay upstream. */
+export interface EntityDisplayItem {
+  name: string;
+  value: string;
+  unit: string | null;
+  available: boolean;
+}
+
+export interface EntitiesData {
+  items: EntityDisplayItem[];
+}
+
 export type DashboardSectionData =
+  | { type: 'entities'; data: EntitiesData | null; configured: boolean; health: SourceHealth | null }
   | { type: 'calendar'; data: CalendarData | null; health: SourceHealth }
   | { type: 'weather'; data: WeatherData | null; health: SourceHealth }
   | { type: 'trains'; data: TrainData | null; health: SourceHealth | null }

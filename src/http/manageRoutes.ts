@@ -19,7 +19,7 @@ import { calendarUrlInputSchema } from '../sources/calendarUrl.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { PrinterConnectionStore } from '../printers/store.ts';
 import { calendarEntityIdsSchema } from '../homeAssistant/calendarSchemas.ts';
-import { todoWidgetV2Schema } from '../widgets/registry.ts';
+import { todoWidgetV2Schema, entitiesWidgetV1Schema } from '../widgets/registry.ts';
 
 const stationCodeInputSchema = z
   .string()
@@ -43,6 +43,7 @@ const octopusTariffCodeInputSchema = z
   );
 
 const dashboardSectionInputSchema = z.union([
+  entitiesWidgetV1Schema,
   todoWidgetV2Schema,
   z.strictObject({
     type: z.literal('calendar'), version: z.literal(1),

@@ -69,7 +69,7 @@ export function contentHash(data: ProfileDashboardData): string {
         || section.type === 'traffic'
         || section.type === 'octopus'
         ? { configured: section.health !== null }
-        : section.type === 'todo'
+        : section.type === 'todo' || section.type === 'entities'
           ? { configured: section.configured }
         : section.type === 'printers'
           ? { configured: section.configured }

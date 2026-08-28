@@ -9,6 +9,7 @@ import type {
   TrainDeparture,
 } from '../model/dashboard.ts';
 import type { PanelProfile } from '../panel/profile.ts';
+import { MINI_ENTITIES_CSS, renderEntities } from './entities.ts';
 
 function esc(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -221,6 +222,7 @@ const PRINTER_CSS = `.mini-printer-head{height:30px;border-bottom:2px solid #000
 
 function renderWidget(section: DashboardSectionData, data: MiniDashboardData): string {
   switch (section.type) {
+    case 'entities': return renderEntities(section.data, section.configured, true);
     case 'calendar': return calendar(section, data);
     case 'weather': return weather(section, data);
     case 'trains': return trains(section, data);
@@ -260,5 +262,6 @@ body{font-family:"Inter",Arial,sans-serif;-webkit-font-smoothing:none}
 export function renderMiniHtml(data: MiniDashboardData, profile: PanelProfile, fontCss: string): string {
   const todoCss = data.sections[0].type === 'todo' ? TODO_CSS : '';
   const printerCss = data.sections[0].type === 'printers' ? PRINTER_CSS : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}${todoCss}${printerCss}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
+  const entitiesCss = data.sections[0].type === 'entities' ? MINI_ENTITIES_CSS : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${fontCss}${css(profile)}${todoCss}${printerCss}${entitiesCss}</style></head><body><div class="mini">${renderWidget(data.sections[0], data)}</div></body></html>`;
 }

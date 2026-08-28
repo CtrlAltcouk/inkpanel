@@ -210,23 +210,25 @@ async function renderDetail(root, device, serviceStatus) {
   const dashboardEditor = detailEl.querySelector('#dashboard-editor');
   bindTodoPreviewRefresh(dashboardEditor, root, device.id);
   bindPrinterPreviewRefresh(dashboardEditor, root, device.id);
-  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers, serviceStatus.haCalendars, serviceStatus.haTodos);
+  renderDashboardEditor(dashboardEditor, device, serviceStatus.trainApi, serviceStatus.busApi, serviceStatus.trafficApi, remembered, serviceStatus.todoLists, serviceStatus.printers, serviceStatus.haCalendars, serviceStatus.haTodos, serviceStatus.haSensors);
 }
 
 export async function renderPanels(root) {
-  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }, runtime, calendars, todos] = await Promise.all([
+  const [{ devices }, trainApi, busApi, trafficApi, { lists: todoLists }, { printers }, runtime, calendars, todos, sensors] = await Promise.all([
     getJson('/api/devices'), getJson('/api/national-rail'), getJson('/api/transportapi'),
     getJson('/api/google-maps'), getJson('/api/todo-lists'), getJson('/api/printers'),
     getJson('/api/runtime-config'),
     getJson('/api/home-assistant/calendars').catch(() => ({ available: false, calendars: [] })),
     getJson('/api/home-assistant/todo-lists').catch(() => ({ available: false, lists: [] })),
+    getJson('/api/home-assistant/sensors').catch(() => ({ available: false, entities: [] })),
   ]);
   // Deployment capability is independent of discovery availability. A failed
   // runtime read surfaces as a page error instead of silently hiding providers.
   const supported = runtime.updateMode === 'home-assistant';
   const haCalendars = { ...calendars, supported };
   const haTodos = { ...todos, supported };
+  const haSensors = { ...sensors, supported };
   if (!devices.length) { root.innerHTML = '<div class="studio-card panel-empty-state"><h2>No panels yet</h2><p class="empty">Power one on and it will appear in the sidebar.</p></div>'; return; }
   if (!devices.some((d) => d.id === selectedId)) selectedId = devices[0].id;
-  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers, haCalendars, haTodos });
+  await renderDetail(root, devices.find((d) => d.id === selectedId), { trainApi, busApi, trafficApi, todoLists, printers, haCalendars, haTodos, haSensors });
 }

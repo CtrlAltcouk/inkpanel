@@ -5,13 +5,15 @@ import { getJson, sendJson } from './api.js';
 import { calendarControlsHtml, rememberCalendarConfig, switchCalendarProvider } from './calendarEditor.js';
 import { todoProviderHtml, homeAssistantTodoControlsHtml, rememberTodoConfig, switchTodoProvider } from './todoEditor.js';
 import { providerDraftState, rememberedProviderDrafts } from './providerDrafts.js';
+import { entitiesControlsHtml, bindEntitiesEditor } from './entitiesEditor.js';
 
-const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'printers', 'todo', 'bins', 'empty'];
+const TYPES = ['calendar', 'weather', 'trains', 'bus', 'traffic', 'octopus', 'printers', 'todo', 'bins', 'empty', 'entities'];
 const POSITIONS = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'];
 const MINI_PROFILE = 'ssd1681-200x200-mono';
 const stateByRoot = new WeakMap();
 
 function typeLabel(type) {
+  if (type === 'entities') return 'Home Assistant Sensors';
   if (type === 'octopus') return 'Octopus Agile';
   if (type === 'todo') return 'To Do';
   if (type === 'printers') return '3D Printers';
@@ -19,6 +21,7 @@ function typeLabel(type) {
 }
 
 function defaultConfig(type) {
+  if (type === 'entities') return { entityIds: [] };
   if (type === 'calendar') return { calendarUrls: [] };
   if (type === 'trains') return { originCrs: '', destinationCrs: '' };
   if (type === 'bus') return { stopCode: '', stopLabel: '', routeFilter: '' };
@@ -75,6 +78,8 @@ function rememberCell(cell, slot, type = slot.type) {
   if (!cell) return;
   if (type === 'calendar') {
     slot.drafts[type] = rememberCalendarConfig(cell, slot);
+  } else if (type === 'entities') {
+    slot.drafts[type] = { entityIds: [...cell.querySelectorAll('[data-selected-entity]')].map((item) => item.dataset.selectedEntity) };
   } else if (type === 'trains') {
     slot.drafts[type] = {
       originCrs: cell.querySelector('[data-station="origin"]')?.dataset.crs ?? '',
@@ -167,7 +172,8 @@ function printerControlsHtml(config, printers, isMini) {
     <p class="error" data-printer-error hidden></p></div>`;
 }
 
-function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini, haCalendars, haTodos) {
+function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, busConfigured, busId, busKey, trafficConfigured, trafficKey, todoLists, printers, isMini, haCalendars, haTodos, haSensors) {
+  if (type === 'entities') return entitiesControlsHtml(haSensors);
   if (type === 'calendar') return calendarControlsHtml(config, haCalendars);
   if (type === 'bins') return `<label>UPRN</label><input type="text" data-bins-uprn value="${esc(config.uprn ?? '')}" inputmode="numeric"><p class="meta">Milton Keynes only. Find your UPRN at <a href="https://www.findmyaddress.co.uk" target="_blank" rel="noreferrer">findmyaddress.co.uk</a>.</p>`;
   if (type === 'weather') return `<p class="meta">Uses panel location: ${esc(locationLabel || 'current panel location')}.</p>`;
@@ -181,12 +187,14 @@ function controlsHtml(type, config, locationLabel, trainConfigured, trainKey, bu
   return `<label>Octopus Agile tariff code</label><input type="text" data-octopus-tariff value="${esc(config.tariffCode ?? '')}" placeholder="E-1R-AGILE-24-10-01-C"><p class="meta">Paste the full electricity tariff code from Octopus. No Octopus API key is required for public Agile prices. <a href="https://developer.octopus.energy/guides/rest/api-endpoints/" target="_blank" rel="noreferrer">See Octopus tariff/API details</a>.</p>`;
 }
 
-export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false, haCalendars = {}, haTodos = {}) {
+export function dashboardCellHtml(deviceId, index, slot, locationLabel = '', trainApi = {}, busApi = {}, trafficApi = {}, positionLabel = POSITIONS[index], todoLists = [], printers = [], isMini = false, haCalendars = {}, haTodos = {}, haSensors = {}) {
   const config = slot.drafts[slot.type] ?? defaultConfig(slot.type);
-  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${TYPES.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini, haCalendars, haTodos)}</div>`;
+  const types = TYPES.filter((type) => type !== 'entities' || haSensors.supported || slot.type === 'entities');
+  return `<div class="dashboard-position">${esc(positionLabel)}</div><h3 class="dashboard-config-title">${typeLabel(slot.type)}</h3><label for="widget-type-${esc(deviceId)}-${index}">Content</label><select id="widget-type-${esc(deviceId)}-${index}" data-widget-type>${types.map((type) => `<option value="${type}" ${type === slot.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select><div data-widget-controls>${controlsHtml(slot.type, config, locationLabel, Boolean(trainApi.configured), trainApi.keyDraft ?? '', Boolean(busApi.configured), busApi.appIdDraft ?? '', busApi.appKeyDraft ?? '', Boolean(trafficApi.configured), trafficApi.keyDraft ?? '', todoLists, printers, isMini, haCalendars, haTodos, haSensors)}</div>`;
 }
 
 function summary(type, config, locationLabel, todoLists = []) {
+  if (type === 'entities') return config.entityIds.length ? `${config.entityIds.length} sensor${config.entityIds.length === 1 ? '' : 's'}` : 'Not set up';
   if (type === 'calendar') { const count = (config.entityIds ?? config.calendarUrls ?? []).length; return count ? `${count} calendar${count === 1 ? '' : 's'} connected` : 'Not set up'; }
   if (type === 'weather') return locationLabel || 'Uses panel location';
   if (type === 'trains') return config.originCrs && config.destinationCrs ? `${config.originCrs} → ${config.destinationCrs}` : 'Not set up';
@@ -432,7 +440,7 @@ function renderEditor(root) {
     { configured: state.trainApiConfigured, keyDraft: state.trainApiKeyDraft },
     { configured: state.busApiConfigured, appIdDraft: state.busAppIdDraft, appKeyDraft: state.busAppKeyDraft },
     { configured: state.trafficApiConfigured, keyDraft: state.trafficApiKeyDraft },
-    slotPosition(state, index), state.todoLists, state.printers, state.isMini, state.haCalendars, state.haTodos);
+    slotPosition(state, index), state.todoLists, state.printers, state.isMini, state.haCalendars, state.haTodos, state.haSensors);
 
   panel.querySelector('[data-widget-type]').addEventListener('change', (event) => {
     const previous = slot.type;
@@ -440,7 +448,12 @@ function renderEditor(root) {
     switchDashboardDraft(state.slots, index, event.target.value, slot.drafts[previous]);
     renderLayout(root); renderEditor(root);
   });
-  if (slot.type === 'calendar') {
+  if (slot.type === 'entities') {
+    bindEntitiesEditor(panel, config, state.haSensors, (nextConfig) => {
+      slot.drafts.entities = nextConfig;
+      renderLayout(root); markDashboardChanged(root);
+    });
+  } else if (slot.type === 'calendar') {
     panel.querySelector('[data-calendar-provider]')?.addEventListener('change', (event) => {
       rememberCell(panel, slot);
       switchCalendarProvider(slot, event.target.value);
@@ -480,10 +493,10 @@ function renderEditor(root) {
   }
 }
 
-export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = [], haCalendars = {}, haTodos = {}) {
+export function renderDashboardEditor(root, device, trainApi = { configured: false }, busApi = { configured: false }, trafficApi = { configured: false }, remembered = { shared: [], slots: [[], [], [], []] }, todoLists = [], printers = [], haCalendars = {}, haTodos = {}, haSensors = {}) {
   const slots = createDashboardDraftState(device.dashboardSections, remembered);
   const isMini = device.panelProfileId === MINI_PROFILE;
-  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers), haCalendars, haTodos });
+  stateByRoot.set(root, { deviceId: device.id, locationLabel: device.locationLabel, slots, selectedIndex: 0, isMini, trainApiConfigured: Boolean(trainApi.configured), trainApiKeyDraft: '', busApiConfigured: Boolean(busApi.configured), busAppIdDraft: '', busAppKeyDraft: '', trafficApiConfigured: Boolean(trafficApi.configured), trafficApiKeyDraft: '', todoLists: clone(todoLists), printers: clone(printers), haCalendars, haTodos, haSensors });
   root.innerHTML = `<div class="dashboard-composer ${isMini ? 'dashboard-composer--single' : ''}"><div class="dashboard-layout-map ${isMini ? 'dashboard-layout-map--single' : ''}" data-dashboard-layout-map></div><div class="dashboard-config-panel" data-dashboard-config-panel></div></div>`;
   renderLayout(root); renderEditor(root);
 }

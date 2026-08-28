@@ -476,3 +476,10 @@ body {
   .panel-save-bar .actions { margin-left: 0; width: 100%; }
   .panel-save-bar .actions button { flex: 1; }
 }
+/* Read-only HA Sensors picker. Scoped to the new editor only. */
+.entities-editor-item{border-bottom:1px solid var(--line,#ddd);padding:12px 0;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.entities-editor-item>div:first-child{min-width:0;flex:1 1 180px}
+.entities-editor-item strong,.entities-editor-item small,.entities-editor-item span,.entities-editor-result strong,.entities-editor-result small,.entities-editor-result span{display:block;overflow-wrap:anywhere}
+.entities-editor-item small,.entities-editor-result small{font-size:11px;opacity:.7}
+.entities-editor-result{width:100%;text-align:left;margin:4px 0;padding:10px}
+[data-entities-results]{max-height:300px;overflow:auto}
