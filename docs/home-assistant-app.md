@@ -1,6 +1,6 @@
 # Home Assistant App architecture
 
-Status: HA-1, HA-2 and ha.6 installation-location defaults are implemented and validated on real Home Assistant hardware. HA-3 read-only Home Assistant To Do is implemented; real-world testing now confirms the ha.9 Ingress freshness fix works. `0.1.0-ha.10` adds HA-4 Home Assistant Sensors on the experimental `Home-Assistant` branch. HA-4 is implemented but not yet real-world validated. PR #31 remains draft and unmerged.
+Status: HA-1, HA-2 and ha.6 installation-location defaults are validated. HA-3 and HA-4 are implemented. Real-world ha.10 Sensors worked through direct LAN Studio, but Ingress still loaded older nested frontend modules: ha.9's document query was not sufficient to version the module graph. `0.1.0-ha.11` versions the complete Studio asset namespace on the experimental `Home-Assistant` branch. HA-4 awaits final real-world Ingress/physical validation. PR #31 remains draft and unmerged.
 
 InkPanel remains a standalone product. Home Assistant support is an additional deployment and data-provider layer; it must not make the normal Docker/Proxmox/Raspberry Pi installation depend on Home Assistant.
 
@@ -150,7 +150,7 @@ Selected calendars are fetched concurrently and independently through `SourceCac
 
 Within the same window, temporary failures reuse validated last-good raw events and report stale health. Crossing the date window intentionally does not replay incomplete previous-day data. Partial failures retain other calendars' events and report an aggregate count; all unavailable means Calendar unavailable. Other widget sources continue independently.
 
-The full-size 800×480 and Mini 200×200 Calendar renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. The current experimental image tag is `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.10` for linux/amd64 and linux/arm64 (HA's aarch64).
+The full-size 800×480 and Mini 200×200 Calendar renderers are unchanged. Only their source of `CalendarData` changes. Firmware, provisioning, schedules and panel protocol are unchanged. The current experimental image tag is `ghcr.io/ctrlaltcouk/inkpanel-home-assistant:0.1.0-ha.11` for linux/amd64 and linux/arm64 (HA's aarch64).
 
 #### First-time panel location defaults (ha.6; validated on real hardware)
 
@@ -248,11 +248,23 @@ Full-size Sensors uses a dominant value with its friendly name beneath for one s
 
 In HA App mode choose **Home Assistant Sensors** in Content. Search by name or entity ID (at most 20 search results at once), inspect current values/units, add up to four, remove or reorder, then **Save changes**. Searching does not dirty panel config. Missing selections stay visible as missing/unavailable. Existing per-slot/shared remembered settings retain IDs and order across Sensors → Weather → Sensors and save/reopen. Standalone hides the new option for other widgets but preserves any already-saved Sensors config.
 
-ha.10 updates App `version`, `ingress_entry: "?inkpanel_release=0.1.0-ha.10"` and the image workflow version together. Existing checks enforce the same release through `BUILD_VERSION`, `INKPANEL_HA_RELEASE` and runtime diagnostics. Historical ha.9 details/checklist above document the original freshness fix; use ha.10 for the current upgrade.
+ha.10 introduced Sensors without changing the asset namespace. ha.11 keeps that implementation unchanged and updates App `version`, `ingress_entry: "?inkpanel_release=0.1.0-ha.11"` and the image workflow version together. Existing checks enforce the same release through `BUILD_VERSION`, `INKPANEL_HA_RELEASE` and runtime diagnostics. Use ha.11 for the current upgrade.
 
-#### Real-world validation checklist for ha.10
+#### ha.11 complete frontend asset namespace
 
-1. Upgrade to `0.1.0-ha.10`, reopen from the HA sidebar normally, and confirm the iframe query and both LAN/Ingress runtime-config releases equal `0.1.0-ha.10`. Do not clear caches or reinstall.
+The real-world distinction was the same container serving current Sensors UI over LAN but older nested modules through Ingress. The entry query changes only the document URL; `./app.js` and its relative imports otherwise retain their previous URLs. `no-store` headers alone do not prevent a stale intermediary from replaying those URLs.
+
+`mountStudioAssets` serves the same public directory under `/assets/<release>/` and the legacy root. In HA mode the release comes from the existing image `BUILD_VERSION` → `INKPANEL_HA_RELEASE` → `homeAssistantRelease` dependency, never a request query. It must be a bounded alphanumeric/dot/hyphen/underscore identifier with no leading dot or path separators. Invalid supplied metadata is rejected; unpackaged HA embedders without metadata retain root assets, while production images always supply the checked release.
+
+Known index, login and legal documents are read once per app construction and their local script/style/favicon references receive the release prefix. The public HTML remains usable in standalone without placeholders or HA environment variables. Login's unchanged inline behaviour is moved into a relative module so it and `paths.js` are versioned too. The actual document stays at `/` or its normal `.html` path; no `<base>` element, document relocation or `appPath()` change is introduced.
+
+Normal relative ES imports resolve from their importing module: `/assets/0.1.0-ha.11/app.js` → `panels.js` → `dashboardEditor.js` → `entitiesEditor.js`, all beneath the same namespace. Dynamic city-picker/WebFlash imports and CSS imports follow the same rule. Font references are relative and retain immutable caching. Terms/privacy navigation stays at the document root. Normal assets/documents retain `no-store` without ETag/Last-Modified; release URL separation now provides freshness independently of those headers. Old namespace URLs are not mapped to new bytes; document entrypoints are not served from the asset namespace, and Express static serving bounds access to the public/font roots.
+
+Standalone ignores HA release metadata and continues to load root modules and APIs. HA LAN and Ingress share the versioned asset implementation, but API calls and previews remain under the original page/Ingress prefix. Regression tests emulate a cached old `panels.js` at the stable URL, navigate normally to the new release in the same browser context, and assert the complete new module graph and Sensors/Calendar/To Do controls load without using the stale module.
+
+#### Real-world validation checklist for ha.11
+
+1. Upgrade to `0.1.0-ha.11`, reopen from the HA sidebar normally, and confirm the iframe query and both LAN/Ingress runtime-config releases equal `0.1.0-ha.11`. Do not hard refresh, clear caches or reinstall. In Network, confirm JS/CSS—including `app.js`, `panels.js`, `dashboardEditor.js`, `entitiesEditor.js` and dynamic imports—load beneath `/api/hassio_ingress/<token>/assets/0.1.0-ha.11/`. API requests must remain beneath `/api/hassio_ingress/<token>/api/`, never `/assets/`.
 2. On a full-size panel, choose Sensors in one section. Search by friendly name and by ID, select a temperature sensor and save. Open the preview and wake the panel: confirm the hero value/unit/name matches HA without conversion.
 3. Add humidity, power and battery (or other real sensors); reorder and save. Verify four rows, matching order/units, on preview and physical display. Try long names/values and an entity without a unit: no overlap or overflow.
 4. Repeat single-sensor and four-sensor checks on Mini at physical size, including long text and UNAVAILABLE. Confirm legibility; HA-4 is not validated until these real displays are checked.

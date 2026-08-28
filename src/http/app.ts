@@ -1,7 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, join } from 'node:path';
 import { DeviceStoreError, type DeviceStore } from '../devices/store.ts';
 import type { FrameService } from '../render/frameService.ts';
 import type { NationalRailCredentialStore } from '../sources/nationalRailCredentials.ts';
@@ -23,14 +21,7 @@ import { PrinterConnectionStore, PrinterStoreError } from '../printers/store.ts'
 import { HomeAssistantClient } from '../homeAssistant/client.ts';
 import { homeAssistantRoutes } from './homeAssistantRoutes.ts';
 import type { UpdateMode } from '../system/updateOwnership.ts';
-
-const require = createRequire(import.meta.url);
-const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
-
-/** Directory holding a @fontsource package's font files. */
-function fontDir(pkg: string): string {
-  return join(dirname(require.resolve(`${pkg}/package.json`)), 'files');
-}
+import { mountStudioAssets } from './studioAssets.ts';
 
 function deviceStoreErrorBody(err: DeviceStoreError) {
   return {
@@ -248,19 +239,7 @@ export function createApp(deps: AppDeps): express.Express {
     next(err);
   });
 
-  // Serve the latin-subset woff2 straight from @fontsource rather than
-  // committing a 2.7 MB TTF for one heading in the admin UI.
-  const fontOptions = { immutable: true, maxAge: '30d' };
-  app.use('/vendor/fonts', express.static(fontDir('@fontsource/dela-gothic-one'), fontOptions));
-  app.use('/vendor/fonts', express.static(fontDir('@fontsource/inter'), fontOptions));
-
-  // Studio modules keep stable URLs across App upgrades, including Ingress.
-  // Do not let old HTML/JS/CSS (or their validators) survive a release change.
-  app.use(express.static(publicDir, {
-    etag: false,
-    lastModified: false,
-    setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); },
-  }));
+  mountStudioAssets(app, updateMode === 'home-assistant' ? deps.homeAssistantRelease : undefined);
 
   return app;
 }

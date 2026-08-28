@@ -110,7 +110,8 @@ for (const profile of [MINI, FULL]) {
 
       const paths = new Set(requests.map((url) => url.pathname));
       for (const path of ['/app.js', '/styles.css', '/studio.css', '/cityPicker.js', '/stationPicker.js', '/flash.js', '/api/devices', '/api/runtime-config', '/api/home-assistant/calendars', '/api/home-assistant/todo-lists', '/api/printers', '/api/todo-lists', '/api/devices/panel-a/push']) {
-        assert.ok(paths.has(prefix + path), path);
+        const asset = /\.(js|css)$/.test(path) ? `/assets/${appConfig.version}${path}` : path;
+        assert.ok(paths.has(prefix + asset), path);
       }
       for (const url of requests.filter((url) => /\.(js|css)$/.test(url.pathname) || url.pathname.includes('/api/'))) {
         assert.ok(url.pathname.startsWith(prefix + '/'), url.href);

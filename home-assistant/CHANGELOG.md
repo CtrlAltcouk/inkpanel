@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-ha.11
+
+- Real-world ha.10 Sensors worked over direct LAN, while Ingress retained older nested frontend modules. A release query on the document alone did not version stable JS/CSS/import URLs.
+- Serve the complete Studio asset graph under `/assets/<image-release>/` without copying the public directory. HA index/login/legal documents reference this namespace; ordinary relative imports, dynamic imports and CSS dependencies inherit it.
+- Keep document URLs and API/Ingress prefix resolution unchanged. Preserve root assets for standalone and legacy callers, normal `no-store` headers and immutable vendor fonts. Validate release metadata and never alias older release namespaces to current assets.
+- Advance App, Ingress entry query and image release to ha.11. Keep Sensors architecture and physical layouts unchanged; HA-4 awaits final real-world Ingress/physical validation.
+- No firmware, framebuffer, protocol, profile, DeviceStore version or frozen migration changes.
+
 ## 0.1.0-ha.10
 
 - Add HA-4 Home Assistant Sensors: the first read-only generic entity-display milestone, supporting only `sensor.*` in the strict `entities` V1 widget with up to four ordered, unique selections.

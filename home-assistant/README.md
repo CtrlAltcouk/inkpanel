@@ -2,7 +2,7 @@
 
 InkPanel turns an ESP32-S3 e-paper display into a configurable dashboard. This Home Assistant App runs the same InkPanel server and Studio as the standalone installation.
 
-This `0.1.0-ha.10` release is experimental. Add
+This `0.1.0-ha.11` release is experimental. Add
 `https://github.com/CtrlAltcouk/inkpanel#Home-Assistant` as a Home Assistant App repository to test it.
 
 The Studio opens through Home Assistant Ingress. Physical panels use the separately configured LAN address; they cannot use an Ingress URL.
@@ -21,8 +21,8 @@ To Do can now display a Home Assistant `todo.*` list using the existing full-siz
 
 Real-world ha.8 testing confirmed the provider and preview fixes worked over direct LAN, but Ingress retained an older Studio document. ha.9 gives each release a different Ingress entry query, making the iframe load a fresh document after upgrading while preserving all existing base paths. Normal Studio assets remain `no-store`. The server's `/api/runtime-config` reports the image release in HA mode for comparison between Ingress and LAN.
 
-Real-world testing now confirms the ha.9 Ingress freshness fix works. Upgrade to ha.10 and reopen InkPanel from the Home Assistant sidebar normally; no hard refresh, cache clearing or reinstall should be needed. Confirm the iframe URL contains `inkpanel_release=0.1.0-ha.10` and runtime config reports the same release.
+Real-world ha.10 testing confirmed Sensors worked through direct LAN Studio, but Ingress still loaded older nested frontend modules. Versioning the document alone was insufficient because JS/CSS URLs remained stable. ha.11 versions the entire Studio asset namespace using the image release, so relative module imports also receive new URLs. Upgrade to ha.11 and reopen normally from the HA sidebar, without hard refresh, cache clearing or reinstall. Confirm the iframe query is `inkpanel_release=0.1.0-ha.11`, runtime config reports that release, and Studio JS/CSS requests include `/assets/0.1.0-ha.11/` beneath the existing Ingress prefix.
 
 **Home Assistant Sensors** is the first read-only generic entity-display milestone, deliberately supporting only `sensor.*` entities. Choose the new Content option in Studio, search by friendly name or entity ID, add up to four sensors, arrange their order and click **Save changes**. One sensor uses a large-value layout; two to four use compact rows on both full-size and Mini displays. Values and units come directly from HA without conversions. Missing sensors remain selected until explicitly removed; outages show unavailable data, never a persisted stale sensor value. Manage sensors in HA, not InkPanel.
 
-HA-4 is implemented but awaits real-world Home Assistant and physical-display validation. Existing widgets, firmware, framebuffer/protocol, profiles and DeviceStore migrations are unchanged. See the repository's `docs/home-assistant-app.md` for the architecture and ha.10 validation checklist.
+HA-4 is implemented but awaits final real-world Ingress and physical-display validation. Sensors and existing widgets, firmware, framebuffer/protocol, profiles and DeviceStore migrations are unchanged. See the repository's `docs/home-assistant-app.md` for the architecture and ha.11 validation checklist.

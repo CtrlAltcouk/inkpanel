@@ -39,7 +39,7 @@ test('API, preview, and login navigation all use the central path helper', async
   const root = fileURLToPath(new URL('../../public/', import.meta.url));
   const api = await readFile(`${root}api.js`, 'utf8');
   const panels = await readFile(`${root}panels.js`, 'utf8');
-  const login = await readFile(`${root}login.html`, 'utf8');
+  const login = await readFile(`${root}login.js`, 'utf8');
   assert.match(api, /fetch\(appPath\(path\)/);
   assert.match(api, /location\.href = appPath\('\/login\.html'\)/);
   assert.match(panels, /src="\$\{panelPreviewUrl\(device\.id\)\}"/);
